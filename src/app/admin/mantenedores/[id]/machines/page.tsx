@@ -1,12 +1,13 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, use, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
 interface PageProps {
-  params: {
+  params: Promise<{
     id: string;
-  };
+  }>;
+
 }
 
 interface Maintainer {
@@ -24,6 +25,7 @@ interface MachineSummary {
 }
 
 export default function MaintainerMachinesPage({ params }: PageProps) {
+  const { id } = use(params);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -46,7 +48,7 @@ export default function MaintainerMachinesPage({ params }: PageProps) {
         }
 
         const [maintRes, machinesRes] = await Promise.all([
-          fetch(`/api/mantenedores/${params.id}`, { cache: "no-store" }),
+          fetch(`/api/mantenedores/${id}`, { cache: "no-store" }),
           fetch("/api/maquinas", { cache: "no-store" }),
         ]);
 
@@ -85,7 +87,7 @@ export default function MaintainerMachinesPage({ params }: PageProps) {
     return () => {
       cancelled = true;
     };
-  }, [params.id]);
+  }, [id]);
 
   const activeMachines = useMemo(() => {
     return availableMachines
@@ -129,7 +131,7 @@ export default function MaintainerMachinesPage({ params }: PageProps) {
     setSuccess(null);
 
     try {
-      const response = await fetch(`/api/mantenedores/${params.id}/machines`, {
+      const response = await fetch(`/api/mantenedores/${id}/machines`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
