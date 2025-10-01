@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Image from "next/image";
 import { useFieldArray, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { templateSchema, TemplateInput } from "@/lib/templates-schema";
@@ -89,7 +90,13 @@ export default function TemplateForm({ initialValues, onSubmit, onDelete, submit
     setTimeout(() => syncOrders(), 0);
   }
 
-  async function uploadMainImage(file: File) {
+  function extractMessage(err: unknown, fallback: string) {
+  if (err instanceof Error && err.message) return err.message;
+  return fallback;
+}
+
+async function uploadMainImage(file: File) {
+
     setUploadingMain(true);
     setFormError(null);
     try {
@@ -101,14 +108,15 @@ export default function TemplateForm({ initialValues, onSubmit, onDelete, submit
         throw new Error(payload?.error || "Falha no upload da imagem");
       }
       setValue("imagemUrl", payload.url, { shouldDirty: true });
-    } catch (err: any) {
-      setFormError(err?.message || "Erro ao enviar imagem");
+    } catch (err: unknown) {
+      setFormError(extractMessage(err, "Erro ao enviar imagem"));
     } finally {
       setUploadingMain(false);
     }
   }
 
   async function uploadItemImage(file: File, itemId: string, index: number) {
+
     setItemUploads(current => ({ ...current, [itemId]: true }));
     setFormError(null);
     try {
@@ -120,8 +128,8 @@ export default function TemplateForm({ initialValues, onSubmit, onDelete, submit
         throw new Error(payload?.error || "Falha no upload da imagem do item");
       }
       setValue(`itens.${index}.imagemItemUrl`, payload.url, { shouldDirty: true });
-    } catch (err: any) {
-      setFormError(err?.message || "Erro ao enviar imagem do item");
+    } catch (err: unknown) {
+      setFormError(extractMessage(err, "Erro ao enviar imagem do item"));
     } finally {
       setItemUploads(current => ({ ...current, [itemId]: false }));
     }
@@ -143,8 +151,8 @@ export default function TemplateForm({ initialValues, onSubmit, onDelete, submit
     };
     try {
       await onSubmit(payload);
-    } catch (err: any) {
-      setFormError(err?.message || "Erro ao salvar template");
+    } catch (err: unknown) {
+      setFormError(extractMessage(err, "Erro ao salvar template"));
     } finally {
       setIsSubmitting(false);
     }
@@ -160,7 +168,7 @@ export default function TemplateForm({ initialValues, onSubmit, onDelete, submit
           <label className="font-medium">Nome do template</label>
           <input
             className="border rounded p-2 w-full"
-            placeholder="Ex: Inspeção semanal de máquinas"
+            placeholder="Ex: Inspecao semanal de maquinas"
             {...register("nome")}
           />
           {errors.nome && <p className="text-sm text-red-600">{errors.nome.message}</p>}
@@ -179,7 +187,7 @@ export default function TemplateForm({ initialValues, onSubmit, onDelete, submit
           {uploadingMain && <p className="text-sm text-gray-600">Enviando imagem...</p>}
           {imagemUrl && (
             <div className="mt-2 space-y-2">
-              <img src={imagemUrl} alt="Imagem do template" className="max-h-48 rounded border" />
+              <Image src={imagemUrl} alt="Imagem do template" width={320} height={240} className="max-h-48 rounded border w-auto" unoptimized />
               <button
                 type="button"
                 className="text-sm text-red-600 underline"
@@ -225,7 +233,7 @@ export default function TemplateForm({ initialValues, onSubmit, onDelete, submit
                         onClick={() => handleMoveUp(index)}
                         disabled={index === 0}
                       >
-                        ?
+                        Subir
                       </button>
                       <button
                         type="button"
@@ -233,7 +241,7 @@ export default function TemplateForm({ initialValues, onSubmit, onDelete, submit
                         onClick={() => handleMoveDown(index)}
                         disabled={index === fields.length - 1}
                       >
-                        ?
+                        Descer
                       </button>
                       <button
                         type="button"
@@ -285,7 +293,7 @@ export default function TemplateForm({ initialValues, onSubmit, onDelete, submit
                   </div>
 
                   <div className="space-y-2">
-                    <label className="font-medium">Critério</label>
+                    <label className="font-medium">Criterio</label>
                     <textarea
                       className="border rounded p-2 w-full"
                       rows={3}
@@ -321,7 +329,7 @@ export default function TemplateForm({ initialValues, onSubmit, onDelete, submit
                     {uploading && <p className="text-sm text-gray-600">Enviando imagem...</p>}
                     {itemImagemUrl && (
                       <div className="mt-2 space-y-2">
-                        <img src={itemImagemUrl} alt="Imagem do item" className="max-h-48 rounded border" />
+                        <Image src={itemImagemUrl} alt="Imagem do item" width={320} height={240} className="max-h-48 rounded border w-auto" unoptimized />
                         <button
                           type="button"
                           className="text-sm text-red-600 underline"
@@ -368,3 +376,5 @@ export default function TemplateForm({ initialValues, onSubmit, onDelete, submit
     </div>
   );
 }
+
+
