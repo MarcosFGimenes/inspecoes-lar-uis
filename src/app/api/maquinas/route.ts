@@ -11,6 +11,12 @@ function extractMessage(err: unknown, fallback: string) {
   return fallback;
 }
 
+type MachineRecord = Record<string, unknown> & {
+  id: string;
+  tag?: unknown;
+  nome?: unknown;
+};
+
 export async function GET(req: NextRequest) {
   const authorized = await requireAdminFromRequest(req);
   if (!authorized) {
@@ -22,12 +28,12 @@ export async function GET(req: NextRequest) {
     const query = adminDb.collection("maquinas").orderBy("createdAt", "desc").limit(100);
 
     const snapshot = await query.get();
-    let records = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    let records: MachineRecord[] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as MachineRecord[];
 
     if (q) {
       records = records.filter(item => {
-        const tag = String(item.tag ?? "").toLowerCase();
-        const nome = String(item.nome ?? "").toLowerCase();
+        const tag = typeof item.tag === "string" ? item.tag.toLowerCase() : "";
+        const nome = typeof item.nome === "string" ? item.nome.toLowerCase() : "";
         return tag.includes(q) || nome.includes(q);
       });
     }

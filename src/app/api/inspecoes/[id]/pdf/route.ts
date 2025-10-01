@@ -11,12 +11,6 @@ type TemplateItemData = {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-interface Params {
-  params: {
-    id: string;
-  };
-}
-
 function extractMessage(err: unknown, fallback: string) {
   if (err instanceof Error && err.message) return err.message;
   return fallback;
@@ -52,14 +46,28 @@ async function resolveSession() {
   return null;
 }
 
-export async function GET(_req: NextRequest, { params }: Params) {
+type RouteContext = {
+  params: Promise<Record<string, string | string[] | undefined>>;
+};
+
+function resolveId(params: Record<string, string | string[] | undefined>) {
+  const idValue = params.id;
+  return Array.isArray(idValue) ? idValue[0] ?? null : idValue ?? null;
+}
+
+export async function GET(_req: NextRequest, context: RouteContext) {
+  const params = (await context.params) ?? {};
+  const id = resolveId(params);
+  if (!id) {
+    return NextResponse.json({ error: "Missing id" }, { status: 400 });
+  }
   const session = await resolveSession();
   if (!session) {
     return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 });
   }
 
   try {
-    const inspectionDoc = await adminDb.collection("inspecoes").doc(params.id).get();
+    const inspectionDoc = await adminDb.collection("inspecoes").doc(id).get();
     if (!inspectionDoc.exists) {
       return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
     }
@@ -183,7 +191,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
       cursorY += 6;
       const observacao = item.observacaoItem ? String(item.observacaoItem) : "-";
       const wrapped = doc.splitTextToSize(`Observação: ${observacao}`, pageWidth - margin * 2);
-      wrapped.forEach(line => {
+      wrapped.forEach((line: string) => {
         doc.text(line, margin, cursorY);
         cursorY += 6;
       });
@@ -202,7 +210,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
     doc.setFontSize(12);
     const observacoes = inspectionData.observacoes ?? "-";
     const obsWrapped = doc.splitTextToSize(String(observacoes) || "-", pageWidth - margin * 2);
-    obsWrapped.forEach(line => {
+    obsWrapped.forEach((line: string) => {
       if (cursorY > pageHeight - 20) {
         doc.addPage();
         cursorY = 20;
@@ -213,7 +221,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
 
     const arrayBuffer = doc.output("arraybuffer");
     const buffer = Buffer.from(arrayBuffer);
-    const fileName = `inspecao-${machine?.tag ?? params.id}.pdf`;
+    const fileName = `inspecao-${machine?.tag ?? id}.pdf`;
 
     return new NextResponse(buffer, {
       headers: {

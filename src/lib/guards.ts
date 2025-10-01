@@ -1,12 +1,12 @@
 // src/lib/guards.ts
-import { cookies } from "next/headers";
 import { getIronSession } from "iron-session";
 import { MaintSession, maintSessionOptions } from "./session-maint";
 import { adminAuth } from "./firebase-admin";
 import { NextRequest } from "next/server";
+import { getCookieStore } from "./cookie-store";
 
 export async function requireMaint() {
-  const store = await getIronSession<MaintSession>(await cookies(), maintSessionOptions);
+  const store = await getIronSession<MaintSession>(getCookieStore(), maintSessionOptions);
   if (store?.role !== "maint" || !store.id) {
     return { ok: false as const, status: 401, error: "UNAUTHENTICATED" };
   }
@@ -14,7 +14,7 @@ export async function requireMaint() {
 }
 
 export async function requireAdmin() {
-  const cookieStore = await cookies();
+  const cookieStore = getCookieStore();
   const cookie = cookieStore.get("adminSess")?.value;
   if (!cookie) {
     return { ok: false as const, status: 401, error: "UNAUTHENTICATED" };

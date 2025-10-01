@@ -1,5 +1,5 @@
 "use client";
-import { useForm } from "react-hook-form";
+import { useForm, type Resolver, type SubmitHandler } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useState } from "react";
@@ -21,14 +21,21 @@ const schema = z.object({
 type FormData = z.infer<typeof schema>;
 
 export default function NewMaintainerPage() {
-  const { register, handleSubmit, formState: { errors }, setError } = useForm<FormData>({
-    resolver: zodResolver(schema),
-    defaultValues: { ativo: true }
+  const form = useForm<FormData>({
+    resolver: zodResolver(schema) as Resolver<FormData>,
+    defaultValues: { ativo: true },
   });
+
+  const {
+    register,
+    handleSubmit,
+    formState: { errors },
+    setError,
+  } = form;
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 
-  async function onSubmit(data: FormData) {
+  const onSubmit: SubmitHandler<FormData> = async data => {
     setLoading(true);
     const res = await fetch("/api/mantenedores", {
       method: "POST",
@@ -44,7 +51,7 @@ export default function NewMaintainerPage() {
       router.push("/admin/mantenedores");
     }
     setLoading(false);
-  }
+  };
 
   return (
     <div className="max-w-md mx-auto p-4">

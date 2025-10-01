@@ -2,14 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
-import { useFieldArray, useForm } from "react-hook-form";
+import { useFieldArray, useForm, type Resolver, type SubmitHandler } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { templateSchema, TemplateInput } from "@/lib/templates-schema";
-import { createTemplateItem, TemplateItemFormData } from "@/lib/template-utils";
+import { createTemplateItem } from "@/lib/template-utils";
 
-export type TemplateFormValues = TemplateInput & {
-  itens: TemplateItemFormData[];
-};
+export type TemplateFormValues = TemplateInput;
 
 type TemplateFormProps = {
   initialValues: TemplateFormValues;
@@ -35,7 +33,7 @@ export default function TemplateForm({ initialValues, onSubmit, onDelete, submit
     watch,
     formState: { errors },
   } = useForm<TemplateFormValues>({
-    resolver: zodResolver(templateSchema),
+    resolver: zodResolver(templateSchema) as Resolver<TemplateFormValues>,
     defaultValues: initialValues,
   });
 
@@ -91,12 +89,11 @@ export default function TemplateForm({ initialValues, onSubmit, onDelete, submit
   }
 
   function extractMessage(err: unknown, fallback: string) {
-  if (err instanceof Error && err.message) return err.message;
-  return fallback;
-}
+    if (err instanceof Error && err.message) return err.message;
+    return fallback;
+  }
 
-async function uploadMainImage(file: File) {
-
+  async function uploadMainImage(file: File) {
     setUploadingMain(true);
     setFormError(null);
     try {
@@ -116,7 +113,6 @@ async function uploadMainImage(file: File) {
   }
 
   async function uploadItemImage(file: File, itemId: string, index: number) {
-
     setItemUploads(current => ({ ...current, [itemId]: true }));
     setFormError(null);
     try {
@@ -135,7 +131,7 @@ async function uploadMainImage(file: File) {
     }
   }
 
-  async function submit(values: TemplateFormValues) {
+  const submit: SubmitHandler<TemplateFormValues> = async values => {
     setIsSubmitting(true);
     setFormError(null);
     const payload: TemplateFormValues = {
@@ -156,7 +152,7 @@ async function uploadMainImage(file: File) {
     } finally {
       setIsSubmitting(false);
     }
-  }
+  };
 
   const disableSubmit = isSubmitting || uploadingMain || isUploadingItem;
 
