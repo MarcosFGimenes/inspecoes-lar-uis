@@ -3,6 +3,9 @@ import { adminDb, adminAuth } from "@/lib/firebase-admin";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 const MaintainerSchema = z.object({
   matricula: z.string().min(1),
   nome: z.string().min(2),
@@ -23,6 +26,11 @@ async function requireAdminSession(req: NextRequest) {
   }
 }
 
+type MaintainerRecord = Record<string, unknown> & {
+  id: string;
+  nome?: unknown;
+};
+
 export async function GET(req: NextRequest) {
   if (!(await requireAdminSession(req))) {
     return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
@@ -34,10 +42,13 @@ export async function GET(req: NextRequest) {
     ref = ref.where("matricula", "==", q);
   }
   const snap = await ref.get();
-  let mantenedores = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+  let mantenedores: MaintainerRecord[] = snap.docs.map(doc => ({ id: doc.id, ...doc.data() })) as MaintainerRecord[];
   if (q) {
     // Filtro local por nome
-    mantenedores = mantenedores.filter(m => m.nome.toLowerCase().includes(q));
+    mantenedores = mantenedores.filter(record => {
+      const nome = typeof record.nome === "string" ? record.nome : "";
+      return nome.toLowerCase().includes(q);
+    });
   }
   return NextResponse.json(mantenedores);
 }
@@ -46,11 +57,18 @@ export async function POST(req: NextRequest) {
   if (!(await requireAdminSession(req))) {
     return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
   }
-  let data;
+  let data: z.infer<typeof MaintainerSchema>;
   try {
     data = MaintainerSchema.parse(await req.json());
-  } catch (e: any) {
-    return NextResponse.json({ error: e.errors?.[0]?.message || "Invalid payload" }, { status: 422 });
+  } catch (error: unknown) {
+    if (error instanceof z.ZodError) {
+      return NextResponse.json(
+        { error: error.issues[0]?.message || "Invalid payload" },
+        { status: 422 }
+      );
+    }
+    const message = error instanceof Error ? error.message : "Invalid payload";
+    return NextResponse.json({ error: message }, { status: 422 });
   }
   // Unicidade
   const exists = await adminDb.collection("mantenedores").where("matricula", "==", data.matricula).limit(1).get();

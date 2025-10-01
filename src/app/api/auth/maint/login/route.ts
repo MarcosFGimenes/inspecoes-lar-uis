@@ -1,12 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase-admin";
 import bcrypt from "bcryptjs";
-import { cookies } from "next/headers";
 import { getIronSession } from "iron-session";
 import { maintSessionOptions, MaintSession } from "@/lib/session-maint";
+import { getCookieStore } from "@/lib/cookie-store";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+type MaintainerLoginPayload = {
+  matricula: string;
+  password: string;
+};
+
+type MaintainerDocument = {
+  ativo: boolean;
+  passwordHash: string;
+  matricula: string;
+  nome: string;
+};
 
 export async function POST(req: NextRequest) {
-  const { matricula, password } = await req.json();
+  const { matricula, password } = (await req.json()) as Partial<MaintainerLoginPayload>;
 
   if (!matricula || !password) {
     return NextResponse.json({ error: "Dados inválidos" }, { status: 400 });
@@ -21,14 +36,14 @@ export async function POST(req: NextRequest) {
   if (snap.empty) return NextResponse.json({ error: "Usuário não encontrado" }, { status: 404 });
 
   const doc = snap.docs[0];
-  const data = doc.data() as any;
+  const data = doc.data() as MaintainerDocument;
 
   if (!data.ativo) return NextResponse.json({ error: "Usuário inativo" }, { status: 403 });
 
   const ok = await bcrypt.compare(password, data.passwordHash);
   if (!ok) return NextResponse.json({ error: "Senha inválida" }, { status: 401 });
 
-  const session = await getIronSession<MaintSession>(await cookies(), maintSessionOptions);
+  const session = await getIronSession<MaintSession>(getCookieStore(), maintSessionOptions);
   session.id = doc.id;
   session.matricula = data.matricula;
   session.nome = data.nome;

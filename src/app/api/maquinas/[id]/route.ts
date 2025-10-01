@@ -6,25 +6,34 @@ import { machineSchema } from "@/lib/machines-schema";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+type RouteContext = {
+  params: Promise<Record<string, string | string[] | undefined>>;
+};
+
 function extractMessage(err: unknown, fallback: string) {
   if (err instanceof Error && err.message) return err.message;
   return fallback;
 }
 
-interface Params {
-  params: {
-    id: string;
-  };
+function resolveId(params: Record<string, string | string[] | undefined>) {
+  const idValue = params.id;
+  return Array.isArray(idValue) ? idValue[0] ?? null : idValue ?? null;
 }
 
-export async function GET(req: NextRequest, { params }: Params) {
+export async function GET(req: NextRequest, context: RouteContext) {
   const authorized = await requireAdminFromRequest(req);
   if (!authorized) {
     return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
   }
 
   try {
-    const doc = await adminDb.collection("maquinas").doc(params.id).get();
+    const params = (await context.params) ?? {};
+    const id = resolveId(params);
+    if (!id) {
+      return NextResponse.json({ error: "Missing id" }, { status: 400 });
+    }
+
+    const doc = await adminDb.collection("maquinas").doc(id).get();
     if (!doc.exists) {
       return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
     }
@@ -37,13 +46,19 @@ export async function GET(req: NextRequest, { params }: Params) {
   }
 }
 
-export async function PUT(req: NextRequest, { params }: Params) {
+export async function PUT(req: NextRequest, context: RouteContext) {
   const authorized = await requireAdminFromRequest(req);
   if (!authorized) {
     return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
   }
 
-  const docRef = adminDb.collection("maquinas").doc(params.id);
+  const params = (await context.params) ?? {};
+  const id = resolveId(params);
+  if (!id) {
+    return NextResponse.json({ error: "Missing id" }, { status: 400 });
+  }
+
+  const docRef = adminDb.collection("maquinas").doc(id);
   const snapshot = await docRef.get();
   if (!snapshot.exists) {
     return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
@@ -78,7 +93,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     });
 
     return NextResponse.json({
-      id: params.id,
+      id,
       ...parsed,
       createdAt: snapshot.data()?.createdAt ?? null,
     });
@@ -90,14 +105,20 @@ export async function PUT(req: NextRequest, { params }: Params) {
   }
 }
 
-export async function DELETE(req: NextRequest, { params }: Params) {
+export async function DELETE(req: NextRequest, context: RouteContext) {
   const authorized = await requireAdminFromRequest(req);
   if (!authorized) {
     return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
   }
 
   try {
-    await adminDb.collection("maquinas").doc(params.id).delete();
+    const params = (await context.params) ?? {};
+    const id = resolveId(params);
+    if (!id) {
+      return NextResponse.json({ error: "Missing id" }, { status: 400 });
+    }
+
+    await adminDb.collection("maquinas").doc(id).delete();
     return NextResponse.json({ ok: true });
   } catch (err: unknown) {
     return NextResponse.json(
