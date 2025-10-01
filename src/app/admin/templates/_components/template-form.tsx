@@ -3,10 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useFieldArray, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { templateSchema, TemplateInput, TemplateItemInput } from "@/lib/templates-schema";
+import { templateSchema, TemplateInput } from "@/lib/templates-schema";
+import { createTemplateItem, TemplateItemFormData } from "@/lib/template-utils";
 
 export type TemplateFormValues = TemplateInput & {
-  itens: (TemplateItemInput & { id: string; ordem: number; createdAt?: string })[];
+  itens: TemplateItemFormData[];
 };
 
 type TemplateFormProps = {
@@ -16,22 +17,6 @@ type TemplateFormProps = {
   submitLabel?: string;
   title: string;
 };
-
-function createItem(order: number): TemplateFormValues["itens"][number] {
-  const now = new Date().toISOString();
-  const id = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2);
-  return {
-    id,
-    componente: "",
-    oQueChecar: "",
-    instrumento: "",
-    criterio: "",
-    oQueFazer: "",
-    imagemItemUrl: undefined,
-    ordem: order,
-    createdAt: now,
-  };
-}
 
 export default function TemplateForm({ initialValues, onSubmit, onDelete, submitLabel = "Salvar", title }: TemplateFormProps) {
   const [formError, setFormError] = useState<string | null>(null);
@@ -56,6 +41,7 @@ export default function TemplateForm({ initialValues, onSubmit, onDelete, submit
   const { fields, append, remove, move } = useFieldArray({
     control,
     name: "itens",
+    keyName: "fieldId",
   });
 
   useEffect(() => {
@@ -75,14 +61,15 @@ export default function TemplateForm({ initialValues, onSubmit, onDelete, submit
   }
 
   function handleAddItem() {
-    append(createItem(fields.length + 1));
+    append(createTemplateItem(fields.length + 1));
     setTimeout(() => syncOrders(), 0);
   }
 
-  function handleRemoveItem(index: number, id: string) {
+  function handleRemoveItem(index: number, id?: string) {
     if (fields.length <= 1) return;
     remove(index);
     setItemUploads(current => {
+      if (!id) return current;
       const clone = { ...current };
       delete clone[id];
       return clone;
@@ -148,10 +135,10 @@ export default function TemplateForm({ initialValues, onSubmit, onDelete, submit
       imagemUrl: values.imagemUrl || undefined,
       itens: values.itens.map((item, index) => ({
         ...item,
+        id: item.id,
         ordem: index + 1,
         createdAt: item.createdAt || new Date().toISOString(),
         imagemItemUrl: item.imagemItemUrl || undefined,
-        id: item.id || (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2)),
       })),
     };
     try {
@@ -223,10 +210,12 @@ export default function TemplateForm({ initialValues, onSubmit, onDelete, submit
           <div className="space-y-4">
             {fields.map((field, index) => {
               const itemErrors = errors.itens?.[index];
-              const uploading = itemUploads[field.id] || false;
-              const itemImagemUrl = itensWatch?.[index]?.imagemItemUrl;
+              const currentItem = itensWatch?.[index];
+              const itemId = currentItem?.id || field.id;
+              const uploading = itemId ? itemUploads[itemId] || false : false;
+              const itemImagemUrl = currentItem?.imagemItemUrl;
               return (
-                <div key={field.id} className="border rounded p-4 space-y-3">
+                <div key={field.fieldId} className="border rounded p-4 space-y-3">
                   <div className="flex items-center justify-between">
                     <h3 className="font-semibold">Item {index + 1}</h3>
                     <div className="flex gap-2">
@@ -249,7 +238,7 @@ export default function TemplateForm({ initialValues, onSubmit, onDelete, submit
                       <button
                         type="button"
                         className="text-sm px-2 py-1 border rounded text-red-600"
-                        onClick={() => handleRemoveItem(index, field.id)}
+                        onClick={() => handleRemoveItem(index, itemId)}
                         disabled={fields.length <= 1}
                       >
                         Remover
@@ -257,7 +246,7 @@ export default function TemplateForm({ initialValues, onSubmit, onDelete, submit
                     </div>
                   </div>
 
-                  <input type="hidden" {...register(`itens.${index}.id`)} defaultValue={field.id} />
+                  <input type="hidden" {...register(`itens.${index}.id`)} />
                   <input type="hidden" {...register(`itens.${index}.ordem`)} />
                   <input type="hidden" {...register(`itens.${index}.createdAt`)} />
 
@@ -326,7 +315,7 @@ export default function TemplateForm({ initialValues, onSubmit, onDelete, submit
                       accept="image/*"
                       onChange={event => {
                         const file = event.target.files?.[0];
-                        if (file) uploadItemImage(file, field.id, index);
+                        if (file && itemId) uploadItemImage(file, itemId, index);
                       }}
                     />
                     {uploading && <p className="text-sm text-gray-600">Enviando imagem...</p>}
