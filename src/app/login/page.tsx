@@ -22,8 +22,9 @@ export default function MaintLoginPage() {
       if (!res.ok) throw new Error(data?.error || "Falha no login");
       setMsg("✅ Login OK. Redirecionando…");
       window.location.href = "/home";
-    } catch (err: any) {
-      setMsg("❌ " + err.message);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Erro desconhecido";
+      setMsg("❌ " + message);
     } finally {
       setLoading(false);
     }

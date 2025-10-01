@@ -26,8 +26,9 @@ export default function AdminLoginPage() {
       if (!res.ok) throw new Error(data?.error || "Falha ao criar sessão");
       setMsg("✅ Sessão criada. Redirecionando…");
       window.location.href = "/admin/dashboard";
-    } catch (err: any) {
-      setMsg("❌ " + err.message);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Erro desconhecido";
+      setMsg("❌ " + message);
     } finally {
       setLoading(false);
     }

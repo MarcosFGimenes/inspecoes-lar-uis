@@ -5,8 +5,20 @@ import { cookies } from "next/headers";
 import { getIronSession } from "iron-session";
 import { maintSessionOptions, MaintSession } from "@/lib/session-maint";
 
+type MaintainerLoginPayload = {
+  matricula: string;
+  password: string;
+};
+
+type MaintainerDocument = {
+  ativo: boolean;
+  passwordHash: string;
+  matricula: string;
+  nome: string;
+};
+
 export async function POST(req: NextRequest) {
-  const { matricula, password } = await req.json();
+  const { matricula, password } = (await req.json()) as Partial<MaintainerLoginPayload>;
 
   if (!matricula || !password) {
     return NextResponse.json({ error: "Dados inválidos" }, { status: 400 });
@@ -21,7 +33,7 @@ export async function POST(req: NextRequest) {
   if (snap.empty) return NextResponse.json({ error: "Usuário não encontrado" }, { status: 404 });
 
   const doc = snap.docs[0];
-  const data = doc.data() as any;
+  const data = doc.data() as MaintainerDocument;
 
   if (!data.ativo) return NextResponse.json({ error: "Usuário inativo" }, { status: 403 });
 

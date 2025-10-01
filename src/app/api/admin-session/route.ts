@@ -10,7 +10,7 @@ export async function GET() {
     if (!c) return NextResponse.json({ ok: false }, { status: 401 });
     await adminAuth.verifySessionCookie(c, true);
     return NextResponse.json({ ok: true });
-  } catch (e) {
+  } catch {
     return NextResponse.json({ ok: false }, { status: 401 });
   }
 }
@@ -40,12 +40,10 @@ export async function POST(req: NextRequest) {
     });
 
     return NextResponse.json({ ok: true, uid: decoded.uid });
-  } catch (e: any) {
+  } catch (error: unknown) {
     // Erros comuns: auth/argument-error (token inválido), projeto diferente, clock skew etc.
-    return NextResponse.json(
-      { error: e?.message || "INVALID_ID_TOKEN" },
-      { status: 401 }
-    );
+    const message = error instanceof Error ? error.message : "INVALID_ID_TOKEN";
+    return NextResponse.json({ error: message || "INVALID_ID_TOKEN" }, { status: 401 });
   }
 }
 
