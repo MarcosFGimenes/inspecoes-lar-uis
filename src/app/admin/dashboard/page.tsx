@@ -41,6 +41,12 @@ export default function AdminDashboard() {
             <Link href="/admin/templates/new">
               <button className="rounded bg-black text-white px-4 py-2">Novo template</button>
             </Link>
+            <Link href="/admin/maquinas">
+              <button className="rounded bg-black text-white px-4 py-2">Maquinas</button>
+            </Link>
+            <Link href="/admin/maquinas/new">
+              <button className="rounded bg-black text-white px-4 py-2">Nova maquina</button>
+            </Link>
             <button onClick={logout} className="rounded bg-black text-white px-4 py-2">
               Sair
             </button>
