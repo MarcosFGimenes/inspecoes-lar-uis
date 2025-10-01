@@ -46,6 +46,7 @@ export default function MantenedoresPage() {
               <th className="p-2">Setor</th>
               <th className="p-2">LAC</th>
               <th className="p-2">Ativo</th>
+              <th className="p-2 text-right">Ações</th>
             </tr>
           </thead>
           <tbody>
@@ -56,6 +57,16 @@ export default function MantenedoresPage() {
                 <td className="p-2">{m.setor}</td>
                 <td className="p-2">{m.lac}</td>
                 <td className="p-2">{m.ativo ? "Sim" : "Não"}</td>
+                <td className="p-2">
+                  <div className="flex justify-end">
+                    <Link
+                      href={`/admin/mantenedores/${m.id}/machines`}
+                      className="rounded bg-blue-600 text-white px-3 py-1 text-sm hover:bg-blue-700"
+                    >
+                      Gerenciar máquinas
+                    </Link>
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>
