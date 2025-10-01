@@ -46,11 +46,18 @@ export async function POST(req: NextRequest) {
   if (!(await requireAdminSession(req))) {
     return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
   }
-  let data;
+  let data: z.infer<typeof MaintainerSchema>;
   try {
     data = MaintainerSchema.parse(await req.json());
-  } catch (e: any) {
-    return NextResponse.json({ error: e.errors?.[0]?.message || "Invalid payload" }, { status: 422 });
+  } catch (error: unknown) {
+    if (error instanceof z.ZodError) {
+      return NextResponse.json(
+        { error: error.errors[0]?.message || "Invalid payload" },
+        { status: 422 }
+      );
+    }
+    const message = error instanceof Error ? error.message : "Invalid payload";
+    return NextResponse.json({ error: message }, { status: 422 });
   }
   // Unicidade
   const exists = await adminDb.collection("mantenedores").where("matricula", "==", data.matricula).limit(1).get();
