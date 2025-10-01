@@ -11,12 +11,6 @@ type TemplateItemData = {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-interface Params {
-  params: {
-    id: string;
-  };
-}
-
 function extractMessage(err: unknown, fallback: string) {
   if (err instanceof Error && err.message) return err.message;
   return fallback;
@@ -52,14 +46,19 @@ async function resolveSession() {
   return null;
 }
 
-export async function GET(_req: NextRequest, { params }: Params) {
+type RouteContext = {
+  params: Promise<{ id: string }>;
+};
+
+export async function GET(_req: NextRequest, context: RouteContext) {
+  const { id } = await context.params;
   const session = await resolveSession();
   if (!session) {
     return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 });
   }
 
   try {
-    const inspectionDoc = await adminDb.collection("inspecoes").doc(params.id).get();
+    const inspectionDoc = await adminDb.collection("inspecoes").doc(id).get();
     if (!inspectionDoc.exists) {
       return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
     }
@@ -213,7 +212,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
 
     const arrayBuffer = doc.output("arraybuffer");
     const buffer = Buffer.from(arrayBuffer);
-    const fileName = `inspecao-${machine?.tag ?? params.id}.pdf`;
+    const fileName = `inspecao-${machine?.tag ?? id}.pdf`;
 
     return new NextResponse(buffer, {
       headers: {
