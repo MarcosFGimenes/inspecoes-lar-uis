@@ -2,6 +2,7 @@ import Head from "next/head";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
+"use client";
 export default function LoginPage() {
     const [matricula, setMatricula] = useState("");
     const [password, setPassword] = useState("");
