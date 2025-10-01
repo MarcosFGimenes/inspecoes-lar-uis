@@ -22,7 +22,6 @@ type MaintainerDocument = {
 
 export async function POST(req: NextRequest) {
   const { matricula, password } = (await req.json()) as Partial<MaintainerLoginBody>;
-
   if (!matricula || !password) {
     return NextResponse.json({ error: "Dados inválidos" }, { status: 400 });
   }
