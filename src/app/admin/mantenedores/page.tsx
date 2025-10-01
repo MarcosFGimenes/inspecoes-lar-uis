@@ -2,8 +2,17 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
+type Maintainer = {
+  id: string;
+  matricula: string;
+  nome: string;
+  setor: string;
+  lac: string;
+  ativo: boolean;
+};
+
 export default function MantenedoresPage() {
-  const [data, setData] = useState<any[]>([]);
+  const [data, setData] = useState<Maintainer[]>([]);
   const [q, setQ] = useState("");
   const [loading, setLoading] = useState(true);
 
@@ -12,7 +21,10 @@ export default function MantenedoresPage() {
       if (r.status === 401) window.location.href = "/admin/login";
     });
     fetch("/api/mantenedores").then(async r => {
-      if (r.ok) setData(await r.json());
+      if (r.ok) {
+        const payload = (await r.json()) as Maintainer[];
+        setData(payload);
+      }
       setLoading(false);
     });
   }, []);
