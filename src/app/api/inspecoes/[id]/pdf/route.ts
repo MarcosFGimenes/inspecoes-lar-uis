@@ -61,6 +61,7 @@ export async function GET(_req: NextRequest, context: RouteContext) {
   if (!id) {
     return NextResponse.json({ error: "Missing id" }, { status: 400 });
   }
+
   const session = await resolveSession();
   if (!session) {
     return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 });

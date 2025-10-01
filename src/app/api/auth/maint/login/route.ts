@@ -20,6 +20,18 @@ type MaintainerDocument = {
   nome: string;
 };
 
+type MaintainerLoginPayload = {
+  matricula: string;
+  password: string;
+};
+
+type MaintainerDocument = {
+  ativo: boolean;
+  passwordHash: string;
+  matricula: string;
+  nome: string;
+};
+
 export async function POST(req: NextRequest) {
   const { matricula, password } = (await req.json()) as Partial<MaintainerLoginPayload>;
 
