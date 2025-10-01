@@ -8,19 +8,7 @@ import { getCookieStore } from "@/lib/cookie-store";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type MaintainerLoginPayload = {
-  matricula: string;
-  password: string;
-};
-
-type MaintainerDocument = {
-  ativo: boolean;
-  passwordHash: string;
-  matricula: string;
-  nome: string;
-};
-
-type MaintainerLoginPayload = {
+type MaintainerLoginBody = {
   matricula: string;
   password: string;
 };
@@ -33,8 +21,7 @@ type MaintainerDocument = {
 };
 
 export async function POST(req: NextRequest) {
-  const { matricula, password } = (await req.json()) as Partial<MaintainerLoginPayload>;
-
+  const { matricula, password } = (await req.json()) as Partial<MaintainerLoginBody>;
   if (!matricula || !password) {
     return NextResponse.json({ error: "Dados inválidos" }, { status: 400 });
   }
