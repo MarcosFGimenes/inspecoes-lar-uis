@@ -1,9 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase-admin";
 import bcrypt from "bcryptjs";
-import { cookies } from "next/headers";
 import { getIronSession } from "iron-session";
 import { maintSessionOptions, MaintSession } from "@/lib/session-maint";
+import { getCookieStore } from "@/lib/cookie-store";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+type MaintainerLoginPayload = {
+  matricula: string;
+  password: string;
+};
+
+type MaintainerDocument = {
+  ativo: boolean;
+  passwordHash: string;
+  matricula: string;
+  nome: string;
+};
 
 type MaintainerLoginPayload = {
   matricula: string;
@@ -40,7 +55,7 @@ export async function POST(req: NextRequest) {
   const ok = await bcrypt.compare(password, data.passwordHash);
   if (!ok) return NextResponse.json({ error: "Senha inválida" }, { status: 401 });
 
-  const session = await getIronSession<MaintSession>(await cookies(), maintSessionOptions);
+  const session = await getIronSession<MaintSession>(getCookieStore(), maintSessionOptions);
   session.id = doc.id;
   session.matricula = data.matricula;
   session.nome = data.nome;

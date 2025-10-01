@@ -6,11 +6,9 @@ import { z } from "zod";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-interface Params {
-  params: {
-    id: string;
-  };
-}
+type RouteContext = {
+  params: Promise<Record<string, string | string[] | undefined>>;
+};
 
 const MachinesPayloadSchema = z.object({
   machines: z
@@ -19,13 +17,20 @@ const MachinesPayloadSchema = z.object({
     .optional(),
 });
 
-export async function PUT(req: NextRequest, { params }: Params) {
+export async function PUT(req: NextRequest, context: RouteContext) {
   const authorized = await requireAdminFromRequest(req);
   if (!authorized) {
     return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
   }
 
-  const maintRef = adminDb.collection("mantenedores").doc(params.id);
+  const params = (await context.params) ?? {};
+  const idValue = params.id;
+  const id = Array.isArray(idValue) ? idValue[0] ?? null : idValue ?? null;
+  if (!id) {
+    return NextResponse.json({ error: "Missing id" }, { status: 400 });
+  }
+
+  const maintRef = adminDb.collection("mantenedores").doc(id);
   const maintSnap = await maintRef.get();
   if (!maintSnap.exists) {
     return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
@@ -63,5 +68,5 @@ export async function PUT(req: NextRequest, { params }: Params) {
   });
 
   const updatedSnap = await maintRef.get();
-  return NextResponse.json({ id: params.id, ...updatedSnap.data() });
+  return NextResponse.json({ id, ...updatedSnap.data() });
 }

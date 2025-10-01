@@ -2,12 +2,15 @@
 
 import dynamic from "next/dynamic";
 import Image from "next/image";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import type { ChangeEvent } from "react";
-import type SignatureCanvasType from "react-signature-canvas";
+import type { SignatureCanvasInstance } from "@/components/signature-canvas-client";
 
-const SignatureCanvas = dynamic(() => import("react-signature-canvas"), { ssr: false });
+type SignatureCanvasComponent = typeof import("@/components/signature-canvas-client").default;
+
+const SignatureCanvas = dynamic(() => import("@/components/signature-canvas-client"), {
+  ssr: false,
+}) as unknown as SignatureCanvasComponent;
 
 type MaintainerInfo = {
   id: string;
@@ -115,7 +118,7 @@ export default function InspectionPage() {
   const [savingAction, setSavingAction] = useState<"save" | "save-new" | null>(null);
   const [lastInspectionId, setLastInspectionId] = useState<string | null>(null);
   const [reloadCounter, setReloadCounter] = useState(0);
-  const signatureRef = useRef<SignatureCanvasType | null>(null);
+  const signatureRef = useRef<SignatureCanvasInstance | null>(null);
   const [signatureTouched, setSignatureTouched] = useState(false);
 
   useEffect(() => {

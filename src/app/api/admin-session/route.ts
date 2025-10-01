@@ -1,11 +1,14 @@
 // src/app/api/admin-session/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { adminAuth } from "@/lib/firebase-admin";
-import { cookies } from "next/headers";
+import { getCookieStore } from "@/lib/cookie-store";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const cookieStore = await cookies();
+    const cookieStore = getCookieStore();
     const c = cookieStore.get("adminSess")?.value;
     if (!c) return NextResponse.json({ ok: false }, { status: 401 });
     await adminAuth.verifySessionCookie(c, true);
@@ -30,7 +33,7 @@ export async function POST(req: NextRequest) {
     const expiresIn = 1000 * 60 * 60 * 8; // 8h
     const sessionCookie = await adminAuth.createSessionCookie(idToken, { expiresIn });
 
-    const cookieStore = await cookies();
+    const cookieStore = getCookieStore();
     cookieStore.set("adminSess", sessionCookie, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
@@ -48,7 +51,7 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE() {
-  const cookieStore = await cookies();
+  const cookieStore = getCookieStore();
   cookieStore.delete("adminSess");
   return NextResponse.json({ ok: true });
 }

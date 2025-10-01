@@ -47,11 +47,21 @@ async function resolveSession() {
 }
 
 type RouteContext = {
-  params: Promise<{ id: string }>;
+  params: Promise<Record<string, string | string[] | undefined>>;
 };
 
+function resolveId(params: Record<string, string | string[] | undefined>) {
+  const idValue = params.id;
+  return Array.isArray(idValue) ? idValue[0] ?? null : idValue ?? null;
+}
+
 export async function GET(_req: NextRequest, context: RouteContext) {
-  const { id } = await context.params;
+  const params = (await context.params) ?? {};
+  const id = resolveId(params);
+  if (!id) {
+    return NextResponse.json({ error: "Missing id" }, { status: 400 });
+  }
+
   const session = await resolveSession();
   if (!session) {
     return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 });
@@ -182,7 +192,7 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       cursorY += 6;
       const observacao = item.observacaoItem ? String(item.observacaoItem) : "-";
       const wrapped = doc.splitTextToSize(`Observação: ${observacao}`, pageWidth - margin * 2);
-      wrapped.forEach(line => {
+      wrapped.forEach((line: string) => {
         doc.text(line, margin, cursorY);
         cursorY += 6;
       });
@@ -201,7 +211,7 @@ export async function GET(_req: NextRequest, context: RouteContext) {
     doc.setFontSize(12);
     const observacoes = inspectionData.observacoes ?? "-";
     const obsWrapped = doc.splitTextToSize(String(observacoes) || "-", pageWidth - margin * 2);
-    obsWrapped.forEach(line => {
+    obsWrapped.forEach((line: string) => {
       if (cursorY > pageHeight - 20) {
         doc.addPage();
         cursorY = 20;

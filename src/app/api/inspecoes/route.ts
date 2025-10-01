@@ -36,34 +36,40 @@ type TemplateItem = {
   oQueFazer?: string;
 };
 
-function parseDataUrl(dataUrl: string) {
+function dataUrlToBuffer(dataUrl: string) {
   const match = dataUrl.match(/^data:(.+);base64,(.*)$/);
   if (!match) {
     throw new Error("INVALID_DATA_URL");
   }
-  const mime = match[1];
-  const base64 = match[2];
-  const buffer = Buffer.from(base64, "base64");
-  let extension = "bin";
-  if (mime === "image/png") extension = "png";
-  else if (mime === "image/jpeg" || mime === "image/jpg") extension = "jpg";
-  else if (mime === "image/webp") extension = "webp";
-  else if (mime === "image/svg+xml") extension = "svg";
-  return { buffer, mime, extension };
+  const [, mime, base64] = match;
+  return {
+    buffer: Buffer.from(base64, "base64"),
+    mime,
+  };
+}
+
+function resolveExtension(mime: string) {
+  if (mime === "image/png") return "png";
+  if (mime === "image/jpeg" || mime === "image/jpg") return "jpg";
+  if (mime === "image/webp") return "webp";
+  if (mime === "image/svg+xml") return "svg";
+  return "bin";
 }
 
 async function uploadDataUrl(path: string, dataUrl: string) {
-  const { buffer, mime, extension } = parseDataUrl(dataUrl);
+  const { buffer, mime } = dataUrlToBuffer(dataUrl);
+  const extension = resolveExtension(mime);
+  const contentType = mime || "application/octet-stream";
   const finalPath = path.endsWith(`.${extension}`) ? path : `${path}.${extension}`;
   const bucket = adminStorage.bucket();
   const file = bucket.file(finalPath);
   await file.save(buffer, {
     resumable: false,
-    contentType: mime,
+    contentType,
   });
   await file.makePublic();
   await file.setMetadata({
-    contentType: mime,
+    contentType,
     cacheControl: "public, max-age=31536000",
   });
   return `https://storage.googleapis.com/${bucket.name}/${finalPath}`;
