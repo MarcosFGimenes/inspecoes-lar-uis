@@ -1,9 +1,9 @@
+"use client";
 import Head from "next/head";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 export default function AdminLoginPage() {
-    "use client";
     const [email, setEmail] = useState("");
     const [senha, setSenha] = useState("");
     const [remember, setRemember] = useState(false);
