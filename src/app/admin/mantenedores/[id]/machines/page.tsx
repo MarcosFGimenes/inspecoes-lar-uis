@@ -7,6 +7,7 @@ interface PageProps {
   params: Promise<{
     id: string;
   }>;
+
 }
 
 interface Maintainer {
