@@ -2,8 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { FieldPath } from "firebase-admin/firestore";
 import type { QueryDocumentSnapshot, DocumentData } from "firebase-admin/firestore";
-import { adminDb, adminStorage } from "@/lib/firebase-admin";
+import { adminDb } from "@/lib/firebase-admin";
 import { requireMaint } from "@/lib/guards";
+import { uploadToImgbbFromDataUrl } from "@/lib/imgbb";
+import { randomUUID } from "crypto";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -36,45 +38,6 @@ type TemplateItem = {
   oQueFazer?: string;
 };
 
-function dataUrlToBuffer(dataUrl: string) {
-  const match = dataUrl.match(/^data:(.+);base64,(.*)$/);
-  if (!match) {
-    throw new Error("INVALID_DATA_URL");
-  }
-  const [, mime, base64] = match;
-  return {
-    buffer: Buffer.from(base64, "base64"),
-    mime,
-  };
-}
-
-function resolveExtension(mime: string) {
-  if (mime === "image/png") return "png";
-  if (mime === "image/jpeg" || mime === "image/jpg") return "jpg";
-  if (mime === "image/webp") return "webp";
-  if (mime === "image/svg+xml") return "svg";
-  return "bin";
-}
-
-async function uploadDataUrl(path: string, dataUrl: string) {
-  const { buffer, mime } = dataUrlToBuffer(dataUrl);
-  const extension = resolveExtension(mime);
-  const contentType = mime || "application/octet-stream";
-  const finalPath = path.endsWith(`.${extension}`) ? path : `${path}.${extension}`;
-  const bucket = adminStorage.bucket();
-  const file = bucket.file(finalPath);
-  await file.save(buffer, {
-    resumable: false,
-    contentType,
-  });
-  await file.makePublic();
-  await file.setMetadata({
-    contentType,
-    cacheControl: "public, max-age=31536000",
-  });
-  return `https://storage.googleapis.com/${bucket.name}/${finalPath}`;
-}
-
 function buildIssueDescription(item: TemplateItem, fallback: string) {
   const componente = item.componente?.trim();
   const criterio = item.criterio?.trim();
@@ -90,6 +53,31 @@ function buildIssueDescription(item: TemplateItem, fallback: string) {
 function extractMessage(err: unknown, fallback: string) {
   if (err instanceof Error && err.message) return err.message;
   return fallback;
+}
+
+function ensureDataUrl(value: string | null | undefined, context: string) {
+  const trimmed = (value ?? "").trim();
+  if (!/^data:[^;]+;base64,/i.test(trimmed)) {
+    throw new Error(`${context}_INVALID_DATA_URL`);
+  }
+  return trimmed;
+}
+
+function sanitizeSegment(segment: string) {
+  return segment
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]+/g, "-")
+    .replace(/-{2,}/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60);
+}
+
+function buildUploadName(prefixes: Array<string | null | undefined>) {
+  const parts = prefixes
+    .map(part => (part ? sanitizeSegment(String(part)) : ""))
+    .filter(Boolean);
+  const base = parts.join("-") || "inspecao";
+  return `${base}-${randomUUID()}`.slice(0, 100);
 }
 
 export async function POST(req: NextRequest) {
@@ -170,7 +158,10 @@ export async function POST(req: NextRequest) {
 
     let assinaturaUrl: string | null = null;
     if (payload.assinaturaDataUrl) {
-      assinaturaUrl = await uploadDataUrl(`public/signatures/${inspectionId}`, payload.assinaturaDataUrl);
+      const assinaturaDataUrl = ensureDataUrl(payload.assinaturaDataUrl, "ASSINATURA");
+      const assinaturaName = buildUploadName(["sign", inspectionId]);
+      const upload = await uploadToImgbbFromDataUrl(assinaturaDataUrl, assinaturaName);
+      assinaturaUrl = upload.url;
     }
 
     const itensPayload: Array<{
@@ -184,10 +175,15 @@ export async function POST(req: NextRequest) {
       const fotosBase64 = item.fotos ? item.fotos.slice(0, 3) : [];
       const fotoUrls: string[] = [];
       for (let index = 0; index < fotosBase64.length; index += 1) {
-        const dataUrl = fotosBase64[index]!;
-        const path = `public/inspections/${inspectionId}/${item.templateItemId}-${index + 1}`;
-        const url = await uploadDataUrl(path, dataUrl);
-        fotoUrls.push(url);
+        const dataUrl = ensureDataUrl(fotosBase64[index]!, `ITEM_FOTO_${index + 1}`);
+        const uploadName = buildUploadName([
+          "inspecao",
+          inspectionId,
+          item.templateItemId,
+          `foto-${index + 1}`,
+        ]);
+        const upload = await uploadToImgbbFromDataUrl(dataUrl, uploadName);
+        fotoUrls.push(upload.url);
       }
       itensPayload.push({
         templateItemId: item.templateItemId,
