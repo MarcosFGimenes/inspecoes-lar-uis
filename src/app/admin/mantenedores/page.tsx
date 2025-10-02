@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { Icon } from "@/components/icon";
 
 type Maintainer = {
   id: string;
@@ -40,7 +41,7 @@ export default function MantenedoresPage() {
         <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 pt-6">
           <div className="flex items-center mb-4 md:mb-0">
             <div className="w-12 h-12 rounded-full bg-green-600 flex items-center justify-center mr-3">
-              <i className="fas fa-tractor text-white text-xl"></i>
+              <Icon name="tractor" className="text-white text-xl" />
             </div>
             <div>
               <h1 className="text-2xl font-bold text-gray-900">Lar Cooperativa Agroindustrial</h1>
@@ -48,11 +49,11 @@ export default function MantenedoresPage() {
             </div>
           </div>
           
-          <Link 
+          <Link
             href="/admin/dashboard"
             className="flex items-center justify-center px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition duration-150 ease-in-out"
           >
-            <i className="fas fa-arrow-left mr-2"></i>
+            <Icon name="arrow-left" className="mr-2" />
             Voltar ao Dashboard
           </Link>
         </div>
@@ -63,7 +64,7 @@ export default function MantenedoresPage() {
             <div className="mb-4 md:mb-0">
               <div className="flex items-center mb-2">
                 <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center mr-3">
-                  <i className="fas fa-users-cog text-blue-600"></i>
+                  <Icon name="users-cog" className="text-blue-600" />
                 </div>
                 <h2 className="text-2xl font-bold text-gray-900">Mantenedores</h2>
               </div>
@@ -72,7 +73,7 @@ export default function MantenedoresPage() {
             
             <Link href="/admin/mantenedores/new">
               <button className="flex items-center justify-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition duration-150 ease-in-out">
-                <i className="fas fa-plus mr-2"></i>
+                <Icon name="plus" className="mr-2" />
                 Novo Mantenedor
               </button>
             </Link>
@@ -81,7 +82,7 @@ export default function MantenedoresPage() {
           {/* Barra de Busca */}
           <div className="relative mb-6">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-              <i className="fas fa-search text-gray-400"></i>
+              <Icon name="search" className="text-gray-400" />
             </div>
             <input
               className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition duration-150 ease-in-out"
@@ -94,7 +95,7 @@ export default function MantenedoresPage() {
           {loading ? (
             <div className="text-center py-12">
               <div className="w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center mx-auto mb-4">
-                <i className="fas fa-spinner fa-spin text-blue-600 text-xl"></i>
+                <Icon name="spinner" spin className="text-blue-600 text-xl" />
               </div>
               <p className="text-gray-600">Carregando mantenedores...</p>
             </div>
@@ -155,7 +156,7 @@ export default function MantenedoresPage() {
                           href={`/admin/mantenedores/${m.id}/machines`}
                           className="inline-flex items-center px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg transition duration-150 ease-in-out"
                         >
-                          <i className="fas fa-cogs mr-1"></i>
+                          <Icon name="cogs" className="mr-1" />
                           Gerenciar Máquinas
                         </Link>
                       </td>
@@ -167,7 +168,7 @@ export default function MantenedoresPage() {
               {filtered.length === 0 && (
                 <div className="text-center py-12">
                   <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-4">
-                    <i className="fas fa-users text-gray-400 text-xl"></i>
+                    <Icon name="users" className="text-gray-400 text-xl" />
                   </div>
                   <p className="text-gray-500 mb-2">Nenhum mantenedor encontrado</p>
                   <p className="text-gray-400 text-sm">

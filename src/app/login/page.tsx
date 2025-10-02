@@ -3,6 +3,7 @@ import Head from "next/head";
 import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { Icon } from "@/components/icon";
 
 export default function LoginPage() {
     const [matricula, setMatricula] = useState("");
@@ -55,8 +56,6 @@ export default function LoginPage() {
                 <title>Lar Cooperativa Agroindustrial - Sistema de Inspeção</title>
                 <meta charSet="UTF-8" />
                 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-                <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
-                <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
             </Head>
             <style jsx global>{`
                 body {
@@ -81,7 +80,7 @@ export default function LoginPage() {
                     <div className="text-center mb-8">
                         <div className="flex items-center justify-center mb-4">
                             <div className="w-12 h-12 rounded-full bg-blue-600 flex items-center justify-center mr-3">
-                                <i className="fas fa-tractor text-white text-xl"></i>
+                                <Icon name="tractor" className="text-white text-xl" />
                             </div>
                             <h1 className="text-2xl font-bold text-gray-900">Unidade Indsutrial de Soja</h1>
                         </div>
@@ -92,7 +91,7 @@ export default function LoginPage() {
                     <div className="bg-white rounded-2xl card-shadow p-8">
                         <div className="text-center mb-6">
                             <div className="w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center mx-auto mb-3">
-                                <i className="fas fa-user-cog text-blue-600 text-2xl"></i>
+                                <Icon name="user-cog" className="text-blue-600 text-2xl" />
                             </div>
                             <h3 className="text-2xl font-bold text-gray-900">Login — Mantenedor</h3>
                             <p className="text-gray-600 mt-2">Acesso para mantenedores</p>
@@ -113,7 +112,7 @@ export default function LoginPage() {
                                         onChange={e => setMatricula(e.target.value)}
                                     />
                                     <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-                                        <i className="fas fa-id-card text-gray-400"></i>
+                                        <Icon name="id-card" className="text-gray-400" />
                                     </div>
                                 </div>
                             </div>
@@ -132,7 +131,7 @@ export default function LoginPage() {
                                         onChange={e => setPassword(e.target.value)}
                                     />
                                     <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-                                        <i className="fas fa-lock text-gray-400"></i>
+                                        <Icon name="lock" className="text-gray-400" />
                                     </div>
                                 </div>
                             </div>
@@ -164,7 +163,7 @@ export default function LoginPage() {
                                 {!loading && <span>Entrar</span>}
                                 {loading && (
                                     <span>
-                                        <i className="fas fa-spinner fa-spin mr-2"></i> Entrando...
+                                        <Icon name="spinner" spin className="mr-2" /> Entrando...
                                     </span>
                                 )}
                             </button>
