@@ -1,7 +1,17 @@
 "use client";
 import Head from "next/head";
+import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import {
+    browserLocalPersistence,
+    browserSessionPersistence,
+    setPersistence,
+    signInWithEmailAndPassword,
+    signOut,
+} from "firebase/auth";
+import { FirebaseError } from "firebase/app";
+import { firebaseAuth } from "@/lib/firebase-client";
 
 export default function AdminLoginPage() {
     const [email, setEmail] = useState("");
@@ -9,20 +19,69 @@ export default function AdminLoginPage() {
     const [remember, setRemember] = useState(false);
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState("");
+    const [error, setError] = useState("");
     const router = useRouter();
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setLoading(true);
         setMessage("");
-        // Simular requisição de login
-        setTimeout(() => {
+        setError("");
+
+        try {
+            await setPersistence(
+                firebaseAuth,
+                remember ? browserLocalPersistence : browserSessionPersistence,
+            );
+
+            const credentials = await signInWithEmailAndPassword(firebaseAuth, email, senha);
+            const idToken = await credentials.user.getIdToken(true);
+
+            const response = await fetch("/api/admin-session", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ idToken }),
+            });
+
+            if (!response.ok) {
+                const payload = await response.json().catch(() => null);
+                const message = payload?.error ?? "Falha ao iniciar sessão.";
+                await signOut(firebaseAuth);
+                throw new Error(message);
+            }
+
             setMessage("✅ Sessão criada. Redirecionando…");
-            setLoading(false);
             setTimeout(() => {
                 router.push("/admin/dashboard");
-            }, 1500);
-        }, 2000);
+            }, 1200);
+        } catch (err: unknown) {
+            await signOut(firebaseAuth).catch(() => undefined);
+            if (err instanceof FirebaseError) {
+                switch (err.code) {
+                    case "auth/invalid-email":
+                        setError("E-mail inválido.");
+                        break;
+                    case "auth/user-disabled":
+                        setError("Usuário desativado.");
+                        break;
+                    case "auth/user-not-found":
+                    case "auth/wrong-password":
+                        setError("Credenciais inválidas.");
+                        break;
+                    default:
+                        setError("Falha ao autenticar: " + err.message);
+                        break;
+                }
+            } else if (err instanceof Error && err.message) {
+                setError(err.message);
+            } else {
+                setError("Falha inesperada ao iniciar sessão. Tente novamente.");
+            }
+        } finally {
+            setLoading(false);
+        }
     };
 
     return (
@@ -148,14 +207,17 @@ export default function AdminLoginPage() {
                             {message && (
                                 <div className="text-center text-sm mt-4 text-green-600">{message}</div>
                             )}
+                            {error && (
+                                <div className="text-center text-sm mt-4 text-red-600">{error}</div>
+                            )}
                         </form>
 
                         <div className="mt-6 pt-6 border-t border-gray-200 text-center">
                             <p className="text-sm text-gray-600">
                                 Voltar para
-                                <a href="/" className="font-medium text-green-600 hover:text-green-500 ml-1 transition duration-150 ease-in-out">
+                                <Link href="/" className="font-medium text-green-600 hover:text-green-500 ml-1 transition duration-150 ease-in-out">
                                     seleção de módulos
-                                </a>
+                                </Link>
                             </p>
                         </div>
                     </div>
