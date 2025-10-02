@@ -1,5 +1,6 @@
 "use client";
 import Head from "next/head";
+import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -9,20 +10,43 @@ export default function LoginPage() {
     const [remember, setRemember] = useState(false);
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState("");
+    const [error, setError] = useState("");
     const router = useRouter();
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setLoading(true);
         setMessage("");
-        // Simular requisição de login
-        setTimeout(() => {
+        setError("");
+
+        try {
+            const response = await fetch("/api/auth/maint/login", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ matricula, password }),
+            });
+
+            if (!response.ok) {
+                const payload = await response.json().catch(() => null);
+                const message = payload?.error ?? "Falha ao realizar login.";
+                throw new Error(message);
+            }
+
             setMessage("✅ Login OK. Redirecionando…");
-            setLoading(false);
             setTimeout(() => {
                 router.push("/home");
-            }, 1500);
-        }, 2000);
+            }, 1200);
+        } catch (err: unknown) {
+            if (err instanceof Error && err.message) {
+                setError(err.message);
+            } else {
+                setError("Falha inesperada ao realizar login. Tente novamente.");
+            }
+        } finally {
+            setLoading(false);
+        }
     };
 
     return (
@@ -148,14 +172,17 @@ export default function LoginPage() {
                             {message && (
                                 <div className="text-center text-sm mt-4 text-green-600">{message}</div>
                             )}
+                            {error && (
+                                <div className="text-center text-sm mt-4 text-red-600">{error}</div>
+                            )}
                         </form>
 
                         <div className="mt-6 pt-6 border-t border-gray-200 text-center">
                             <p className="text-sm text-gray-600">
                                 Voltar para
-                                <a href="/" className="font-medium text-blue-600 hover:text-blue-500 ml-1 transition duration-150 ease-in-out">
+                                <Link href="/" className="font-medium text-blue-600 hover:text-blue-500 ml-1 transition duration-150 ease-in-out">
                                     seleção de módulos
-                                </a>
+                                </Link>
                             </p>
                         </div>
                     </div>
