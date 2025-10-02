@@ -5,6 +5,7 @@ import { z } from "zod";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { Icon } from "@/components/icon";
 
 const schema = z.object({
   matricula: z.string().min(1, "Obrigatório"),
@@ -61,7 +62,7 @@ export default function NewMaintainerPage() {
         <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 pt-6">
           <div className="flex items-center mb-4 md:mb-0">
             <div className="w-12 h-12 rounded-full bg-green-600 flex items-center justify-center mr-3">
-              <i className="fas fa-tractor text-white text-xl"></i>
+              <Icon name="tractor" className="text-white text-xl" />
             </div>
             <div>
               <h1 className="text-2xl font-bold text-gray-900">Lar Cooperativa Agroindustrial</h1>
@@ -69,11 +70,11 @@ export default function NewMaintainerPage() {
             </div>
           </div>
           
-          <Link 
+          <Link
             href="/admin/mantenedores"
             className="flex items-center justify-center px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition duration-150 ease-in-out"
           >
-            <i className="fas fa-arrow-left mr-2"></i>
+            <Icon name="arrow-left" className="mr-2" />
             Voltar
           </Link>
         </div>
@@ -82,7 +83,7 @@ export default function NewMaintainerPage() {
         <div className="bg-white rounded-2xl shadow-lg p-6 md:p-8">
           <div className="text-center mb-8">
             <div className="w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center mx-auto mb-4">
-              <i className="fas fa-user-plus text-blue-600 text-2xl"></i>
+              <Icon name="user-plus" className="text-blue-600 text-2xl" />
             </div>
             <h2 className="text-3xl font-bold text-gray-900 mb-2">Novo Mantenedor</h2>
             <p className="text-gray-600">Cadastre um novo técnico no sistema</p>
@@ -104,7 +105,7 @@ export default function NewMaintainerPage() {
                 />
                 {errors.matricula && (
                   <div className="flex items-center mt-1 text-red-600 text-sm">
-                    <i className="fas fa-exclamation-circle mr-1"></i>
+                    <Icon name="exclamation-circle" className="mr-1" />
                     {errors.matricula.message}
                   </div>
                 )}
@@ -123,7 +124,7 @@ export default function NewMaintainerPage() {
                 />
                 {errors.lac && (
                   <div className="flex items-center mt-1 text-red-600 text-sm">
-                    <i className="fas fa-exclamation-circle mr-1"></i>
+                    <Icon name="exclamation-circle" className="mr-1" />
                     {errors.lac.message}
                   </div>
                 )}
@@ -143,7 +144,7 @@ export default function NewMaintainerPage() {
               />
               {errors.nome && (
                 <div className="flex items-center mt-1 text-red-600 text-sm">
-                  <i className="fas fa-exclamation-circle mr-1"></i>
+                  <Icon name="exclamation-circle" className="mr-1" />
                   {errors.nome.message}
                 </div>
               )}
@@ -160,12 +161,12 @@ export default function NewMaintainerPage() {
                 placeholder="Digite o setor"
                 {...register("setor")}
               />
-              {errors.setor && (
-                <div className="flex items-center mt-1 text-red-600 text-sm">
-                  <i className="fas fa-exclamation-circle mr-1"></i>
-                  {errors.setor.message}
-                </div>
-              )}
+                {errors.setor && (
+                  <div className="flex items-center mt-1 text-red-600 text-sm">
+                    <Icon name="exclamation-circle" className="mr-1" />
+                    {errors.setor.message}
+                  </div>
+                )}
             </div>
 
             {/* Senha */}
@@ -184,7 +185,7 @@ export default function NewMaintainerPage() {
                 />
                 {errors.password && (
                   <div className="flex items-center mt-1 text-red-600 text-sm">
-                    <i className="fas fa-exclamation-circle mr-1"></i>
+                    <Icon name="exclamation-circle" className="mr-1" />
                     {errors.password.message}
                   </div>
                 )}
@@ -204,7 +205,7 @@ export default function NewMaintainerPage() {
                 />
                 {errors.confirm && (
                   <div className="flex items-center mt-1 text-red-600 text-sm">
-                    <i className="fas fa-exclamation-circle mr-1"></i>
+                    <Icon name="exclamation-circle" className="mr-1" />
                     {errors.confirm.message}
                   </div>
                 )}
@@ -226,7 +227,7 @@ export default function NewMaintainerPage() {
             {/* Erro Geral */}
             {errors.root && (
               <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start">
-                <i className="fas fa-exclamation-triangle text-red-600 mt-0.5 mr-3"></i>
+                <Icon name="exclamation-triangle" className="text-red-600 mt-0.5 mr-3" />
                 <div>
                   <p className="text-red-800 font-medium">Erro ao cadastrar</p>
                   <p className="text-red-600 text-sm mt-1">{errors.root.message}</p>
@@ -243,22 +244,22 @@ export default function NewMaintainerPage() {
               >
                 {loading ? (
                   <>
-                    <i className="fas fa-spinner fa-spin mr-2"></i>
+                    <Icon name="spinner" spin className="mr-2" />
                     Salvando...
                   </>
                 ) : (
                   <>
-                    <i className="fas fa-save mr-2"></i>
+                    <Icon name="save" className="mr-2" />
                     Criar Mantenedor
                   </>
                 )}
               </button>
-              
-              <Link 
+
+              <Link
                 href="/admin/mantenedores"
                 className="flex-1 flex items-center justify-center px-6 py-3 bg-gray-500 hover:bg-gray-600 text-white rounded-lg transition duration-150 ease-in-out"
               >
-                <i className="fas fa-times mr-2"></i>
+                <Icon name="times" className="mr-2" />
                 Cancelar
               </Link>
             </div>

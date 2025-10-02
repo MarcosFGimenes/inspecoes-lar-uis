@@ -1,5 +1,6 @@
 "use client";
 import Head from "next/head";
+import { Icon } from "@/components/icon";
 
 export default function Home() {
     return (
@@ -8,8 +9,6 @@ export default function Home() {
                 <title>Lar Cooperativa Agroindustrial- Sistema de Manutenção</title>
                 <meta charSet="UTF-8" />
                 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-                <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
-                <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
             </Head>
             <style jsx global>{`
                 body {
@@ -32,7 +31,7 @@ export default function Home() {
                     <div className="text-center">
                         <div className="flex items-center justify-center mb-4">
                             <div className="w-12 h-12 rounded-full bg-blue-600 flex items-center justify-center mr-3">
-                                <i className="fas fa-tools text-white text-xl"></i>
+                                <Icon name="tools" className="text-white text-xl" />
                             </div>
                             <h1 className="text-3xl font-bold text-gray-900">Lar Cooperativa Agroindustrial</h1>
                         </div>
@@ -47,12 +46,12 @@ export default function Home() {
                             <div className="bg-white rounded-2xl card-shadow p-6 h-full border-l-4 border-blue-500 hover:border-blue-700">
                                 <div className="flex flex-col items-center text-center">
                                     <div className="w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center mb-4">
-                                        <i className="fas fa-user-cog text-blue-600 text-2xl"></i>
+                                        <Icon name="user-cog" className="text-blue-600 text-2xl" />
                                     </div>
                                     <h3 className="text-xl font-bold text-gray-900 mb-2">Mantenedor</h3>
                                     <p className="text-gray-600 text-sm">Acesso para mantenedores</p>
                                     <div className="mt-4 text-blue-600 font-medium">
-                                        Acessar <i className="fas fa-arrow-right ml-1"></i>
+                                        Acessar <Icon name="arrow-right" className="ml-1" />
                                     </div>
                                 </div>
                             </div>
@@ -63,12 +62,12 @@ export default function Home() {
                             <div className="bg-white rounded-2xl card-shadow p-6 h-full border-l-4 border-green-500 hover:border-green-700">
                                 <div className="flex flex-col items-center text-center">
                                     <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center mb-4">
-                                        <i className="fas fa-user-shield text-green-600 text-2xl"></i>
+                                        <Icon name="user-shield" className="text-green-600 text-2xl" />
                                     </div>
                                     <h3 className="text-xl font-bold text-gray-900 mb-2">PCM</h3>
                                     <p className="text-gray-600 text-sm">Acesso para planejamento e controle de manutenção</p>
                                     <div className="mt-4 text-green-600 font-medium">
-                                        Acessar <i className="fas fa-arrow-right ml-1"></i>
+                                        Acessar <Icon name="arrow-right" className="ml-1" />
                                     </div>
                                 </div>
                             </div>

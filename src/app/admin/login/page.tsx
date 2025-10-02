@@ -12,6 +12,7 @@ import {
 } from "firebase/auth";
 import { FirebaseError } from "firebase/app";
 import { firebaseAuth } from "@/lib/firebase-client";
+import { Icon } from "@/components/icon";
 
 export default function AdminLoginPage() {
     const [email, setEmail] = useState("");
@@ -90,8 +91,6 @@ export default function AdminLoginPage() {
                 <title>Unidade Industrial de Soja - Admin PCM</title>
                 <meta charSet="UTF-8" />
                 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-                <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
-                <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
             </Head>
             <style jsx global>{`
                 body {
@@ -116,7 +115,7 @@ export default function AdminLoginPage() {
                     <div className="text-center mb-8">
                         <div className="flex items-center justify-center mb-4">
                             <div className="w-12 h-12 rounded-full bg-green-600 flex items-center justify-center mr-3">
-                                <i className="fas fa-tractor text-white text-xl"></i>
+                                <Icon name="tractor" className="text-white text-xl" />
                             </div>
                             <h1 className="text-2xl font-bold text-gray-900">Unidade Indsutrial de Soja</h1>
                         </div>
@@ -127,7 +126,7 @@ export default function AdminLoginPage() {
                     <div className="bg-white rounded-2xl card-shadow p-8">
                         <div className="text-center mb-6">
                             <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-3">
-                                <i className="fas fa-user-shield text-green-600 text-2xl"></i>
+                                <Icon name="user-shield" className="text-green-600 text-2xl" />
                             </div>
                             <h3 className="text-2xl font-bold text-gray-900">Login — Admin (PCM)</h3>
                             <p className="text-gray-600 mt-2">Acesso para planejamento e controle de manutenção</p>
@@ -148,7 +147,7 @@ export default function AdminLoginPage() {
                                         onChange={e => setEmail(e.target.value)}
                                     />
                                     <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-                                        <i className="fas fa-envelope text-gray-400"></i>
+                                        <Icon name="envelope" className="text-gray-400" />
                                     </div>
                                 </div>
                             </div>
@@ -167,7 +166,7 @@ export default function AdminLoginPage() {
                                         onChange={e => setSenha(e.target.value)}
                                     />
                                     <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-                                        <i className="fas fa-lock text-gray-400"></i>
+                                        <Icon name="lock" className="text-gray-400" />
                                     </div>
                                 </div>
                             </div>
@@ -199,7 +198,7 @@ export default function AdminLoginPage() {
                                 {!loading && <span>Entrar</span>}
                                 {loading && (
                                     <span>
-                                        <i className="fas fa-spinner fa-spin mr-2"></i> Entrando...
+                                        <Icon name="spinner" spin className="mr-2" /> Entrando...
                                     </span>
                                 )}
                             </button>

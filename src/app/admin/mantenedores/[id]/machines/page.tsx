@@ -2,6 +2,7 @@
 
 import { FormEvent, use, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { Icon } from "@/components/icon";
 
 interface PageProps {
   params: Promise<{
@@ -158,7 +159,7 @@ export default function MaintainerMachinesPage({ params }: PageProps) {
         <div className="max-w-4xl mx-auto">
           <div className="bg-white rounded-2xl shadow-lg p-8 text-center">
             <div className="w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center mx-auto mb-4">
-              <i className="fas fa-spinner fa-spin text-blue-600 text-xl"></i>
+              <Icon name="spinner" spin className="text-blue-600 text-xl" />
             </div>
             <p className="text-gray-600">Carregando...</p>
           </div>
@@ -174,7 +175,7 @@ export default function MaintainerMachinesPage({ params }: PageProps) {
         <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 pt-6">
           <div className="flex items-center mb-4 md:mb-0">
             <div className="w-12 h-12 rounded-full bg-green-600 flex items-center justify-center mr-3">
-              <i className="fas fa-tractor text-white text-xl"></i>
+              <Icon name="tractor" className="text-white text-xl" />
             </div>
             <div>
               <h1 className="text-2xl font-bold text-gray-900">Lar Cooperativa Agroindustrial</h1>
@@ -182,11 +183,11 @@ export default function MaintainerMachinesPage({ params }: PageProps) {
             </div>
           </div>
           
-          <Link 
+          <Link
             href="/admin/mantenedores"
             className="flex items-center justify-center px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition duration-150 ease-in-out"
           >
-            <i className="fas fa-arrow-left mr-2"></i>
+            <Icon name="arrow-left" className="mr-2" />
             Voltar aos Mantenedores
           </Link>
         </div>
@@ -196,15 +197,15 @@ export default function MaintainerMachinesPage({ params }: PageProps) {
           {error && !maintainer ? (
             <div className="text-center py-8">
               <div className="w-16 h-16 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
-                <i className="fas fa-exclamation-triangle text-red-600 text-2xl"></i>
+                <Icon name="exclamation-triangle" className="text-red-600 text-2xl" />
               </div>
               <h3 className="text-xl font-bold text-gray-900 mb-2">Erro ao carregar</h3>
               <p className="text-red-600 mb-4">{error}</p>
-              <Link 
+              <Link
                 href="/admin/mantenedores"
                 className="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition duration-150 ease-in-out"
               >
-                <i className="fas fa-arrow-left mr-2"></i>
+                <Icon name="arrow-left" className="mr-2" />
                 Voltar
               </Link>
             </div>
@@ -215,7 +216,7 @@ export default function MaintainerMachinesPage({ params }: PageProps) {
                 <div className="mb-4 md:mb-0">
                   <div className="flex items-center mb-2">
                     <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center mr-3">
-                      <i className="fas fa-cogs text-orange-600"></i>
+                      <Icon name="cogs" className="text-orange-600" />
                     </div>
                     <h2 className="text-2xl font-bold text-gray-900">Gerenciar Máquinas</h2>
                   </div>
@@ -235,7 +236,7 @@ export default function MaintainerMachinesPage({ params }: PageProps) {
               {/* Mensagens de Status */}
               {error && (
                 <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6 flex items-start">
-                  <i className="fas fa-exclamation-triangle text-red-600 mt-0.5 mr-3"></i>
+                  <Icon name="exclamation-triangle" className="text-red-600 mt-0.5 mr-3" />
                   <div>
                     <p className="text-red-800 font-medium">Erro</p>
                     <p className="text-red-600 text-sm mt-1">{error}</p>
@@ -245,7 +246,7 @@ export default function MaintainerMachinesPage({ params }: PageProps) {
 
               {success && (
                 <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6 flex items-start">
-                  <i className="fas fa-check-circle text-green-600 mt-0.5 mr-3"></i>
+                  <Icon name="check-circle" className="text-green-600 mt-0.5 mr-3" />
                   <div>
                     <p className="text-green-800 font-medium">Sucesso</p>
                     <p className="text-green-600 text-sm mt-1">{success}</p>
@@ -257,7 +258,7 @@ export default function MaintainerMachinesPage({ params }: PageProps) {
                 {/* Lista de Máquinas Ativas */}
                 <div className="border border-gray-200 rounded-xl p-6">
                   <div className="flex items-center mb-4">
-                    <i className="fas fa-list-check text-blue-600 mr-2"></i>
+                    <Icon name="list-check" className="text-blue-600 mr-2" />
                     <h3 className="text-lg font-semibold text-gray-900">Máquinas Ativas</h3>
                     <span className="ml-2 bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">
                       {activeMachines.length}
@@ -266,7 +267,7 @@ export default function MaintainerMachinesPage({ params }: PageProps) {
                   
                   {activeMachines.length === 0 ? (
                     <div className="text-center py-8 text-gray-500">
-                      <i className="fas fa-inbox text-3xl mb-2 opacity-50"></i>
+                      <Icon name="inbox" className="text-3xl mb-2 opacity-50" />
                       <p>Nenhuma máquina ativa encontrada.</p>
                     </div>
                   ) : (
@@ -303,7 +304,7 @@ export default function MaintainerMachinesPage({ params }: PageProps) {
                 {orphanedSelections.length > 0 && (
                   <div className="border border-yellow-300 bg-yellow-50 rounded-xl p-4">
                     <div className="flex items-start">
-                      <i className="fas fa-exclamation-triangle text-yellow-600 mt-0.5 mr-3"></i>
+                      <Icon name="exclamation-triangle" className="text-yellow-600 mt-0.5 mr-3" />
                       <div>
                         <p className="font-semibold text-yellow-800">Atenção</p>
                         <p className="text-yellow-700 text-sm mt-1">
@@ -328,22 +329,22 @@ export default function MaintainerMachinesPage({ params }: PageProps) {
                   >
                     {saving ? (
                       <>
-                        <i className="fas fa-spinner fa-spin mr-2"></i>
+                        <Icon name="spinner" spin className="mr-2" />
                         Salvando...
                       </>
                     ) : (
                       <>
-                        <i className="fas fa-save mr-2"></i>
+                        <Icon name="save" className="mr-2" />
                         Salvar Atribuições
                       </>
                     )}
                   </button>
-                  
-                  <Link 
+
+                  <Link
                     href="/admin/mantenedores"
                     className="flex-1 flex items-center justify-center px-6 py-3 bg-gray-500 hover:bg-gray-600 text-white rounded-lg transition duration-150 ease-in-out"
                   >
-                    <i className="fas fa-times mr-2"></i>
+                    <Icon name="times" className="mr-2" />
                     Cancelar
                   </Link>
                 </div>
