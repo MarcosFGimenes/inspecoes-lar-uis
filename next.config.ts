@@ -5,6 +5,16 @@ const nextConfig: NextConfig = {
     remotePatterns: [
       {
         protocol: "https",
+        hostname: "i.ibb.co",
+        pathname: "/**",
+      },
+      {
+        protocol: "https",
+        hostname: "ibb.co",
+        pathname: "/**",
+      },
+      {
+        protocol: "https",
         hostname: "storage.googleapis.com",
         pathname: "/**",
       },
