@@ -168,6 +168,36 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       cursorY += imgHeight + 10;
     }
 
+    const pcmSign = (inspectionData.pcmSign ?? {}) as Record<string, unknown>;
+    const pcmSignatureUrl = typeof pcmSign.assinaturaUrl === "string" ? pcmSign.assinaturaUrl : null;
+    const pcmSignature = await fetchImageData(pcmSignatureUrl);
+    const pcmName = typeof pcmSign.nome === "string" ? pcmSign.nome : null;
+    if (pcmSignature) {
+      if (cursorY > pageHeight - 60) {
+        doc.addPage();
+        cursorY = 20;
+      }
+      doc.setFontSize(12);
+      doc.text(
+        `Assinatura do assistente${pcmName ? ` (${pcmName})` : ""}:`,
+        margin,
+        cursorY
+      );
+      cursorY += 6;
+      const imgWidth = 60;
+      const imgHeight = 30;
+      doc.addImage(pcmSignature.base64, pcmSignature.format, margin, cursorY, imgWidth, imgHeight);
+      cursorY += imgHeight + 10;
+    } else if (pcmName) {
+      if (cursorY > pageHeight - 20) {
+        doc.addPage();
+        cursorY = 20;
+      }
+      doc.setFontSize(12);
+      doc.text(`Assinatura do assistente: ${pcmName}`, margin, cursorY);
+      cursorY += 8;
+    }
+
     if (cursorY > pageHeight - 40) {
       doc.addPage();
       cursorY = 20;
