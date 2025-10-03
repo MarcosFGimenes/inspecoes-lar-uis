@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { jsPDF } from "jspdf";
 import { adminDb } from "@/lib/firebase-admin";
 import { requireAdmin, requireMaint } from "@/lib/guards";
+import { drawLarHeader } from "@/server/pdf/header-lar";
+import type { LarHeaderData } from "@/server/pdf/header-lar";
 
 type TemplateItemData = {
   id?: string;
@@ -32,6 +34,14 @@ async function fetchImageData(url: string | null | undefined) {
   } catch {
     return null;
   }
+}
+
+async function fetchImageAsDataUrl(url: string | null | undefined) {
+  const image = await fetchImageData(url);
+  if (!image) return null;
+
+  const mime = image.format === "PNG" ? "image/png" : image.format === "WEBP" ? "image/webp" : "image/jpeg";
+  return `data:${mime};base64,${image.base64}`;
 }
 
 async function resolveSession() {
@@ -113,18 +123,37 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       }
     }
 
-    const doc = new jsPDF();
-    const margin = 14;
+    const doc = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
+    const margin = 10;
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
-    let cursorY = 20;
+    const finalizedAt = inspectionData.finalizadaEm ?? inspectionData.createdAt;
+    const inspectionDate = finalizedAt ? new Date(finalizedAt) : null;
+    const templateName =
+      (typeof template?.nome === "string" && template.nome) ||
+      (typeof template?.title === "string" && template.title) ||
+      "Inspeção";
+    const headerData: LarHeaderData = {
+      tituloTemplate: templateName,
+      unidade: typeof machine?.unidade === "string" ? machine.unidade : "-",
+      setor: typeof machine?.setor === "string" ? machine.setor : typeof machine?.localUnidade === "string" ? machine.localUnidade : "-",
+      dataInspecaoISO: inspectionDate ? inspectionDate.toISOString() : new Date().toISOString(),
+      maquinaNome: typeof machine?.nome === "string" ? machine.nome : templateName,
+      tag: typeof machine?.tag === "string" ? machine.tag : "-",
+      fotoMaquinaUrl: await fetchImageAsDataUrl(machine?.fotoUrl ?? null) ?? undefined,
+    };
 
+    const { headerHeightMm } = drawLarHeader(doc, headerData, { pageWidthMm: pageWidth });
+
+    let cursorY = margin + headerHeightMm + 6;
+
+    doc.setFont("helvetica", "bold");
     doc.setFontSize(18);
     doc.text("Relatório de Inspeção", margin, cursorY);
     cursorY += 10;
 
+    doc.setFont("helvetica", "normal");
     doc.setFontSize(12);
-    const finalizedAt = inspectionData.finalizadaEm ?? inspectionData.createdAt;
     const headerLines = [
       `Unidade: ${machine?.unidade ?? "-"}`,
       `Local: ${machine?.localUnidade ?? "-"}`,
@@ -133,7 +162,7 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       `TAG: ${machine?.tag ?? "-"}`,
       `LAC: ${machine?.lac ?? "-"}`,
       `Template: ${template?.nome ?? "-"}`,
-      `Data/Hora: ${finalizedAt ? new Date(finalizedAt).toLocaleString("pt-BR") : "-"}`,
+      `Data/Hora: ${inspectionDate ? inspectionDate.toLocaleString("pt-BR") : "-"}`,
       `Mantenedor: ${maintainer?.nome ?? "-"} (${maintainer?.matricula ?? "-"})`,
       `Nº da O.S.: ${inspectionData.osNumero ?? "-"}`,
     ];
@@ -143,21 +172,11 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       cursorY += 6;
     });
 
-    const photo = await fetchImageData(machine?.fotoUrl ?? null);
-    if (photo) {
-      const imgWidth = 60;
-      const imgHeight = 45;
-      const x = pageWidth - margin - imgWidth;
-      const y = 20;
-      doc.addImage(photo.base64, photo.format, x, y, imgWidth, imgHeight);
-      cursorY = Math.max(cursorY, y + imgHeight + 8);
-    }
-
     const signature = await fetchImageData(inspectionData.assinaturaUrl ?? null);
     if (signature) {
       if (cursorY > pageHeight - 60) {
         doc.addPage();
-        cursorY = 20;
+        cursorY = margin;
       }
       doc.setFontSize(12);
       doc.text("Assinatura do mantenedor:", margin, cursorY);
@@ -168,20 +187,51 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       cursorY += imgHeight + 10;
     }
 
+    const pcmSign = (inspectionData.pcmSign ?? {}) as Record<string, unknown>;
+    const pcmSignatureUrl = typeof pcmSign.assinaturaUrl === "string" ? pcmSign.assinaturaUrl : null;
+    const pcmSignature = await fetchImageData(pcmSignatureUrl);
+    const pcmName = typeof pcmSign.nome === "string" ? pcmSign.nome : null;
+    if (pcmSignature) {
+      if (cursorY > pageHeight - 60) {
+        doc.addPage();
+        cursorY = margin;
+      }
+      doc.setFontSize(12);
+      doc.text(
+        `Assinatura do assistente${pcmName ? ` (${pcmName})` : ""}:`,
+        margin,
+        cursorY
+      );
+      cursorY += 6;
+      const imgWidth = 60;
+      const imgHeight = 30;
+      doc.addImage(pcmSignature.base64, pcmSignature.format, margin, cursorY, imgWidth, imgHeight);
+      cursorY += imgHeight + 10;
+    } else if (pcmName) {
+      if (cursorY > pageHeight - 20) {
+        doc.addPage();
+        cursorY = margin;
+      }
+      doc.setFontSize(12);
+      doc.text(`Assinatura do assistente: ${pcmName}`, margin, cursorY);
+      cursorY += 8;
+    }
+
     if (cursorY > pageHeight - 40) {
       doc.addPage();
-      cursorY = 20;
+      cursorY = margin;
     }
 
     doc.setFontSize(14);
     doc.text("Itens do checklist", margin, cursorY);
     cursorY += 8;
 
+    doc.setFont("helvetica", "normal");
     doc.setFontSize(12);
     itens.forEach((item, index) => {
       if (cursorY > pageHeight - 40) {
         doc.addPage();
-        cursorY = 20;
+        cursorY = margin;
       }
       const templateItem = templateItemsMap.get(item.templateItemId) ?? {};
       const componente = templateItem?.componente ?? item.templateItemId;
@@ -200,7 +250,7 @@ export async function GET(_req: NextRequest, context: RouteContext) {
 
     if (cursorY > pageHeight - 40) {
       doc.addPage();
-      cursorY = 20;
+      cursorY = margin;
     }
 
     doc.setFontSize(14);
@@ -213,7 +263,7 @@ export async function GET(_req: NextRequest, context: RouteContext) {
     obsWrapped.forEach((line: string) => {
       if (cursorY > pageHeight - 20) {
         doc.addPage();
-        cursorY = 20;
+        cursorY = margin;
       }
       doc.text(line, margin, cursorY);
       cursorY += 6;
