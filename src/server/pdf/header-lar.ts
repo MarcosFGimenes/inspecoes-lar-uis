@@ -6,213 +6,253 @@ export type LarHeaderData = {
   tituloTemplate: string;
   unidade: string;
   setor: string;
-  dataInspecaoISO: string;
+  dataInspecaoISO?: string;
   maquinaNome: string;
   tag: string;
-  fotoMaquinaUrl?: string;
+  fotoMaquinaDataUrl?: string;
+  ordemServico?: string;
 };
 
-type ParsedImage = { data: string; format: "PNG" | "JPEG" | "WEBP" };
+const M = 10;
+const W = 210 - 2 * M;
+const H_TOP = 28;
+const W_LOGO = 38;
+const W_TITLE = 80;
+const W_BOX = 72;
+const H_INFO = 18;
+const H_INFO_ROW1 = 9;
+const H_TAG_LINE = 7;
+const Y_PHOTO = M + H_TOP + H_INFO + H_TAG_LINE + 3;
+const H_PHOTO = 34;
+const X_PHOTO = M + W_LOGO + W_TITLE + 2;
+const W_PHOTO = W_BOX - 4;
 
-let cachedLarLogo: ParsedImage | null | undefined;
+let cachedLarLogoDataUrl: string | null | undefined;
 
-function loadLarLogo(): ParsedImage | null {
-  if (cachedLarLogo !== undefined) {
-    return cachedLarLogo;
+function loadLarLogoDataUrl(): string | null {
+  if (cachedLarLogoDataUrl !== undefined) {
+    return cachedLarLogoDataUrl;
   }
 
   try {
     const logoPath = join(process.cwd(), "public", "lar-logo.png");
     const buffer = readFileSync(logoPath);
-    cachedLarLogo = {
-      data: buffer.toString("base64"),
-      format: "PNG",
-    };
-    return cachedLarLogo;
+    cachedLarLogoDataUrl = `data:image/png;base64,${buffer.toString("base64")}`;
+    return cachedLarLogoDataUrl;
   } catch {
-    cachedLarLogo = null;
+    cachedLarLogoDataUrl = null;
     return null;
   }
 }
 
-function formatDate(iso: string): string {
-  if (!iso) return "-";
+function ensureDataUrl(src?: string | null): string | null {
+  if (!src || typeof src !== "string") return null;
+  return src.startsWith("data:") ? src : null;
+}
+
+function formatDate(iso?: string): string {
+  if (!iso) return "__/__/____";
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) {
-    return "-";
+    return "__/__/____";
   }
-  return date.toLocaleDateString("pt-BR");
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const year = String(date.getFullYear());
+  return `${day}/${month}/${year}`;
 }
 
-function parseImageSource(src?: string | null): ParsedImage | null {
-  if (!src) return null;
-  if (!src.startsWith("data:")) {
-    return null;
-  }
+type ImageFormat = "PNG" | "JPEG" | "WEBP";
 
-  const match = /^data:image\/(png|jpeg|jpg|webp);base64,(.+)$/i.exec(src);
-  if (!match) {
-    return null;
-  }
-
-  const [, subtype, base64] = match;
-  const format = subtype.toLowerCase() === "png" ? "PNG" : subtype.toLowerCase() === "webp" ? "WEBP" : "JPEG";
-  return { data: base64, format };
+function resolveImageFormat(dataUrl: string): ImageFormat {
+  if (dataUrl.startsWith("data:image/png")) return "PNG";
+  if (dataUrl.startsWith("data:image/webp")) return "WEBP";
+  return "JPEG";
 }
 
-function drawInfoCell(
-  doc: jsPDF,
-  text: string,
-  x: number,
-  y: number,
-  options: { bold?: boolean; size?: number }
-) {
-  const { bold = false, size = 9 } = options;
-  doc.setFont("helvetica", bold ? "bold" : "normal");
-  doc.setFontSize(size);
-  doc.text(text, x, y);
+function drawImageContain(doc: jsPDF, dataUrl: string, x: number, y: number, w: number, h: number) {
+  const properties = doc.getImageProperties(dataUrl);
+  const ratio = properties.width / properties.height;
+  let drawWidth = w;
+  let drawHeight = drawWidth / ratio;
+  if (drawHeight > h) {
+    drawHeight = h;
+    drawWidth = drawHeight * ratio;
+  }
+  const dx = x + (w - drawWidth) / 2;
+  const dy = y + (h - drawHeight) / 2;
+  const format = resolveImageFormat(dataUrl);
+  doc.addImage(dataUrl, format, dx, dy, drawWidth, drawHeight);
 }
 
-export function drawLarHeader(
-  doc: jsPDF,
-  data: LarHeaderData,
-  opts?: { pageWidthMm?: number }
-): { headerHeightMm: number } {
-  const pageWidth = opts?.pageWidthMm ?? doc.internal.pageSize.getWidth();
-  const margin = 10;
-  const top = margin;
-  const contentWidth = pageWidth - margin * 2;
-  const innerPadding = 2;
-  const innerLeft = margin + innerPadding;
-  const innerTop = top + innerPadding;
+export function drawLarHeader(doc: jsPDF, data: LarHeaderData): {
+  topHeightMm: number;
+  photoBox: { x: number; y: number; w: number; h: number };
+} {
+  doc.setDrawColor(0);
+  doc.setTextColor(0);
 
-  const templateTitle = data.tituloTemplate?.trim() || "INSPEÇÃO";
-  const titleUpper = templateTitle.toUpperCase();
+  // Top band
+  doc.setLineWidth(0.4);
+  doc.rect(M, M, W, H_TOP);
 
-  const infoTableWidth = 64;
-  const infoTableHeight = 24;
-  const infoTableX = margin + contentWidth - innerPadding - infoTableWidth;
-  const infoTableY = innerTop;
+  const xLogoDivider = M + W_LOGO;
+  const xTitleDivider = M + W_LOGO + W_TITLE;
+  doc.line(xLogoDivider, M, xLogoDivider, M + H_TOP);
+  doc.line(xTitleDivider, M, xTitleDivider, M + H_TOP);
 
+  const boxX = xTitleDivider;
+  const boxY = M;
+  const boxRight = boxX + W_BOX;
+  const boxMidY = boxY + H_TOP / 2;
+  const boxLabelSplitY = boxMidY + (H_TOP / 2) / 2;
+  const boxBottom = boxY + H_TOP;
+  const boxMidX = boxX + W_BOX / 2;
+  const boxC2 = boxX + W_BOX * 0.55;
+  const boxC3 = boxX + W_BOX * 0.9;
+
+  doc.setLineWidth(0.3);
+  doc.line(boxX, boxMidY, boxRight, boxMidY);
+  doc.line(boxX, boxLabelSplitY, boxRight, boxLabelSplitY);
+  doc.line(boxMidX, boxY, boxMidX, boxMidY);
+  doc.line(boxC2, boxMidY, boxC2, boxBottom);
+  doc.line(boxC3, boxMidY, boxC3, boxBottom);
+
+  // Logo
+  const logoDataUrl = loadLarLogoDataUrl();
   const logoBox = {
-    x: innerLeft,
-    y: innerTop,
-    w: 22,
-    h: 22,
+    x: M + 3,
+    y: M + 2,
+    w: W_LOGO - 6,
+    h: H_TOP - 4,
   };
 
-  const titleAreaX = logoBox.x + logoBox.w + 6;
-  const titleAreaRight = infoTableX - 4;
-  const titleAreaWidth = Math.max(titleAreaRight - titleAreaX, 40);
-
-  doc.setDrawColor(0);
-  doc.setLineWidth(0.4);
-
-  const logoImage = loadLarLogo();
-  if (logoImage) {
-    doc.addImage(logoImage.data, logoImage.format, logoBox.x, logoBox.y, logoBox.w, logoBox.h);
+  if (logoDataUrl) {
+    drawImageContain(doc, logoDataUrl, logoBox.x, logoBox.y, logoBox.w, logoBox.h);
   } else {
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(18);
-    doc.text("Lar", logoBox.x + 2, logoBox.y + logoBox.h / 1.5);
+    doc.setFontSize(22);
+    doc.text("Lar", logoBox.x + logoBox.w / 2, logoBox.y + logoBox.h / 2, {
+      align: "center",
+      baseline: "middle",
+    });
   }
 
+  // Title
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(13);
-  doc.text(
-    `INSPEÇÃO ${titleUpper}`,
-    titleAreaX + titleAreaWidth / 2,
-    innerTop + 10,
-    { align: "center" }
-  );
-
   doc.setFontSize(12);
-  doc.text(titleUpper, titleAreaX + titleAreaWidth / 2, innerTop + 18, { align: "center" });
+  const title = (data.tituloTemplate || "INSPEÇÃO").toUpperCase();
+  const titleX = M + W_LOGO + W_TITLE / 2;
+  const titleY = M + H_TOP / 2;
+  doc.text(title, titleX, titleY, { align: "center", baseline: "middle" });
 
-  doc.rect(infoTableX, infoTableY, infoTableWidth, infoTableHeight);
-  const rowHeight = infoTableHeight / 3;
-  const colSplit = infoTableX + infoTableWidth / 2;
-  doc.line(infoTableX, infoTableY + rowHeight, infoTableX + infoTableWidth, infoTableY + rowHeight);
-  doc.line(infoTableX, infoTableY + rowHeight * 2, infoTableX + infoTableWidth, infoTableY + rowHeight * 2);
-  doc.line(colSplit, infoTableY, colSplit, infoTableY + infoTableHeight);
+  // Box texts
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(8.5);
+  doc.text("NÚMERO:", boxX + 2, boxY + 6);
+  doc.text("PÁGINAS:", boxMidX + 2, boxY + 6);
 
-  drawInfoCell(doc, "NÚMERO:", infoTableX + 2, infoTableY + 5, { bold: true, size: 8.5 });
-  drawInfoCell(doc, "PÁGINAS:", colSplit + 2, infoTableY + 5, { bold: true, size: 8.5 });
+  doc.setFontSize(10);
+  doc.text("FO 012 050 33", boxX + 2, boxMidY - 3);
+  doc.text("1/1", boxMidX + 2, boxMidY - 3);
 
-  drawInfoCell(doc, "FO 012 050 33", infoTableX + 2, infoTableY + rowHeight + 5, { bold: true, size: 10 });
-  drawInfoCell(doc, "1/1", colSplit + 2, infoTableY + rowHeight + 5, { bold: true, size: 10 });
+  doc.setFontSize(8.5);
+  doc.text("EMISSÃO:", boxX + 2, boxLabelSplitY - 3);
+  doc.text("REVISÃO:", boxC2 + 2, boxLabelSplitY - 3);
+  doc.text("Nº", boxC3 + 2, boxLabelSplitY - 3);
 
-  drawInfoCell(doc, "EMISSÃO:  REVISÃO:  Nº", infoTableX + 2, infoTableY + rowHeight * 2 + 5, {
-    bold: true,
-    size: 8.5,
-  });
-  drawInfoCell(doc, "08/04/2024  05/07/2024  01", colSplit + 2, infoTableY + rowHeight * 2 + 5, {
-    bold: true,
-    size: 9.5,
-  });
+  doc.setFontSize(10);
+  doc.text("08/04/2024", boxX + 2, boxBottom - 3);
+  doc.text("05/07/2024", boxC2 + 2, boxBottom - 3);
+  doc.text("01", boxC3 + 2, boxBottom - 3);
 
-  const photoBoxWidth = 105;
-  const photoBoxHeight = 35;
-  const photoBoxX = margin + contentWidth - innerPadding - photoBoxWidth;
-  const infoSectionWidth = Math.max(photoBoxX - innerLeft - 4, 60);
+  // Identification block
+  const infoTop = M + H_TOP;
+  const infoBottom = infoTop + H_INFO;
+  const infoLeft = M;
+  const infoRight = M + W;
+  const rowDividerY = infoTop + H_INFO_ROW1;
+  const leftBlockWidth = W - W_BOX;
+  const leftBlockRight = infoLeft + leftBlockWidth;
 
-  const infoRowY = infoTableY + infoTableHeight + 8;
-  const infoRowHeight = 10;
-  const infoRowWidth = infoSectionWidth;
-  doc.rect(innerLeft, infoRowY, infoRowWidth, infoRowHeight);
-  const colWidth = infoRowWidth / 3;
-  doc.line(innerLeft + colWidth, infoRowY, innerLeft + colWidth, infoRowY + infoRowHeight);
-  doc.line(innerLeft + colWidth * 2, infoRowY, innerLeft + colWidth * 2, infoRowY + infoRowHeight);
+  doc.setLineWidth(0.4);
+  doc.rect(infoLeft, infoTop, W, H_INFO);
+  doc.line(infoLeft, rowDividerY, infoRight, rowDividerY);
+  doc.line(leftBlockRight, infoTop, leftBlockRight, infoBottom);
+
+  const colUnidadeWidth = leftBlockWidth * 0.45;
+  const colSetorWidth = leftBlockWidth * 0.35;
+  const colSetorX = infoLeft + colUnidadeWidth;
+  const colDataX = colSetorX + colSetorWidth;
+
+  doc.setLineWidth(0.3);
+  doc.line(colSetorX, infoTop, colSetorX, rowDividerY);
+  doc.line(colDataX, infoTop, colDataX, rowDividerY);
 
   const unidade = data.unidade?.trim() || "-";
   const setor = data.setor?.trim() || "-";
   const dataInspecao = formatDate(data.dataInspecaoISO);
 
-  drawInfoCell(doc, `Unidade: ${unidade}`, innerLeft + 2, infoRowY + 6, { bold: false, size: 9 });
-  drawInfoCell(doc, `Setor: ${setor}`, innerLeft + colWidth + 2, infoRowY + 6, { bold: false, size: 9 });
-  drawInfoCell(doc, `Data: ${dataInspecao}`, innerLeft + colWidth * 2 + 2, infoRowY + 6, {
-    bold: false,
-    size: 9,
-  });
-
-  const machineLineY = infoRowY + infoRowHeight + 8;
-  const machineText = `${(data.maquinaNome || "-").toUpperCase()}   TAG ${data.tag || "-"}`;
+  const labelY = infoTop + 4;
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(11);
-  doc.text(machineText, innerLeft, machineLineY);
-  doc.line(innerLeft, machineLineY + 2, innerLeft + infoSectionWidth, machineLineY + 2);
+  doc.setFontSize(8.5);
+  doc.text("Unidade:", infoLeft + 2, labelY);
+  doc.text("Setor:", colSetorX + 2, labelY);
+  doc.text("Data:", colDataX + 2, labelY);
 
-  const photoBoxY = infoRowY;
-  doc.rect(photoBoxX, photoBoxY, photoBoxWidth, photoBoxHeight);
-  const parsedPhoto = parseImageSource(data.fotoMaquinaUrl);
-  if (parsedPhoto) {
-    const inset = 3;
-    const targetW = photoBoxWidth - inset * 2;
-    const targetH = photoBoxHeight - inset * 2;
-    doc.addImage(
-      parsedPhoto.data,
-      parsedPhoto.format,
-      photoBoxX + inset,
-      photoBoxY + inset,
-      targetW,
-      targetH,
-      undefined,
-      "FAST"
-    );
-  } else {
+  const valueY = rowDividerY - 2;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.text(unidade, infoLeft + 2, valueY);
+  doc.text(setor, colSetorX + 2, valueY);
+  doc.text(dataInspecao, colDataX + 2, valueY);
+
+  const row2Top = rowDividerY;
+  const osLabel = "Ordem de Serviço:";
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(8.5);
+  doc.text(osLabel, infoLeft + 2, row2Top + 5);
+
+  const osLabelWidth = doc.getTextWidth(`${osLabel} `);
+  const osLineStartX = infoLeft + 2 + osLabelWidth;
+  const osLineEndX = leftBlockRight - 2;
+  const osLineY = infoBottom - 2;
+  doc.setLineWidth(0.3);
+  doc.line(osLineStartX, osLineY, osLineEndX, osLineY);
+
+  const ordemServico = data.ordemServico?.trim() || "";
+  if (ordemServico) {
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
-    doc.setTextColor(120);
-    doc.text("FOTO DA MÁQUINA", photoBoxX + photoBoxWidth / 2, photoBoxY + photoBoxHeight / 2, {
-      align: "center",
-      baseline: "middle",
-    });
-    doc.setTextColor(0);
+    doc.text(ordemServico, osLineStartX + 1, osLineY - 1);
   }
 
-  const headerBottom = Math.max(photoBoxY + photoBoxHeight + innerPadding, machineLineY + 10);
-  const headerHeight = headerBottom - top;
-  doc.rect(margin, top, contentWidth, headerHeight);
+  // Tag line
+  const tagTextX = leftBlockRight + 2;
+  const tagTextY = infoBottom + 5;
+  const machineName = (data.maquinaNome || "").toUpperCase();
+  const tagValue = data.tag?.trim() || "";
+  const tagLineText = `${machineName}  TAG ${tagValue}`.trim();
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10.5);
+  doc.text(tagLineText, tagTextX, tagTextY);
 
-  return { headerHeightMm: headerHeight };
+  const textWidth = doc.getTextWidth(`${tagLineText} `);
+  const lineStartX = Math.min(tagTextX + textWidth + 1, M + W - 35);
+  const lineEndX = Math.min(lineStartX + 32, M + W - 2);
+  doc.setLineWidth(0.3);
+  doc.line(lineStartX, tagTextY - 1, lineEndX, tagTextY - 1);
+
+  // Photo area
+  const photoBox = { x: X_PHOTO, y: Y_PHOTO, w: W_PHOTO, h: H_PHOTO };
+  doc.setLineWidth(0.3);
+  doc.rect(photoBox.x, photoBox.y, photoBox.w, photoBox.h);
+
+  const photoDataUrl = ensureDataUrl(data.fotoMaquinaDataUrl);
+  if (photoDataUrl) {
+    drawImageContain(doc, photoDataUrl, photoBox.x, photoBox.y, photoBox.w, photoBox.h);
+  }
+
+  const topHeightMm = H_TOP + H_INFO + H_TAG_LINE;
+  return { topHeightMm, photoBox };
 }
