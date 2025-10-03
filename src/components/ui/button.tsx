@@ -45,7 +45,6 @@ export function buttonStyles({ variant = "default", size = "md", className }: Bu
     className
   );
 }
-
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant = "default", size = "md", disabled, loading, children, ...props }, ref) => {
     const isDisabled = disabled || loading;
