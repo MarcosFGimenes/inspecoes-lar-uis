@@ -509,10 +509,23 @@ export default function PendingSignaturesPage() {
 
     const trimmedCargo = cargo.trim();
 
+    let assinaturaDataUrl: string | null = null;
+    try {
+      const rawCanvas = canvas.getCanvas();
+      assinaturaDataUrl = rawCanvas.toDataURL("image/png");
+    } catch (err) {
+      console.error("[pcm-sign] failed to export canvas:", err);
+      assinaturaDataUrl = null;
+    }
+
+    if (!assinaturaDataUrl) {
+      setModalError("Não foi possível processar a assinatura. Tente novamente.");
+      return;
+    }
+
     try {
       setModalLoading(true);
       setModalError(null);
-      const assinaturaDataUrl = canvas.getTrimmedCanvas().toDataURL("image/png");
       const payload = {
         nome: trimmedName,
         cargo: trimmedCargo ? trimmedCargo : undefined,
