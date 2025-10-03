@@ -43,15 +43,18 @@ export async function uploadToImgbbFromDataUrl(
   expirationSec?: number
 ): Promise<{ url: string; display_url: string; delete_url?: string }> {
   const base64 = extractBase64(dataUrl);
-  const form = new FormData();
-  form.set("image", base64);
+  const body = new URLSearchParams();
+  body.set("image", base64);
   if (name && name.trim()) {
-    form.set("name", name.trim());
+    body.set("name", name.trim());
   }
 
   const response = await fetch(buildEndpoint(expirationSec), {
     method: "POST",
-    body: form,
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body,
   });
 
   let payload: UploadResponse | null = null;
