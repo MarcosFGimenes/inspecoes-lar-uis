@@ -2,20 +2,21 @@
 
 import dynamic from "next/dynamic";
 import { forwardRef } from "react";
-import type { default as SignatureCanvasType } from "react-signature-canvas";
+import type { ComponentClass } from "react";
+import type SignatureCanvasClass, { SignatureCanvasProps } from "react-signature-canvas";
+
+type SignatureCanvasInstance = SignatureCanvasClass;
 
 const SignatureCanvasDynamic = dynamic(() => import("react-signature-canvas"), {
   ssr: false,
-}) as unknown as SignatureCanvasType;
-
-export type SignatureCanvasInstance = SignatureCanvasType;
-export type SignatureCanvasProps = React.ComponentProps<SignatureCanvasType>;
+}) as unknown as ComponentClass<SignatureCanvasProps>;
 
 const SignatureCanvasWithRef = forwardRef<SignatureCanvasInstance, SignatureCanvasProps>((props, ref) => (
   // @ts-expect-error – ref typing is not preserved by next/dynamic
   <SignatureCanvasDynamic {...props} ref={ref} />
 ));
 
-SignatureCanvasWithRef.displayName = "SignatureCanvasWithRef";
+SignatureCanvasWithRef.displayName = "SignatureCanvas";
 
+export type { SignatureCanvasInstance, SignatureCanvasProps };
 export default SignatureCanvasWithRef;
