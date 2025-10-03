@@ -3,6 +3,12 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
+import { buttonStyles } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
+
 interface TemplateSummary {
   id: string;
   nome: string;
@@ -20,6 +26,7 @@ export default function TemplatesPage() {
   const [loading, setLoading] = useState(true);
   const [templates, setTemplates] = useState<TemplateSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -57,70 +64,97 @@ export default function TemplatesPage() {
   }, []);
 
   const items = useMemo(() => {
-    return templates.map(template => ({
+    const formatted = templates.map(template => ({
       ...template,
       itensCount: Array.isArray(template.itens) ? template.itens.length : 0,
       createdAtLabel: template.createdAt ? new Date(template.createdAt).toLocaleString("pt-BR") : "-",
     }));
-  }, [templates]);
 
-  if (loading) {
-    return (
-      <div className="max-w-4xl mx-auto p-4 space-y-4">
-        <header className="flex justify-between items-center">
-          <h1 className="text-2xl font-bold">Templates</h1>
-          <Link href="/admin/templates/new" className="rounded bg-black text-white px-4 py-2">
-            Novo template
-          </Link>
-        </header>
-        <p>Carregando...</p>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="max-w-4xl mx-auto p-4 space-y-4">
-        <header className="flex justify-between items-center">
-          <h1 className="text-2xl font-bold">Templates</h1>
-          <Link href="/admin/templates/new" className="rounded bg-black text-white px-4 py-2">
-            Novo template
-          </Link>
-        </header>
-        <p className="text-red-600">{error}</p>
-      </div>
-    );
-  }
+    if (!search.trim()) return formatted;
+    const term = search.trim().toLowerCase();
+    return formatted.filter(template => template.nome.toLowerCase().includes(term));
+  }, [search, templates]);
 
   return (
-    <div className="max-w-4xl mx-auto p-4 space-y-4">
-      <header className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold">Templates</h1>
-        <Link href="/admin/templates/new" className="rounded bg-black text-white px-4 py-2">
+    <div className="max-w-7xl mx-auto px-4 py-10 space-y-6">
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-3xl font-semibold text-[var(--text)]">Templates de checklist</h1>
+          <p className="text-sm text-[var(--muted)]">Organize os modelos que serão usados nas inspeções.</p>
+        </div>
+        <Link
+          href="/admin/templates/new"
+          className={buttonStyles()}
+        >
+          <i className="fas fa-plus" aria-hidden />
           Novo template
         </Link>
       </header>
 
-      {items.length === 0 ? (
-        <p className="text-gray-600">Nenhum template cadastrado ainda.</p>
+      {error ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Erro ao carregar</CardTitle>
+            <CardDescription>{error}</CardDescription>
+          </CardHeader>
+        </Card>
       ) : (
-        <div className="border rounded divide-y">
-          {items.map(template => (
-            <Link
-              key={template.id}
-              href={`/admin/templates/${template.id}`}
-              className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-4 hover:bg-gray-50"
-            >
-              <div>
-                <p className="font-semibold">{template.nome}</p>
-                <p className="text-sm text-gray-600">Criado em {template.createdAtLabel}</p>
+        <Card>
+          <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <CardTitle>Templates cadastrados</CardTitle>
+              <CardDescription>Filtre pelo nome para encontrar rapidamente um checklist.</CardDescription>
+            </div>
+            <div className="w-full sm:max-w-xs">
+              <Input
+                placeholder="Buscar template"
+                value={search}
+                onChange={event => setSearch(event.target.value)}
+                aria-label="Buscar template"
+              />
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {loading ? (
+              <div className="space-y-3">
+                <Skeleton className="h-16 w-full" />
+                <Skeleton className="h-16 w-full" />
+                <Skeleton className="h-16 w-full" />
               </div>
-              <div className="text-sm text-gray-700">
-                {template.itensCount} {template.itensCount === 1 ? "item" : "itens"}
+            ) : items.length === 0 ? (
+              <EmptyState
+                title="Nenhum template encontrado"
+                description={
+                  search
+                    ? "Ajuste a busca ou limpe o filtro para visualizar todos os templates."
+                    : "Cadastre um template para começar a montar checklists."
+                }
+                icon={<i className="fas fa-clipboard-list" aria-hidden />}
+              />
+            ) : (
+              <div className="divide-y divide-[var(--border)] rounded-lg border border-[var(--border)]">
+                {items.map(template => (
+                  <Link
+                    key={template.id}
+                    href={`/admin/templates/${template.id}`}
+                    className="flex flex-col gap-3 p-4 transition-colors hover:bg-[var(--surface-strong)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)] focus-visible:ring-offset-2"
+                  >
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <p className="text-base font-semibold text-[var(--text)]">{template.nome}</p>
+                        <p className="text-xs text-[var(--muted)]">Criado em {template.createdAtLabel}</p>
+                      </div>
+                      <span className="inline-flex items-center gap-2 rounded-full bg-[var(--surface)] px-3 py-1 text-xs font-medium text-[var(--muted)]">
+                        <i className="fas fa-check-double" aria-hidden />
+                        {template.itensCount} {template.itensCount === 1 ? "item" : "itens"}
+                      </span>
+                    </div>
+                  </Link>
+                ))}
               </div>
-            </Link>
-          ))}
-        </div>
+            )}
+          </CardContent>
+        </Card>
       )}
     </div>
   );

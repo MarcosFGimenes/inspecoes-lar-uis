@@ -6,6 +6,7 @@ import { adminDb } from "@/lib/firebase-admin";
 import { requireMaint } from "@/lib/guards";
 import { uploadToImgbbFromDataUrl } from "@/lib/imgbb";
 import { randomUUID } from "crypto";
+import type { ChecklistAnswer, ChecklistNonConformityTreatment } from "@/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -155,6 +156,7 @@ export async function POST(req: NextRequest) {
 
     const inspectionRef = adminDb.collection("inspecoes").doc();
     const inspectionId = inspectionRef.id;
+    const nowIso = new Date().toISOString();
 
     let assinaturaUrl: string | null = null;
     if (payload.assinaturaDataUrl) {
@@ -170,6 +172,8 @@ export async function POST(req: NextRequest) {
       observacaoItem: string | null;
       fotos: string[];
     }> = [];
+    const answersPayload: ChecklistAnswer[] = [];
+    const treatmentsPayload: ChecklistNonConformityTreatment[] = [];
 
     for (const item of payload.itens) {
       const fotosBase64 = item.fotos ? item.fotos.slice(0, 3) : [];
@@ -191,9 +195,25 @@ export async function POST(req: NextRequest) {
         observacaoItem: item.observacaoItem?.trim() ? item.observacaoItem.trim() : null,
         fotos: fotoUrls,
       });
-    }
 
-    const nowIso = new Date().toISOString();
+      const templateItem = templateMap.get(item.templateItemId) ?? {};
+      const response = item.resultado === "NC" ? "nc" : item.resultado === "NA" ? "na" : "c";
+      answersPayload.push({
+        questionId: item.templateItemId,
+        questionText: templateItem.oQueChecar ?? templateItem.criterio ?? templateItem.componente ?? null,
+        response,
+        observation: item.observacaoItem?.trim() ? item.observacaoItem.trim() : null,
+        photoUrls: fotoUrls,
+      });
+
+      if (response === "nc") {
+        treatmentsPayload.push({
+          questionId: item.templateItemId,
+          status: "open",
+          createdAt: nowIso,
+        });
+      }
+    }
 
     const openIssuesSnap = await adminDb
       .collection("issues")
@@ -297,6 +317,8 @@ export async function POST(req: NextRequest) {
       observacoes,
       assinaturaUrl,
       itens: itensPayload,
+      answers: answersPayload,
+      nonConformityTreatments: treatmentsPayload,
       qtdNC,
       createdAt: nowIso,
       iniciadaEm: nowIso,
