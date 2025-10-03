@@ -18,7 +18,31 @@ function extractMessage(err: unknown, fallback: string) {
   return fallback;
 }
 
-async function fetchImageData(url: string | null | undefined) {
+type ImageFormat = "PNG" | "JPEG" | "WEBP";
+type FetchedImage = { dataUrl: string };
+
+function resolveImageFormat(dataUrl: string): ImageFormat {
+  if (dataUrl.startsWith("data:image/png")) return "PNG";
+  if (dataUrl.startsWith("data:image/webp")) return "WEBP";
+  return "JPEG";
+}
+
+function drawImageContain(doc: jsPDF, dataUrl: string, x: number, y: number, w: number, h: number) {
+  const props = doc.getImageProperties(dataUrl);
+  const ratio = props.width / props.height;
+  let drawWidth = w;
+  let drawHeight = drawWidth / ratio;
+  if (drawHeight > h) {
+    drawHeight = h;
+    drawWidth = drawHeight * ratio;
+  }
+  const dx = x + (w - drawWidth) / 2;
+  const dy = y + (h - drawHeight) / 2;
+  const format = resolveImageFormat(dataUrl);
+  doc.addImage(dataUrl, format, dx, dy, drawWidth, drawHeight);
+}
+
+async function fetchImageData(url: string | null | undefined): Promise<FetchedImage | null> {
   if (!url) return null;
   try {
     const response = await fetch(url);
@@ -30,7 +54,9 @@ async function fetchImageData(url: string | null | undefined) {
     if (mime.includes("png")) format = "PNG";
     else if (mime.includes("webp")) format = "WEBP";
     const base64 = buffer.toString("base64");
-    return { base64, format };
+    const resolvedMime = format === "PNG" ? "image/png" : format === "WEBP" ? "image/webp" : "image/jpeg";
+    const dataUrl = `data:${resolvedMime};base64,${base64}`;
+    return { dataUrl };
   } catch {
     return null;
   }
@@ -38,10 +64,7 @@ async function fetchImageData(url: string | null | undefined) {
 
 async function fetchImageAsDataUrl(url: string | null | undefined) {
   const image = await fetchImageData(url);
-  if (!image) return null;
-
-  const mime = image.format === "PNG" ? "image/png" : image.format === "WEBP" ? "image/webp" : "image/jpeg";
-  return `data:${mime};base64,${image.base64}`;
+  return image?.dataUrl ?? null;
 }
 
 async function resolveSession() {
@@ -127,6 +150,7 @@ export async function GET(_req: NextRequest, context: RouteContext) {
     const margin = 10;
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
+    const contentWidth = pageWidth - margin * 2;
     const finalizedAt = inspectionData.finalizadaEm ?? inspectionData.createdAt;
     const inspectionDate = finalizedAt ? new Date(finalizedAt) : null;
     const templateName =
@@ -136,16 +160,22 @@ export async function GET(_req: NextRequest, context: RouteContext) {
     const headerData: LarHeaderData = {
       tituloTemplate: templateName,
       unidade: typeof machine?.unidade === "string" ? machine.unidade : "-",
-      setor: typeof machine?.setor === "string" ? machine.setor : typeof machine?.localUnidade === "string" ? machine.localUnidade : "-",
-      dataInspecaoISO: inspectionDate ? inspectionDate.toISOString() : new Date().toISOString(),
+      setor:
+        typeof machine?.setor === "string"
+          ? machine.setor
+          : typeof machine?.localUnidade === "string"
+          ? machine.localUnidade
+          : "-",
+      dataInspecaoISO: inspectionDate ? inspectionDate.toISOString() : undefined,
       maquinaNome: typeof machine?.nome === "string" ? machine.nome : templateName,
       tag: typeof machine?.tag === "string" ? machine.tag : "-",
-      fotoMaquinaUrl: await fetchImageAsDataUrl(machine?.fotoUrl ?? null) ?? undefined,
+      fotoMaquinaDataUrl: (await fetchImageAsDataUrl(machine?.fotoUrl ?? null)) ?? undefined,
+      ordemServico: typeof inspectionData.osNumero === "string" ? inspectionData.osNumero : undefined,
     };
 
-    const { headerHeightMm } = drawLarHeader(doc, headerData, { pageWidthMm: pageWidth });
+    const { topHeightMm, photoBox } = drawLarHeader(doc, headerData);
 
-    let cursorY = margin + headerHeightMm + 6;
+    let cursorY = Math.max(margin + topHeightMm, photoBox.y + photoBox.h) + 6;
 
     doc.setFont("helvetica", "bold");
     doc.setFontSize(18);
@@ -167,55 +197,16 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       `Nº da O.S.: ${inspectionData.osNumero ?? "-"}`,
     ];
 
-    headerLines.forEach(line => {
+    headerLines.forEach((line: string) => {
       doc.text(line, margin, cursorY);
       cursorY += 6;
     });
 
-    const signature = await fetchImageData(inspectionData.assinaturaUrl ?? null);
-    if (signature) {
-      if (cursorY > pageHeight - 60) {
-        doc.addPage();
-        cursorY = margin;
-      }
-      doc.setFontSize(12);
-      doc.text("Assinatura do mantenedor:", margin, cursorY);
-      cursorY += 6;
-      const imgWidth = 60;
-      const imgHeight = 30;
-      doc.addImage(signature.base64, signature.format, margin, cursorY, imgWidth, imgHeight);
-      cursorY += imgHeight + 10;
-    }
-
+    const maintSignature = await fetchImageData(inspectionData.assinaturaUrl ?? null);
     const pcmSign = (inspectionData.pcmSign ?? {}) as Record<string, unknown>;
     const pcmSignatureUrl = typeof pcmSign.assinaturaUrl === "string" ? pcmSign.assinaturaUrl : null;
     const pcmSignature = await fetchImageData(pcmSignatureUrl);
     const pcmName = typeof pcmSign.nome === "string" ? pcmSign.nome : null;
-    if (pcmSignature) {
-      if (cursorY > pageHeight - 60) {
-        doc.addPage();
-        cursorY = margin;
-      }
-      doc.setFontSize(12);
-      doc.text(
-        `Assinatura do assistente${pcmName ? ` (${pcmName})` : ""}:`,
-        margin,
-        cursorY
-      );
-      cursorY += 6;
-      const imgWidth = 60;
-      const imgHeight = 30;
-      doc.addImage(pcmSignature.base64, pcmSignature.format, margin, cursorY, imgWidth, imgHeight);
-      cursorY += imgHeight + 10;
-    } else if (pcmName) {
-      if (cursorY > pageHeight - 20) {
-        doc.addPage();
-        cursorY = margin;
-      }
-      doc.setFontSize(12);
-      doc.text(`Assinatura do assistente: ${pcmName}`, margin, cursorY);
-      cursorY += 8;
-    }
 
     if (cursorY > pageHeight - 40) {
       doc.addPage();
@@ -226,26 +217,103 @@ export async function GET(_req: NextRequest, context: RouteContext) {
     doc.text("Itens do checklist", margin, cursorY);
     cursorY += 8;
 
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(12);
+    const boxPadding = 4;
+    const lineHeight = 5;
+
     itens.forEach((item, index) => {
-      if (cursorY > pageHeight - 40) {
+      const templateItem = templateItemsMap.get(item.templateItemId) ?? {};
+      const componente = templateItem?.componente ?? item.templateItemId;
+      const questionText = `${index + 1}. ${componente}`;
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(11);
+      let questionLines = doc.splitTextToSize(questionText, contentWidth - boxPadding * 2);
+      if (questionLines.length === 0) {
+        questionLines = [questionText];
+      }
+
+      const resultLabel = "Resultado:";
+      const resultValue = item.resultado ? String(item.resultado) : "-";
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      const resultLabelWidth = doc.getTextWidth(`${resultLabel} `);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      const resultWidth = Math.max(contentWidth - boxPadding * 2 - resultLabelWidth, contentWidth * 0.3);
+      let resultLines = doc.splitTextToSize(resultValue, resultWidth);
+      if (resultLines.length === 0) {
+        resultLines = ["-"];
+      }
+
+      const obsLabel = "Observação:";
+      const obsValue = item.observacaoItem ? String(item.observacaoItem) : "-";
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      const obsLabelWidth = doc.getTextWidth(`${obsLabel} `);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      const obsWidth = Math.max(contentWidth - boxPadding * 2 - obsLabelWidth, contentWidth * 0.3);
+      let obsLines = doc.splitTextToSize(obsValue, obsWidth);
+      if (obsLines.length === 0) {
+        obsLines = ["-"];
+      }
+
+      const questionHeight = boxPadding * 2 + questionLines.length * lineHeight;
+      const resultHeight = boxPadding * 2 + resultLines.length * lineHeight;
+      const obsHeight = boxPadding * 2 + obsLines.length * lineHeight;
+      const boxHeight = questionHeight + resultHeight + obsHeight;
+
+      if (cursorY + boxHeight > pageHeight - margin) {
         doc.addPage();
         cursorY = margin;
       }
-      const templateItem = templateItemsMap.get(item.templateItemId) ?? {};
-      const componente = templateItem?.componente ?? item.templateItemId;
-      doc.text(`${index + 1}. ${componente}`, margin, cursorY);
-      cursorY += 6;
-      doc.text(`Resultado: ${item.resultado ?? "-"}`, margin, cursorY);
-      cursorY += 6;
-      const observacao = item.observacaoItem ? String(item.observacaoItem) : "-";
-      const wrapped = doc.splitTextToSize(`Observação: ${observacao}`, pageWidth - margin * 2);
-      wrapped.forEach((line: string) => {
-        doc.text(line, margin, cursorY);
-        cursorY += 6;
+
+      doc.setLineWidth(0.4);
+      doc.rect(margin, cursorY, contentWidth, boxHeight);
+
+      doc.setLineWidth(0.3);
+      const questionBottom = cursorY + questionHeight;
+      const resultBottom = questionBottom + resultHeight;
+      doc.line(margin, questionBottom, margin + contentWidth, questionBottom);
+      doc.line(margin, resultBottom, margin + contentWidth, resultBottom);
+
+      let textY = cursorY + boxPadding + lineHeight;
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(11);
+      questionLines.forEach((line: string) => {
+        doc.text(line, margin + boxPadding, textY);
+        textY += lineHeight;
       });
-      cursorY += 2;
+
+      let sectionStart = questionBottom;
+      textY = sectionStart + boxPadding + lineHeight;
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.text(resultLabel, margin + boxPadding, textY);
+      const resultValueX = margin + boxPadding + resultLabelWidth;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.text(resultLines[0], resultValueX, textY);
+      for (let i = 1; i < resultLines.length; i += 1) {
+        textY += lineHeight;
+        doc.text(resultLines[i], margin + boxPadding, textY);
+      }
+
+      sectionStart = resultBottom;
+      textY = sectionStart + boxPadding + lineHeight;
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.text(obsLabel, margin + boxPadding, textY);
+      const obsValueX = margin + boxPadding + obsLabelWidth;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.text(obsLines[0], obsValueX, textY);
+      for (let i = 1; i < obsLines.length; i += 1) {
+        textY += lineHeight;
+        doc.text(obsLines[i], margin + boxPadding, textY);
+      }
+
+      cursorY += boxHeight + 6;
     });
 
     if (cursorY > pageHeight - 40) {
@@ -259,7 +327,7 @@ export async function GET(_req: NextRequest, context: RouteContext) {
 
     doc.setFontSize(12);
     const observacoes = inspectionData.observacoes ?? "-";
-    const obsWrapped = doc.splitTextToSize(String(observacoes) || "-", pageWidth - margin * 2);
+    const obsWrapped = doc.splitTextToSize(String(observacoes) || "-", contentWidth);
     obsWrapped.forEach((line: string) => {
       if (cursorY > pageHeight - 20) {
         doc.addPage();
@@ -268,6 +336,56 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       doc.text(line, margin, cursorY);
       cursorY += 6;
     });
+
+    const signatureBoxHeight = 45;
+    const signatureGap = 10;
+    const signatureBoxWidth = (contentWidth - signatureGap) / 2;
+    let signaturePageHeight = doc.internal.pageSize.getHeight();
+    let signatureStartY = signaturePageHeight - margin - signatureBoxHeight;
+
+    if (cursorY + 10 > signatureStartY) {
+      doc.addPage();
+      cursorY = margin;
+      signaturePageHeight = doc.internal.pageSize.getHeight();
+      signatureStartY = signaturePageHeight - margin - signatureBoxHeight;
+    }
+
+    const leftSignatureX = margin;
+    const rightSignatureX = margin + signatureBoxWidth + signatureGap;
+
+    doc.setLineWidth(0.4);
+    doc.rect(leftSignatureX, signatureStartY, signatureBoxWidth, signatureBoxHeight);
+    doc.rect(rightSignatureX, signatureStartY, signatureBoxWidth, signatureBoxHeight);
+
+    const labelOffsetY = 8;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.text("Assinatura do mantenedor", leftSignatureX + 4, signatureStartY + labelOffsetY);
+    doc.text("Assinatura do assistente", rightSignatureX + 4, signatureStartY + labelOffsetY);
+
+    const imageAreaY = signatureStartY + labelOffsetY + 2;
+    const imageAreaHeight = signatureBoxHeight - labelOffsetY - 14;
+    const imageAreaWidth = signatureBoxWidth - 8;
+
+    if (maintSignature?.dataUrl) {
+      drawImageContain(doc, maintSignature.dataUrl, leftSignatureX + 4, imageAreaY, imageAreaWidth, imageAreaHeight);
+    }
+
+    if (pcmSignature?.dataUrl) {
+      drawImageContain(doc, pcmSignature.dataUrl, rightSignatureX + 4, imageAreaY, imageAreaWidth, imageAreaHeight);
+    }
+
+    const nameLineY = signatureStartY + signatureBoxHeight - 10;
+    doc.setLineWidth(0.3);
+    doc.line(leftSignatureX + 4, nameLineY, leftSignatureX + signatureBoxWidth - 4, nameLineY);
+    doc.line(rightSignatureX + 4, nameLineY, rightSignatureX + signatureBoxWidth - 4, nameLineY);
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    const maintNameText = `${maintainer?.nome ?? "-"}${maintainer?.matricula ? ` (${maintainer.matricula})` : ""}`;
+    doc.text(maintNameText, leftSignatureX + 4, nameLineY + 6);
+    const pcmNameText = pcmName ?? "-";
+    doc.text(pcmNameText, rightSignatureX + 4, nameLineY + 6);
 
     const arrayBuffer = doc.output("arraybuffer");
     const buffer = Buffer.from(arrayBuffer);
