@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { MutableRefObject } from "react";
+import type { RefObject } from "react";
 import Image from "next/image";
 import { useSearchParams } from "next/navigation";
 import { createPortal } from "react-dom";
@@ -44,12 +44,22 @@ interface SignatureModalProps {
   onCargoChange(value: string): void;
   loading: boolean;
   error: string | null;
-  canvasRef: MutableRefObject<SignatureCanvasInstance | null>;
+  canvasRef: RefObject<SignatureCanvasInstance | null>;
   onClear(): void;
   detail: InspectionDetailData | null;
   detailLoading: boolean;
   detailError: string | null;
 }
+
+type PcmSignResponse = {
+  ok?: boolean;
+  error?: string;
+  pcmSign?: {
+    signedAt?: string;
+    nome?: string;
+    cargo?: string | null;
+  };
+};
 
 function formatDateTime(value: string | null) {
   if (!value) return "-";
@@ -484,22 +494,28 @@ export default function PendingSignaturesPage() {
 
   const handleConfirmSignature = useCallback(async () => {
     if (!selected) return;
-    if (!nome.trim()) {
+
+    const trimmedName = nome.trim();
+    if (!trimmedName) {
       setModalError("Informe o nome do PCM");
       return;
     }
-    if (!signatureRef.current || signatureRef.current.isEmpty()) {
+
+    const canvas = signatureRef.current;
+    if (!canvas || canvas.isEmpty()) {
       setModalError("Desenhe a assinatura antes de confirmar");
       return;
     }
 
+    const trimmedCargo = cargo.trim();
+
     try {
       setModalLoading(true);
       setModalError(null);
-      const assinaturaDataUrl = signatureRef.current.getTrimmedCanvas().toDataURL("image/png");
+      const assinaturaDataUrl = canvas.getTrimmedCanvas().toDataURL("image/png");
       const payload = {
-        nome: nome.trim(),
-        cargo: cargo.trim() ? cargo.trim() : undefined,
+        nome: trimmedName,
+        cargo: trimmedCargo ? trimmedCargo : undefined,
         assinaturaDataUrl,
       };
 
@@ -509,31 +525,44 @@ export default function PendingSignaturesPage() {
         body: JSON.stringify(payload),
       });
 
+      const rawText = await response.text();
+      let parsed: PcmSignResponse | null = null;
+      try {
+        parsed = rawText ? (JSON.parse(rawText) as PcmSignResponse) : null;
+      } catch {
+        parsed = null;
+      }
+
       if (!response.ok) {
-        const data = await response.json().catch(() => null);
-        throw new Error(data?.error || "Não foi possível registrar a assinatura");
+        const serverMessage = parsed?.error || rawText || "Não foi possível registrar a assinatura";
+        console.error("[pcm-sign] request failed", response.status, serverMessage);
+        throw new Error(serverMessage);
       }
 
       setItems(prev => prev.filter(item => item.id !== selected.id));
       setSuccessMessage("Assinatura registrada com sucesso.");
       if (broadcastRef.current) {
-        const signedAtIso = new Date().toISOString();
+        const signedAtIso =
+          parsed?.pcmSign?.signedAt && typeof parsed.pcmSign.signedAt === "string"
+            ? parsed.pcmSign.signedAt
+            : new Date().toISOString();
         broadcastRef.current.postMessage({
           type: "inspection-signed",
           id: selected.id,
-          nome: payload.nome,
-          cargo: payload.cargo ?? null,
+          nome: parsed?.pcmSign?.nome ?? payload.nome,
+          cargo: parsed?.pcmSign?.cargo ?? payload.cargo ?? null,
           signedAt: signedAtIso,
         });
       }
       closeModal();
     } catch (err: unknown) {
+      console.error("[pcm-sign] client error:", err);
       const message = err instanceof Error && err.message ? err.message : "Erro ao registrar assinatura";
       setModalError(message);
     } finally {
       setModalLoading(false);
     }
-  }, [cargo, closeModal, nome, selected]);
+  }, [broadcastRef, cargo, closeModal, nome, selected]);
 
   if (loading) {
     return (

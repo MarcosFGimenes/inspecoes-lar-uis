@@ -1,79 +1,74 @@
 // src/lib/imgbb.ts
-const DATA_URL_REGEX = /^data:([^;]+);base64,([a-z0-9+/=\r\n]+)$/i;
 
-type UploadResponse = {
+const DATA_URL_REGEX = /^data:(.+);base64,(.*)$/i;
+
+type ImgbbSuccessResponse = {
   data?: {
     url?: string;
     display_url?: string;
     delete_url?: string;
   };
   success?: boolean;
-  status?: number;
 };
 
+type UploadResult = {
+  url: string;
+  display_url: string;
+  delete_url?: string;
+  mime: string;
+};
+
+function ensureApiKey() {
+  const apiKey = process.env.IMGBB_API_KEY;
+  if (!apiKey) {
+    throw new Error("IMGBB_API_KEY missing");
+  }
+  return apiKey;
+}
+
 function extractBase64(dataUrl: string) {
-  const trimmed = dataUrl.trim();
-  const match = trimmed.match(DATA_URL_REGEX);
+  const match = dataUrl.match(DATA_URL_REGEX);
   if (!match) {
     throw new Error("INVALID_DATA_URL");
   }
-  const base64 = match[2]!.replace(/\s+/g, "");
+  const [, mime, base64] = match;
   if (!base64) {
     throw new Error("INVALID_DATA_URL");
   }
-  return base64;
-}
-
-function buildEndpoint(expirationSec?: number) {
-  const apiKey = process.env.IMGBB_API_KEY;
-  if (!apiKey) {
-    throw new Error("IMGBB_API_KEY_NOT_CONFIGURED");
-  }
-  const endpoint = new URL("https://api.imgbb.com/1/upload");
-  endpoint.searchParams.set("key", apiKey);
-  if (typeof expirationSec === "number" && Number.isFinite(expirationSec) && expirationSec > 0) {
-    endpoint.searchParams.set("expiration", Math.floor(expirationSec).toString());
-  }
-  return endpoint.toString();
+  return { mime, base64 };
 }
 
 export async function uploadToImgbbFromDataUrl(
   dataUrl: string,
   name?: string,
   expirationSec?: number
-): Promise<{ url: string; display_url: string; delete_url?: string }> {
-  const base64 = extractBase64(dataUrl);
-  const body = new URLSearchParams();
-  body.set("image", base64);
-  if (name && name.trim()) {
-    body.set("name", name.trim());
+): Promise<UploadResult> {
+  const apiKey = ensureApiKey();
+  const { mime, base64 } = extractBase64(dataUrl.trim());
+
+  const form = new FormData();
+  form.append("image", base64);
+  if (name) {
+    form.append("name", name);
   }
 
-  const response = await fetch(buildEndpoint(expirationSec), {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body,
-  });
-
-  let payload: UploadResponse | null = null;
-  try {
-    payload = (await response.json()) as UploadResponse;
-  } catch (err) {
-    throw new Error(`IMGBB_RESPONSE_ERROR: ${(err as Error)?.message ?? "Unknown"}`);
+  const query = new URLSearchParams({ key: apiKey });
+  if (typeof expirationSec === "number" && Number.isFinite(expirationSec) && expirationSec > 0) {
+    query.set("expiration", Math.floor(expirationSec).toString());
   }
 
-  if (!response.ok || payload?.success !== true || !payload.data?.url || !payload.data.display_url) {
-    const status = payload?.status ?? response.status;
-    const message = `IMGBB_UPLOAD_FAILED: status=${status}`;
-    throw new Error(message);
+  const endpoint = `https://api.imgbb.com/1/upload?${query.toString()}`;
+  const response = await fetch(endpoint, { method: "POST", body: form });
+  const json = (await response.json().catch(() => ({}))) as ImgbbSuccessResponse;
+
+  if (!response.ok || json?.success !== true || !json.data?.url || !json.data.display_url) {
+    throw new Error(`IMGBB_UPLOAD_FAILED ${response.status} ${JSON.stringify(json)}`);
   }
 
   return {
-    url: payload.data.url,
-    display_url: payload.data.display_url,
-    delete_url: payload.data.delete_url,
+    url: json.data.url,
+    display_url: json.data.display_url,
+    delete_url: json.data.delete_url,
+    mime,
   };
 }
-
