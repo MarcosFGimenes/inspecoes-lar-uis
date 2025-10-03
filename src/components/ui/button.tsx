@@ -31,18 +31,27 @@ const sizeClasses: Record<ButtonSize, string> = {
   icon: "h-10 w-10",
 };
 
+interface ButtonStyleOptions {
+  variant?: ButtonVariant;
+  size?: ButtonSize;
+  className?: string;
+}
+
+export function buttonStyles({ variant = "default", size = "md", className }: ButtonStyleOptions = {}) {
+  return cn(
+    "inline-flex items-center justify-center gap-2 rounded-md font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60",
+    variantClasses[variant],
+    sizeClasses[size],
+    className
+  );
+}
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant = "default", size = "md", disabled, loading, children, ...props }, ref) => {
     const isDisabled = disabled || loading;
     return (
       <button
         ref={ref}
-        className={cn(
-          "inline-flex items-center justify-center gap-2 rounded-md font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60",
-          variantClasses[variant],
-          sizeClasses[size],
-          className
-        )}
+        className={buttonStyles({ variant, size, className })}
         disabled={isDisabled}
         {...props}
       >
