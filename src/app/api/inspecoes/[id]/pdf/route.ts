@@ -54,8 +54,8 @@ async function fetchImageData(url: string | null | undefined): Promise<FetchedIm
     if (mime.includes("png")) format = "PNG";
     else if (mime.includes("webp")) format = "WEBP";
     const base64 = buffer.toString("base64");
-    const mime = format === "PNG" ? "image/png" : format === "WEBP" ? "image/webp" : "image/jpeg";
-    const dataUrl = `data:${mime};base64,${base64}`;
+    const resolvedMime = format === "PNG" ? "image/png" : format === "WEBP" ? "image/webp" : "image/jpeg";
+    const dataUrl = `data:${resolvedMime};base64,${base64}`;
     return { dataUrl };
   } catch {
     return null;
@@ -197,7 +197,7 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       `Nº da O.S.: ${inspectionData.osNumero ?? "-"}`,
     ];
 
-    headerLines.forEach(line => {
+    headerLines.forEach((line: string) => {
       doc.text(line, margin, cursorY);
       cursorY += 6;
     });
@@ -280,7 +280,7 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       let textY = cursorY + boxPadding + lineHeight;
       doc.setFont("helvetica", "bold");
       doc.setFontSize(11);
-      questionLines.forEach(line => {
+      questionLines.forEach((line: string) => {
         doc.text(line, margin + boxPadding, textY);
         textY += lineHeight;
       });
