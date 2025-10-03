@@ -23,6 +23,13 @@ const navigationItems: NavigationItem[] = [
     accentClass: "bg-red-100 text-red-600",
   },
   {
+    href: "/admin/inspecoes",
+    title: "Gestão de inspeções",
+    description: "Centralize edição, assinatura e relatórios",
+    icon: "fas fa-clipboard-check",
+    accentClass: "bg-sky-100 text-sky-600",
+  },
+  {
     href: "/admin/inspecoes/assinar",
     title: "Assinaturas pendentes",
     description: "Assine inspeções do PCM com destaque para NCs",
@@ -128,6 +135,10 @@ export default function AdminDashboard() {
                   <Link href="/admin/nc" className={buttonStyles({ variant: "secondary" })}>
                     <i className="fas fa-exclamation-circle" aria-hidden />
                     Abrir tratativas
+                  </Link>
+                  <Link href="/admin/inspecoes" className={buttonStyles({ variant: "outline" })}>
+                    <i className="fas fa-clipboard-check" aria-hidden />
+                    Ver inspeções
                   </Link>
                   <Link href="/admin/inspecoes/assinar" className={buttonStyles()}>
                     <i className="fas fa-pen-fancy" aria-hidden />

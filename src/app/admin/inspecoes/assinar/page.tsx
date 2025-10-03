@@ -33,6 +33,7 @@ interface InspectionDetailData {
   template: Record<string, unknown> | null;
   machine: ChecklistResponse["machine"] | null;
 }
+
 interface SignatureModalProps {
   open: boolean;
   onClose(): void;
