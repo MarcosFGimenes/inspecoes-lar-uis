@@ -3,6 +3,12 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
+import { buttonStyles } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
+
 interface MachineListItem {
   id: string;
   tag: string;
@@ -52,7 +58,7 @@ export default function MachinesPage() {
 
         if (!machinesRes.ok) {
           const payload = await machinesRes.json().catch(() => null);
-          throw new Error(payload?.error || "Falha ao carregar maquinas");
+          throw new Error(payload?.error || "Falha ao carregar máquinas");
         }
         if (!templatesRes.ok) {
           const payload = await templatesRes.json().catch(() => null);
@@ -85,7 +91,7 @@ export default function MachinesPage() {
   const templateMap = useMemo(() => buildTemplateMap(templates), [templates]);
 
   const filtered = useMemo(() => {
-    if (!query) return machines;
+    if (!query.trim()) return machines;
     const term = query.trim().toLowerCase();
     return machines.filter(machine => {
       const tag = machine.tag?.toLowerCase() ?? "";
@@ -94,75 +100,103 @@ export default function MachinesPage() {
     });
   }, [machines, query]);
 
-  if (loading) {
-    return (
-      <div className="max-w-4xl mx-auto p-4 space-y-4">
-        <header className="flex justify-between items-center">
-          <h1 className="text-2xl font-bold">Maquinas</h1>
-          <Link href="/admin/maquinas/new" className="rounded bg-black text-white px-4 py-2">
-            Nova maquina
-          </Link>
-        </header>
-        <p>Carregando...</p>
-      </div>
-    );
-  }
+  const content = () => {
+    if (loading) {
+      return (
+        <div className="space-y-3">
+          <Skeleton className="h-20 w-full" />
+          <Skeleton className="h-20 w-full" />
+          <Skeleton className="h-20 w-full" />
+        </div>
+      );
+    }
 
-  if (error) {
+    if (filtered.length === 0) {
+      return (
+        <EmptyState
+          title="Nenhuma máquina encontrada"
+          description={
+            query
+              ? "Tente alterar os termos da busca para localizar o equipamento."
+              : "Cadastre uma máquina para vincular templates e inspeções."
+          }
+          icon={<i className="fas fa-tractor" aria-hidden />}
+        />
+      );
+    }
+
     return (
-      <div className="max-w-4xl mx-auto p-4 space-y-4">
-        <header className="flex justify-between items-center">
-          <h1 className="text-2xl font-bold">Maquinas</h1>
-          <Link href="/admin/maquinas/new" className="rounded bg-black text-white px-4 py-2">
-            Nova maquina
-          </Link>
-        </header>
-        <p className="text-red-600">{error}</p>
+      <div className="divide-y divide-[var(--border)] rounded-lg border border-[var(--border)]">
+        {filtered.map(machine => {
+          const templateLabel = machine.templateId ? templateMap.get(machine.templateId) ?? "-" : "-";
+          const createdLabel = machine.createdAt ? new Date(machine.createdAt).toLocaleString("pt-BR") : "-";
+          return (
+            <Link
+              key={machine.id}
+              href={`/admin/maquinas/${machine.id}`}
+              className="flex flex-col gap-3 p-4 transition-colors hover:bg-[var(--surface-strong)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)] focus-visible:ring-offset-2"
+            >
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-base font-semibold text-[var(--text)]">{machine.tag} — {machine.nome}</p>
+                  <p className="text-xs text-[var(--muted)]">Template: {templateLabel}</p>
+                  <p className="text-xs text-[var(--muted)]">Criada em {createdLabel}</p>
+                </div>
+                <span
+                  className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${
+                    machine.ativo
+                      ? "bg-emerald-100 text-emerald-700"
+                      : "bg-rose-100 text-rose-700"
+                  }`}
+                >
+                  {machine.ativo ? "Ativa" : "Inativa"}
+                </span>
+              </div>
+            </Link>
+          );
+        })}
       </div>
     );
-  }
+  };
 
   return (
-    <div className="max-w-5xl mx-auto p-4 space-y-4">
-      <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <h1 className="text-2xl font-bold">Maquinas</h1>
-        <Link href="/admin/maquinas/new" className="rounded bg-black text-white px-4 py-2">
-          Nova maquina
+    <div className="max-w-7xl mx-auto px-4 py-10 space-y-6">
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-3xl font-semibold text-[var(--text)]">Máquinas</h1>
+          <p className="text-sm text-[var(--muted)]">Gerencie os equipamentos vinculados aos checklists.</p>
+        </div>
+        <Link href="/admin/maquinas/new" className={buttonStyles()}>
+          <i className="fas fa-plus" aria-hidden />
+          Nova máquina
         </Link>
       </header>
 
-      <input
-        className="border rounded p-2 w-full"
-        placeholder="Buscar por TAG ou nome"
-        value={query}
-        onChange={event => setQuery(event.target.value)}
-      />
-
-      {filtered.length === 0 ? (
-        <p className="text-gray-600">Nenhuma maquina encontrada.</p>
+      {error ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Erro ao carregar dados</CardTitle>
+            <CardDescription>{error}</CardDescription>
+          </CardHeader>
+        </Card>
       ) : (
-        <div className="border rounded divide-y">
-          {filtered.map(machine => {
-            const templateLabel = machine.templateId ? templateMap.get(machine.templateId) ?? "-" : "-";
-            const createdLabel = machine.createdAt
-              ? new Date(machine.createdAt).toLocaleString("pt-BR")
-              : "-";
-            return (
-              <Link
-                key={machine.id}
-                href={`/admin/maquinas/${machine.id}`}
-                className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-4 hover:bg-gray-50"
-              >
-                <div className="space-y-1">
-                  <p className="font-semibold">{machine.tag} - {machine.nome}</p>
-                  <p className="text-sm text-gray-600">Template: {templateLabel}</p>
-                  <p className="text-xs text-gray-500">Criado em {createdLabel}</p>
-                </div>
-                <span className="text-sm text-gray-700">{machine.ativo ? "Ativa" : "Inativa"}</span>
-              </Link>
-            );
-          })}
-        </div>
+        <Card>
+          <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <CardTitle>Lista de máquinas</CardTitle>
+              <CardDescription>Busque por TAG ou nome para encontrar um ativo específico.</CardDescription>
+            </div>
+            <div className="w-full sm:max-w-xs">
+              <Input
+                placeholder="Buscar por TAG ou nome"
+                value={query}
+                onChange={event => setQuery(event.target.value)}
+                aria-label="Buscar máquina"
+              />
+            </div>
+          </CardHeader>
+          <CardContent>{content()}</CardContent>
+        </Card>
       )}
     </div>
   );
