@@ -35,6 +35,10 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "MACHINE_INACTIVE" }, { status: 403 });
     }
 
+    if (machineData?.ativo === false) {
+      return NextResponse.json({ error: "MACHINE_INACTIVE" }, { status: 403 });
+    }
+
     const maintDoc = await adminDb.collection("mantenedores").doc(auth.store.id!).get();
     if (!maintDoc.exists) {
       return NextResponse.json({ error: "MAINTAINER_NOT_FOUND" }, { status: 403 });
