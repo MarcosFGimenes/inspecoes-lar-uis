@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+
 import { adminDb } from "@/lib/firebase-admin";
 import { requireAdminFromRequest } from "@/lib/guards";
+import {
+  MachineDoc,
+  getMachinesByIdsChunked,
+  listActiveMachines,
+} from "@/lib/db/machines";
 import { z } from "zod";
 
 export const runtime = "nodejs";
@@ -11,11 +17,90 @@ type RouteContext = {
 };
 
 const MachinesPayloadSchema = z.object({
-  machines: z
-    .array(z.string().min(1))
-    .max(1000)
-    .optional(),
+  assignedIds: z.array(z.string().min(1)).max(1000).optional(),
 });
+
+function resolveId(params: Record<string, string | string[] | undefined>) {
+  const idValue = params.id;
+  return Array.isArray(idValue) ? idValue[0] ?? null : idValue ?? null;
+}
+
+function sanitizeMaintainerMachines(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const normalized = value
+    .map(item => (typeof item === "string" ? item.trim() : ""))
+    .filter(Boolean);
+  return Array.from(new Set(normalized)).slice(0, 1000);
+}
+
+function buildMaintainerPayload(
+  maintainer: FirebaseFirestore.DocumentSnapshot,
+  assignedIds: string[],
+  assignedDocs: MachineDoc[],
+  activeDocs: MachineDoc[],
+) {
+  const maintData = maintainer.data() ?? {};
+  const inactiveOrMissingIds = assignedIds.filter(
+    id => !activeDocs.some(machine => machine.id === id),
+  );
+
+  const response = {
+    maintainer: {
+      id: maintainer.id,
+      nome: typeof maintData.nome === "string" ? maintData.nome : null,
+      matricula: typeof maintData.matricula === "string" ? maintData.matricula : null,
+    },
+    assignedIds,
+    assignedDocs,
+    activeDocs,
+    inactiveOrMissingIds,
+  };
+
+  if (inactiveOrMissingIds.length > 0) {
+    console.debug("[assign-machines] inactive or missing ids", inactiveOrMissingIds);
+  }
+
+  return response;
+}
+
+export async function GET(req: NextRequest, context: RouteContext) {
+  const authorized = await requireAdminFromRequest(req);
+  if (!authorized) {
+    return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
+  }
+
+  const params = (await context.params) ?? {};
+  const id = resolveId(params);
+  if (!id) {
+    return NextResponse.json({ error: "Missing id" }, { status: 400 });
+  }
+
+  const maintRef = adminDb.collection("mantenedores").doc(id);
+  const maintSnap = await maintRef.get();
+  if (!maintSnap.exists) {
+    return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
+  }
+
+  const assignedIds = sanitizeMaintainerMachines(maintSnap.data()?.machines);
+  const [assignedDocs, activeDocs] = await Promise.all([
+    getMachinesByIdsChunked(assignedIds),
+    listActiveMachines(),
+  ]);
+
+  const payload = buildMaintainerPayload(maintSnap, assignedIds, assignedDocs, activeDocs);
+
+  console.debug("[assign-machines] assignedIds", payload.assignedIds);
+  console.debug(
+    "[assign-machines] activeIds",
+    payload.activeDocs.map(machine => machine.id),
+  );
+  console.debug(
+    "[assign-machines] inactiveOrMissingIds",
+    payload.inactiveOrMissingIds,
+  );
+
+  return NextResponse.json(payload);
+}
 
 export async function PUT(req: NextRequest, context: RouteContext) {
   const authorized = await requireAdminFromRequest(req);
@@ -24,8 +109,7 @@ export async function PUT(req: NextRequest, context: RouteContext) {
   }
 
   const params = (await context.params) ?? {};
-  const idValue = params.id;
-  const id = Array.isArray(idValue) ? idValue[0] ?? null : idValue ?? null;
+  const id = resolveId(params);
   if (!id) {
     return NextResponse.json({ error: "Missing id" }, { status: 400 });
   }
@@ -45,28 +129,33 @@ export async function PUT(req: NextRequest, context: RouteContext) {
     return NextResponse.json({ error: message }, { status: 422 });
   }
 
-  const machines = Array.from(new Set(parsed.machines ?? [])).filter(Boolean);
+  const assignedIds = Array.from(new Set(parsed.assignedIds ?? [])).filter(Boolean);
 
-  if (machines.length > 0) {
-    const machineSnapshots = await Promise.all(
-      machines.map(machineId => adminDb.collection("maquinas").doc(machineId).get())
-    );
-    const missing = machines.filter((_, index) => !machineSnapshots[index].exists);
-    if (missing.length > 0) {
-      return NextResponse.json(
-        { error: "MACHINE_NOT_FOUND", details: { missing } },
-        { status: 400 }
-      );
-    }
+  const [assignedDocs, activeDocs] = await Promise.all([
+    getMachinesByIdsChunked(assignedIds),
+    listActiveMachines(),
+  ]);
+
+  const inactiveOrMissingIds = assignedIds.filter(
+    machineId => !activeDocs.some(machine => machine.id === machineId),
+  );
+
+  if (inactiveOrMissingIds.length > 0) {
+    console.debug("[assign-machines] inactive or missing ids on save", inactiveOrMissingIds);
   }
 
   const updatedAt = new Date().toISOString();
 
   await maintRef.update({
-    machines,
+    machines: assignedIds,
     updatedAt,
   });
 
-  const updatedSnap = await maintRef.get();
-  return NextResponse.json({ id, ...updatedSnap.data() });
+  return NextResponse.json({
+    ok: true,
+    inactiveOrMissingIds,
+    assignedIds,
+    assignedDocs,
+    activeDocs,
+  });
 }

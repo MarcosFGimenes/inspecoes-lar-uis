@@ -176,7 +176,7 @@ export default function AdminNonConformitiesPage() {
       }
 
       const [machinesSnap, templatesSnap, responsesSnap] = await Promise.all([
-        getDocs(collection(firebaseDb, "maquinas")),
+        getDocs(collection(firebaseDb, "machines")),
         getDocs(collection(firebaseDb, "templates")),
         getDocs(query(collection(firebaseDb, "inspecoes"), orderBy("createdAt", "desc"), limit(200))),
       ]);
