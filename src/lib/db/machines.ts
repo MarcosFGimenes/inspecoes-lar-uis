@@ -124,6 +124,44 @@ export async function getMachinesByIdsChunked(ids: string[]): Promise<MachineDoc
   return ordered;
 }
 
+async function findMachineByTagInCollection(
+  collectionName: string,
+  tag: string,
+): Promise<MachineDoc | null> {
+  const snapshot = await adminDb
+    .collection(collectionName)
+    .where("tag", "==", tag)
+    .limit(1)
+    .get();
+
+  if (snapshot.empty) {
+    return null;
+  }
+
+  return mapMachineDoc(snapshot.docs[0]!);
+}
+
+export async function findMachineByTag(tag: string): Promise<MachineDoc | null> {
+  const primaryRecord = await findMachineByTagInCollection(PRIMARY_COLLECTION, tag);
+  if (primaryRecord) {
+    return primaryRecord;
+  }
+
+  for (const legacyCollection of LEGACY_COLLECTIONS) {
+    const legacyRecord = await findMachineByTagInCollection(legacyCollection, tag);
+    if (legacyRecord) {
+      console.debug("[machines-repo] fetched legacy machine by tag", {
+        tag,
+        legacyCollection,
+        id: legacyRecord.id,
+      });
+      return legacyRecord;
+    }
+  }
+
+  return null;
+}
+
 async function listActiveMachinesFromCollection(collectionName: string): Promise<MachineDoc[]> {
   const snapshot = await adminDb
     .collection(collectionName)

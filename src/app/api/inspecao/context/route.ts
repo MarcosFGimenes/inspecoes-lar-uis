@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase-admin";
+import { findMachineByTag } from "@/lib/db/machines";
 import { requireMaint } from "@/lib/guards";
 
 export const runtime = "nodejs";
@@ -24,18 +25,15 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const machineQuery = await adminDb
-      .collection("machines")
-      .where("tag", "==", tag)
-      .limit(1)
-      .get();
+    const machineRecord = await findMachineByTag(tag);
 
-    if (machineQuery.empty) {
+    if (!machineRecord) {
       return NextResponse.json({ error: "MACHINE_NOT_FOUND" }, { status: 404 });
     }
 
-    const machineDoc = machineQuery.docs[0]!;
-    const machineData = machineDoc.data();
+    if (machineRecord.ativo === false) {
+      return NextResponse.json({ error: "MACHINE_INACTIVE" }, { status: 403 });
+    }
 
     if (machineData?.ativo === false) {
       return NextResponse.json({ error: "MACHINE_INACTIVE" }, { status: 403 });
@@ -50,11 +48,11 @@ export async function GET(req: NextRequest) {
       ? (maintDoc.data()?.machines as string[])
       : [];
 
-    if (!maintMachines.includes(machineDoc.id)) {
+    if (!maintMachines.includes(machineRecord.id)) {
       return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
     }
 
-    const templateId = String(machineData.templateId ?? "").trim();
+    const templateId = String(machineRecord.templateId ?? "").trim();
     if (!templateId) {
       return NextResponse.json({ error: "TEMPLATE_NOT_DEFINED" }, { status: 400 });
     }
@@ -68,7 +66,7 @@ export async function GET(req: NextRequest) {
 
     const issuesSnap = await adminDb
       .collection("issues")
-      .where("machineId", "==", machineDoc.id)
+      .where("machineId", "==", machineRecord.id)
       .where("status", "==", "aberta")
       .get();
 
@@ -90,14 +88,14 @@ export async function GET(req: NextRequest) {
         matricula: auth.store.matricula ?? null,
       },
       machine: {
-        id: machineDoc.id,
-        tag: machineData.tag ?? null,
-        nome: machineData.nome ?? null,
-        setor: machineData.setor ?? null,
-        unidade: machineData.unidade ?? null,
-        localUnidade: machineData.localUnidade ?? null,
-        lac: machineData.lac ?? null,
-        fotoUrl: machineData.fotoUrl ?? null,
+        id: machineRecord.id,
+        tag: machineRecord.tag ?? null,
+        nome: machineRecord.nome ?? null,
+        setor: machineRecord.setor ?? null,
+        unidade: machineRecord.unidade ?? null,
+        localUnidade: machineRecord.localUnidade ?? null,
+        lac: machineRecord.lac ?? null,
+        fotoUrl: machineRecord.fotoUrl ?? null,
         templateId,
       },
       template: {
