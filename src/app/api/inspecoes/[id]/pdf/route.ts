@@ -157,6 +157,33 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       (typeof template?.nome === "string" && template.nome) ||
       (typeof template?.title === "string" && template.title) ||
       "Inspeção";
+    const templateRecord = template as Record<string, unknown>;
+    const templateTitleValue =
+      (typeof templateRecord?.["title"] === "string" && (templateRecord["title"] as string)) ||
+      (typeof templateRecord?.["nome"] === "string" && (templateRecord["nome"] as string)) ||
+      templateName;
+    const templateVersionCandidate =
+      templateRecord?.["version"] ??
+      templateRecord?.["versao"] ??
+      templateRecord?.["versaoAtual"] ??
+      templateRecord?.["versionName"] ??
+      null;
+    const templateVersion =
+      typeof templateVersionCandidate === "string" || typeof templateVersionCandidate === "number"
+        ? String(templateVersionCandidate)
+        : undefined;
+
+    const operatorNome = typeof maintainer?.nome === "string" ? maintainer.nome : undefined;
+    const operatorMatricula =
+      typeof maintainer?.matricula === "string" ? maintainer.matricula : undefined;
+    const lac = typeof machine?.lac === "string" ? machine.lac : undefined;
+    const machineLocalRaw =
+      typeof machine?.local === "string"
+        ? machine.local
+        : typeof machine?.localUnidade === "string"
+        ? machine.localUnidade
+        : undefined;
+
     const headerData: LarHeaderData = {
       tituloTemplate: templateName,
       unidade: typeof machine?.unidade === "string" ? machine.unidade : "-",
@@ -171,36 +198,18 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       tag: typeof machine?.tag === "string" ? machine.tag : "-",
       fotoMaquinaDataUrl: (await fetchImageAsDataUrl(machine?.fotoUrl ?? null)) ?? undefined,
       ordemServico: typeof inspectionData.osNumero === "string" ? inspectionData.osNumero : undefined,
+      templateTitle: templateTitleValue,
+      templateVersion,
+      operatorNome,
+      operatorMatricula,
+      dataHoraISO: inspectionDate ? inspectionDate.toISOString() : undefined,
+      lac,
+      local: machineLocalRaw,
     };
 
-    const { topHeightMm, photoBox } = drawLarHeader(doc, headerData);
+    const { topHeightMm } = drawLarHeader(doc, headerData);
 
-    let cursorY = Math.max(margin + topHeightMm, photoBox.y + photoBox.h) + 6;
-
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(18);
-    doc.text("Relatório de Inspeção", margin, cursorY);
-    cursorY += 10;
-
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(12);
-    const headerLines = [
-      `Unidade: ${machine?.unidade ?? "-"}`,
-      `Local: ${machine?.localUnidade ?? "-"}`,
-      `Setor: ${machine?.setor ?? "-"}`,
-      `Máquina: ${machine?.nome ?? "-"}`,
-      `TAG: ${machine?.tag ?? "-"}`,
-      `LAC: ${machine?.lac ?? "-"}`,
-      `Template: ${template?.nome ?? "-"}`,
-      `Data/Hora: ${inspectionDate ? inspectionDate.toLocaleString("pt-BR") : "-"}`,
-      `Mantenedor: ${maintainer?.nome ?? "-"} (${maintainer?.matricula ?? "-"})`,
-      `Nº da O.S.: ${inspectionData.osNumero ?? "-"}`,
-    ];
-
-    headerLines.forEach((line: string) => {
-      doc.text(line, margin, cursorY);
-      cursorY += 6;
-    });
+    let cursorY = margin + topHeightMm + 6;
 
     const maintSignature = await fetchImageData(inspectionData.assinaturaUrl ?? null);
     const pcmSign = (inspectionData.pcmSign ?? {}) as Record<string, unknown>;
