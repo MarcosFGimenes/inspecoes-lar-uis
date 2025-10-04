@@ -100,7 +100,7 @@ function drawImageContain(doc: jsPDF, dataUrl: string, x: number, y: number, w: 
   }
   const dx = x + (w - drawWidth) / 2;
   const dy = y + (h - drawHeight) / 2;
-  const format = (properties.fileType as any) || "PNG";
+  const format = properties.fileType;
   doc.addImage(dataUrl, format, dx, dy, drawWidth, drawHeight);
 }
 
