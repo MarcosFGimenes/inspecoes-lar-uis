@@ -11,16 +11,23 @@ interface PageProps {
 
 interface Maintainer {
   id: string;
-  nome: string;
-  matricula?: string;
-  machines?: string[];
+  nome: string | null;
+  matricula?: string | null;
 }
 
 interface MachineSummary {
   id: string;
-  tag: string;
-  nome: string;
-  ativo?: boolean;
+  tag: string | null;
+  nome: string | null;
+  ativo?: boolean | null;
+}
+
+interface MachinesResponse {
+  maintainer: Maintainer;
+  assignedIds: string[];
+  assignedDocs: MachineSummary[];
+  activeDocs: MachineSummary[];
+  inactiveOrMissingIds: string[];
 }
 
 export default function MaintainerMachinesPage({ params }: PageProps) {
@@ -30,8 +37,10 @@ export default function MaintainerMachinesPage({ params }: PageProps) {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [maintainer, setMaintainer] = useState<Maintainer | null>(null);
-  const [availableMachines, setAvailableMachines] = useState<MachineSummary[]>([]);
+  const [activeDocs, setActiveDocs] = useState<MachineSummary[]>([]);
+  const [assignedDocs, setAssignedDocs] = useState<MachineSummary[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
+  const [initialInactiveOrMissing, setInitialInactiveOrMissing] = useState<string[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -46,28 +55,21 @@ export default function MaintainerMachinesPage({ params }: PageProps) {
           return;
         }
 
-        const [maintRes, machinesRes] = await Promise.all([
-          fetch(`/api/mantenedores/${id}`, { cache: "no-store" }),
-          fetch("/api/maquinas", { cache: "no-store" }),
-        ]);
-
-        if (!maintRes.ok) {
-          const payload = await maintRes.json().catch(() => null);
-          throw new Error(payload?.error || "Falha ao carregar mantenedor");
-        }
+        const machinesRes = await fetch(`/api/mantenedores/${id}/machines`, { cache: "no-store" });
 
         if (!machinesRes.ok) {
           const payload = await machinesRes.json().catch(() => null);
           throw new Error(payload?.error || "Falha ao carregar máquinas");
         }
 
-        const maintData = (await maintRes.json()) as Maintainer;
-        const machinesData = (await machinesRes.json()) as MachineSummary[];
+        const data = (await machinesRes.json()) as MachinesResponse;
 
         if (!cancelled) {
-          setMaintainer(maintData);
-          setSelected(Array.isArray(maintData.machines) ? maintData.machines : []);
-          setAvailableMachines(Array.isArray(machinesData) ? machinesData : []);
+          setMaintainer(data.maintainer);
+          setSelected(Array.isArray(data.assignedIds) ? data.assignedIds : []);
+          setActiveDocs(Array.isArray(data.activeDocs) ? data.activeDocs : []);
+          setAssignedDocs(Array.isArray(data.assignedDocs) ? data.assignedDocs : []);
+          setInitialInactiveOrMissing(Array.isArray(data.inactiveOrMissingIds) ? data.inactiveOrMissingIds : []);
         }
       } catch (err: unknown) {
         if (!cancelled) {
@@ -89,7 +91,7 @@ export default function MaintainerMachinesPage({ params }: PageProps) {
   }, [id]);
 
   const activeMachines = useMemo(() => {
-    return availableMachines
+    return activeDocs
       .filter(machine => machine.ativo !== false)
       .sort((a, b) => {
         const tagA = (a.tag ?? "").toLowerCase();
@@ -98,7 +100,15 @@ export default function MaintainerMachinesPage({ params }: PageProps) {
         if (tagA > tagB) return 1;
         return 0;
       });
-  }, [availableMachines]);
+  }, [activeDocs]);
+
+  const assignedDocsMap = useMemo(() => {
+    const map = new Map<string, MachineSummary>();
+    assignedDocs.forEach(doc => {
+      map.set(doc.id, doc);
+    });
+    return map;
+  }, [assignedDocs]);
 
   const activeMachineMap = useMemo(() => {
     const map = new Map<string, MachineSummary>();
@@ -108,9 +118,15 @@ export default function MaintainerMachinesPage({ params }: PageProps) {
     return map;
   }, [activeMachines]);
 
-  const orphanedSelections = useMemo(() => {
+  const inactiveOrMissingSelections = useMemo(() => {
     return selected.filter(machineId => !activeMachineMap.has(machineId));
   }, [activeMachineMap, selected]);
+
+  useEffect(() => {
+    console.debug("[assign-machines] assignedIds", selected);
+    console.debug("[assign-machines] activeIds", activeMachines.map(machine => machine.id));
+    console.debug("[assign-machines] inactiveOrMissingIds", inactiveOrMissingSelections);
+  }, [selected, activeMachines, inactiveOrMissingSelections]);
 
   function toggleMachine(id: string) {
     setSelected(current => {
@@ -119,6 +135,11 @@ export default function MaintainerMachinesPage({ params }: PageProps) {
       }
       return [...current, id];
     });
+    setSuccess(null);
+  }
+
+  function removeInactiveSelection(id: string) {
+    setSelected(current => current.filter(item => item !== id));
     setSuccess(null);
   }
 
@@ -135,7 +156,7 @@ export default function MaintainerMachinesPage({ params }: PageProps) {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ machines: selected }),
+        body: JSON.stringify({ assignedIds: selected }),
       });
 
       if (!response.ok) {
@@ -222,7 +243,7 @@ export default function MaintainerMachinesPage({ params }: PageProps) {
                   {maintainer && (
                     <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 inline-block">
                       <p className="text-blue-800 font-medium">
-                        {maintainer.nome}
+                        {maintainer.nome ?? "—"}
                         {maintainer.matricula && (
                           <span className="text-blue-600 ml-2">• Matrícula {maintainer.matricula}</span>
                         )}
@@ -300,20 +321,41 @@ export default function MaintainerMachinesPage({ params }: PageProps) {
                 </div>
 
                 {/* Aviso de Máquinas Orfãs */}
-                {orphanedSelections.length > 0 && (
+                {inactiveOrMissingSelections.length > 0 && (
                   <div className="border border-yellow-300 bg-yellow-50 rounded-xl p-4">
                     <div className="flex items-start">
                       <i className="fas fa-exclamation-triangle text-yellow-600 mt-0.5 mr-3"></i>
                       <div>
                         <p className="font-semibold text-yellow-800">Atenção</p>
                         <p className="text-yellow-700 text-sm mt-1">
-                          Algumas máquinas atribuídas não estão mais ativas e serão mantidas até que você desmarque:
+                          Algumas máquinas atribuídas não foram encontradas como <strong>ativas</strong> (podem estar inativas ou ausentes por permissão/consulta). Elas continuam marcadas <strong>até você desmarcar</strong>:
                         </p>
                         <ul className="list-disc list-inside text-yellow-700 text-sm mt-2 space-y-1">
-                          {orphanedSelections.map(machineId => (
-                            <li key={machineId} className="font-mono">{machineId}</li>
-                          ))}
+                          {inactiveOrMissingSelections.map(machineId => {
+                            const machine = assignedDocsMap.get(machineId);
+                            return (
+                              <li key={machineId} className="flex items-center justify-between gap-4 font-mono">
+                                <span className="truncate">
+                                  {machine?.tag ?? machine?.nome ?? machineId}
+                                </span>
+                                <label className="flex items-center gap-2 text-xs font-sans">
+                                  <input
+                                    type="checkbox"
+                                    checked={selected.includes(machineId)}
+                                    onChange={() => removeInactiveSelection(machineId)}
+                                    className="h-4 w-4 text-yellow-600 focus:ring-yellow-500 border-yellow-300 rounded"
+                                  />
+                                  <span>Desmarcar</span>
+                                </label>
+                              </li>
+                            );
+                          })}
                         </ul>
+                        {initialInactiveOrMissing.length > 0 && (
+                          <p className="text-yellow-700 text-xs mt-3">
+                            IDs recebidos: {initialInactiveOrMissing.join(", ")}
+                          </p>
+                        )}
                       </div>
                     </div>
                   </div>
