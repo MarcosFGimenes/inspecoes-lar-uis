@@ -75,20 +75,6 @@ function formatDate(iso?: string): string {
   return `${day}/${month}/${year}`;
 }
 
-function formatDateTime(iso?: string): string {
-  if (!iso) return "__/__/____ __:__";
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) {
-    return "__/__/____ __:__";
-  }
-  const day = String(date.getDate()).padStart(2, "0");
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const year = String(date.getFullYear());
-  const hours = String(date.getHours()).padStart(2, "0");
-  const minutes = String(date.getMinutes()).padStart(2, "0");
-  return `${day}/${month}/${year} ${hours}:${minutes}`;
-}
-
 function drawImageContain(doc: jsPDF, dataUrl: string, x: number, y: number, w: number, h: number) {
   const properties = doc.getImageProperties(dataUrl);
   const ratio = properties.width / properties.height;
@@ -291,18 +277,12 @@ export function drawLarHeader(doc: jsPDF, data: LarHeaderData): {
     mantenedorValue = `(${operatorMatricula})`;
   }
 
-  const dateTimeValue = formatDateTime(data.dataHoraISO);
-  const ordemServicoValue = data.ordemServico?.trim() || "—";
   const lacValue = data.lac?.trim() || "—";
   const localValue = data.local?.trim();
-  const tagValue = machineTag || "—";
 
   const panelFields = [
-    { label: "Máquina:", value: `${data.maquinaNome} (TAG ${tagValue})` },
     { label: "Template:", value: templateValue },
     { label: "Mantenedor:", value: mantenedorValue },
-    { label: "Data/Hora:", value: dateTimeValue },
-    { label: "OS:", value: ordemServicoValue || "—" },
     { label: "LAC:", value: lacValue },
   ];
 
@@ -338,8 +318,7 @@ export function drawLarHeader(doc: jsPDF, data: LarHeaderData): {
   const panelHeight = Math.max(DEFAULT_H_PANEL, contentHeight);
 
   doc.setLineWidth(0.4);
-  doc.setFillColor(230, 240, 255);
-  doc.rect(panelX, panelY, panelWidth, panelHeight, "FD");
+  doc.rect(panelX, panelY, panelWidth, panelHeight);
   doc.setDrawColor(0);
 
   let textY = panelY + panelPadding + 4;
@@ -365,8 +344,6 @@ export function drawLarHeader(doc: jsPDF, data: LarHeaderData): {
       textY += fieldSpacing;
     }
   });
-
-  doc.setFillColor(255, 255, 255);
 
   const panelBottom = panelY + panelHeight;
   const machineLabelBottom = machineLabelY + H_MACHINE_LABEL;
