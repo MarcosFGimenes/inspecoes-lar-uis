@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase-admin";
 import { requireAdminFromRequest } from "@/lib/guards";
 import { machineSchema } from "@/lib/machines-schema";
+import { listAllMachines } from "@/lib/db/machines";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,12 +12,6 @@ function extractMessage(err: unknown, fallback: string) {
   return fallback;
 }
 
-type MachineRecord = Record<string, unknown> & {
-  id: string;
-  tag?: unknown;
-  nome?: unknown;
-};
-
 export async function GET(req: NextRequest) {
   const authorized = await requireAdminFromRequest(req);
   if (!authorized) {
@@ -25,20 +20,17 @@ export async function GET(req: NextRequest) {
 
   try {
     const q = req.nextUrl.searchParams.get("q")?.trim().toLowerCase();
-    const query = adminDb.collection("maquinas").orderBy("createdAt", "desc").limit(100);
+    const records = await listAllMachines(100);
 
-    const snapshot = await query.get();
-    let records: MachineRecord[] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as MachineRecord[];
+    const filtered = q
+      ? records.filter(item => {
+          const tag = typeof item.tag === "string" ? item.tag.toLowerCase() : "";
+          const nome = typeof item.nome === "string" ? item.nome.toLowerCase() : "";
+          return tag.includes(q) || nome.includes(q);
+        })
+      : records;
 
-    if (q) {
-      records = records.filter(item => {
-        const tag = typeof item.tag === "string" ? item.tag.toLowerCase() : "";
-        const nome = typeof item.nome === "string" ? item.nome.toLowerCase() : "";
-        return tag.includes(q) || nome.includes(q);
-      });
-    }
-
-    return NextResponse.json(records);
+    return NextResponse.json(filtered);
   } catch (err: unknown) {
     return NextResponse.json(
       { error: extractMessage(err, "INTERNAL_ERROR") },
@@ -66,7 +58,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const existing = await adminDb
-      .collection("maquinas")
+      .collection("machines")
       .where("tag", "==", parsed.tag)
       .limit(1)
       .get();
@@ -75,7 +67,7 @@ export async function POST(req: NextRequest) {
     }
 
     const now = new Date().toISOString();
-    const docRef = await adminDb.collection("maquinas").add({
+    const docRef = await adminDb.collection("machines").add({
       ...parsed,
       fotoUrl: parsed.fotoUrl ?? null,
       createdAt: now,

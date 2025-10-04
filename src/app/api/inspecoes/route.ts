@@ -99,7 +99,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const machineQuery = await adminDb
-      .collection("maquinas")
+      .collection("machines")
       .where("tag", "==", payload.tag)
       .limit(1)
       .get();
@@ -110,6 +110,10 @@ export async function POST(req: NextRequest) {
 
     const machineDoc = machineQuery.docs[0]!;
     const machineData = machineDoc.data();
+
+    if (machineData?.ativo === false) {
+      return NextResponse.json({ error: "MACHINE_INACTIVE" }, { status: 403 });
+    }
 
     const maintDoc = await adminDb.collection("mantenedores").doc(auth.store.id!).get();
     if (!maintDoc.exists) {
