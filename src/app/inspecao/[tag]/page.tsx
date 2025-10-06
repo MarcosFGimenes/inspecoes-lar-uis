@@ -25,6 +25,15 @@ type InspectionContext = { maintainer: MaintainerInfo; machine: MachineInfo; tem
 
 type ItemFormState = { resultado: "" | "C" | "NC" | "NA"; observacao: string; fotos: File[]; fileKey: number };
 type FeedbackState = { type: "success" | "error"; message: string };
+type DraftItemState = { templateItemId: string; resultado: "" | "C" | "NC" | "NA"; observacao: string };
+type DraftDataState = {
+  osNumero: string;
+  observacoes: string;
+  assinaturaDataUrl: string | null;
+  itens: DraftItemState[];
+  resolveIssues: string[];
+  updatedAt?: string | null;
+};
 
 const RESULT_OPTIONS: Array<{ value: "C" | "NC" | "NA"; label: string; tone: "ok" | "nc" | "na" }> = [
   { value: "C", label: "C", tone: "ok" },
@@ -88,8 +97,18 @@ export default function InspectionPage() {
   const [lastInspectionId, setLastInspectionId] = useState<string | null>(null);
   const [reloadCounter, setReloadCounter] = useState(0);
 
+  const [draftLoading, setDraftLoading] = useState(false);
+  const [draftError, setDraftError] = useState<string | null>(null);
+  const [draftSaving, setDraftSaving] = useState(false);
+  const [autoSavingDraft, setAutoSavingDraft] = useState(false);
+  const [draftFeedback, setDraftFeedback] = useState<FeedbackState | null>(null);
+  const [lastDraftUpdatedAt, setLastDraftUpdatedAt] = useState<string | null>(null);
+  const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastDraftPayloadRef = useRef<string | null>(null);
+
   const signatureRef = useRef<SignatureCanvasInstance | null>(null);
   const [signatureTouched, setSignatureTouched] = useState(false);
+  const [signatureDataUrl, setSignatureDataUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (searchParams?.get("ok") === "1") setFeedback({ type: "success", message: "Inspeção salva" });
@@ -142,14 +161,281 @@ export default function InspectionPage() {
   const resetForm = useCallback(() => {
     if (!context?.template?.itens) return;
     const initial: Record<string, ItemFormState> = {};
-    context.template.itens.filter((i) => i.id).forEach((i, idx) => {
-      initial[i.id!] = { resultado: "", observacao: "", fotos: [], fileKey: Date.now() + idx };
-    });
-    setItemsState(initial); setOsNumero(""); setObservacoes(""); setResolveIssues({});
-    setSignatureTouched(false); signatureRef.current?.clear?.();
+    context.template.itens
+      .filter(i => i.id)
+      .forEach((i, idx) => {
+        initial[i.id!] = { resultado: "", observacao: "", fotos: [], fileKey: Date.now() + idx };
+      });
+    setItemsState(initial);
+    setOsNumero("");
+    setObservacoes("");
+    setResolveIssues({});
+    setDraftFeedback(null);
+    setLastDraftUpdatedAt(null);
+    lastDraftPayloadRef.current = null;
+    setSignatureTouched(false);
+    setSignatureDataUrl(null);
+    signatureRef.current?.clear?.();
   }, [context?.template?.itens]);
 
   useEffect(() => { if (context) resetForm(); }, [context, resetForm]);
+
+  const applyDraft = useCallback(
+    (draft: DraftDataState) => {
+      const itemsMap = new Map(draft.itens.map(item => [item.templateItemId, item] as const));
+      const base: Record<string, ItemFormState> = {};
+      const now = Date.now();
+      sortedItems.forEach((item, idx) => {
+        if (!item.id) return;
+        const saved = itemsMap.get(item.id);
+        const resultado = saved?.resultado === "C" || saved?.resultado === "NC" || saved?.resultado === "NA" ? saved.resultado : "";
+        base[item.id] = {
+          resultado,
+          observacao: saved?.observacao ?? "",
+          fotos: [],
+          fileKey: now + idx,
+        };
+      });
+      setItemsState(base);
+      setOsNumero(draft.osNumero ?? "");
+      setObservacoes(draft.observacoes ?? "");
+      const validResolveIds = draft.resolveIssues
+        .filter(id => typeof id === "string" && id.trim().length > 0)
+        .map(id => id.trim())
+        .sort();
+      const resolveMap: Record<string, boolean> = {};
+      validResolveIds.forEach(id => {
+        resolveMap[id] = true;
+      });
+      setResolveIssues(resolveMap);
+      setDraftFeedback(null);
+      const updatedAt = draft.updatedAt ?? null;
+      setLastDraftUpdatedAt(updatedAt);
+      const signatureValue = draft.assinaturaDataUrl ?? null;
+      setSignatureDataUrl(signatureValue);
+      setSignatureTouched(!!signatureValue);
+      if (signatureValue) {
+        setTimeout(() => {
+          try {
+            signatureRef.current?.fromDataURL?.(signatureValue);
+          } catch {
+            // ignore load errors
+          }
+        }, 0);
+      } else {
+        signatureRef.current?.clear?.();
+      }
+      const normalizedItems: DraftItemState[] = sortedItems
+        .filter(item => item?.id)
+        .map(item => {
+          const saved = itemsMap.get(item.id as string);
+          const resultado = saved?.resultado === "C" || saved?.resultado === "NC" || saved?.resultado === "NA" ? saved.resultado : "";
+          const observacao = saved?.observacao?.trim() ?? "";
+          return {
+            templateItemId: item.id as string,
+            resultado,
+            observacao,
+          };
+        });
+      const normalizedPayload: DraftDataState = {
+        osNumero: (draft.osNumero ?? "").trim().toUpperCase(),
+        observacoes: (draft.observacoes ?? "").trim(),
+        assinaturaDataUrl: signatureValue,
+        itens: normalizedItems,
+        resolveIssues: validResolveIds,
+        updatedAt,
+      };
+      lastDraftPayloadRef.current = JSON.stringify(normalizedPayload);
+      if (draftTimerRef.current) {
+        clearTimeout(draftTimerRef.current);
+        draftTimerRef.current = null;
+      }
+    },
+    [sortedItems]
+  );
+
+  useEffect(() => {
+    if (!context?.machine?.tag) {
+      return;
+    }
+    let cancelled = false;
+    const currentTag = context.machine.tag ?? tag;
+    async function loadDraft() {
+      setDraftLoading(true);
+      setDraftError(null);
+      try {
+        const response = await fetch(`/api/inspecoes/drafts/${encodeURIComponent(currentTag)}` , {
+          cache: "no-store",
+        });
+        if (response.status === 401) {
+          window.location.href = "/login";
+          return;
+        }
+        if (!response.ok) {
+          const payload = await response.json().catch(() => null);
+          throw new Error(typeof payload?.error === "string" ? payload.error : "Falha ao carregar rascunho");
+        }
+        const data = await response.json();
+        if (cancelled) return;
+        const draft = data?.draft;
+        if (draft) {
+          applyDraft({
+            osNumero: draft.osNumero ?? "",
+            observacoes: draft.observacoes ?? "",
+            assinaturaDataUrl: draft.assinaturaDataUrl ?? null,
+            itens: Array.isArray(draft.itens) ? draft.itens : [],
+            resolveIssues: Array.isArray(draft.resolveIssues) ? draft.resolveIssues : [],
+            updatedAt: draft.updatedAt ?? null,
+          });
+        } else {
+          lastDraftPayloadRef.current = null;
+          setLastDraftUpdatedAt(null);
+        }
+      } catch (err: unknown) {
+        if (!cancelled) {
+          const message = err instanceof Error && err.message ? err.message : "Falha ao carregar rascunho";
+          setDraftError(message);
+        }
+      } finally {
+        if (!cancelled) {
+          setDraftLoading(false);
+        }
+      }
+    }
+    loadDraft();
+    return () => {
+      cancelled = true;
+    };
+  }, [context?.machine?.tag, applyDraft, tag]);
+
+  const buildCurrentDraftPayload = useCallback((): DraftDataState => {
+    const normalizedOs = osNumero.trim().toUpperCase();
+    const normalizedObs = observacoes.trim();
+    const itens: DraftItemState[] = [];
+    sortedItems.forEach(item => {
+      if (!item?.id) return;
+      const st = itemsState[item.id];
+      const resultado = st?.resultado === "C" || st?.resultado === "NC" || st?.resultado === "NA" ? st.resultado : "";
+      const observacao = st?.observacao?.trim() ?? "";
+      itens.push({
+        templateItemId: item.id,
+        resultado,
+        observacao,
+      });
+    });
+    const resolveIds = Object.entries(resolveIssues)
+      .filter(([, checked]) => checked)
+      .map(([id]) => id)
+      .sort();
+    return {
+      osNumero: normalizedOs,
+      observacoes: normalizedObs,
+      assinaturaDataUrl: signatureDataUrl ?? null,
+      itens,
+      resolveIssues: resolveIds,
+    };
+  }, [itemsState, observacoes, osNumero, resolveIssues, signatureDataUrl, sortedItems]);
+
+  const saveDraft = useCallback(
+    async (mode: "manual" | "auto") => {
+      if (!context?.machine?.tag) return;
+      const draftState = buildCurrentDraftPayload();
+      const fingerprint = JSON.stringify(draftState);
+      if (mode === "auto" && lastDraftPayloadRef.current === fingerprint) {
+        return;
+      }
+      if (mode === "manual" && lastDraftPayloadRef.current === fingerprint) {
+        setDraftFeedback({ type: "success", message: "Rascunho já está atualizado." });
+        return;
+      }
+
+      const payload = {
+        osNumero: draftState.osNumero || undefined,
+        observacoes: draftState.observacoes || undefined,
+        assinaturaDataUrl: draftState.assinaturaDataUrl,
+        itens: draftState.itens,
+        resolveIssues: draftState.resolveIssues,
+      };
+
+      try {
+        if (mode === "manual") {
+          setDraftSaving(true);
+          setDraftFeedback(null);
+        } else {
+          setAutoSavingDraft(true);
+        }
+        const response = await fetch(`/api/inspecoes/drafts/${encodeURIComponent(context.machine.tag)}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (response.status === 401) {
+          window.location.href = "/login";
+          return;
+        }
+        if (!response.ok) {
+          const payloadError = await response.json().catch(() => null);
+          throw new Error(typeof payloadError?.error === "string" ? payloadError.error : "Falha ao salvar rascunho");
+        }
+        const data = await response.json();
+        lastDraftPayloadRef.current = fingerprint;
+        const updatedAt = data?.draft?.updatedAt ?? new Date().toISOString();
+        setLastDraftUpdatedAt(updatedAt);
+        setDraftError(null);
+        if (draftTimerRef.current) {
+          clearTimeout(draftTimerRef.current);
+          draftTimerRef.current = null;
+        }
+        if (mode === "manual") {
+          setDraftFeedback({ type: "success", message: "Rascunho salvo com sucesso." });
+        }
+      } catch (err: unknown) {
+        const message = err instanceof Error && err.message ? err.message : "Falha ao salvar rascunho";
+        setDraftError(message);
+        if (mode === "manual") {
+          setDraftFeedback({ type: "error", message });
+        }
+      } finally {
+        if (mode === "manual") {
+          setDraftSaving(false);
+        } else {
+          setAutoSavingDraft(false);
+        }
+      }
+    },
+    [buildCurrentDraftPayload, context?.machine?.tag]
+  );
+
+  const handleManualDraftSave = useCallback(() => {
+    saveDraft("manual").catch(() => undefined);
+  }, [saveDraft]);
+
+  useEffect(() => {
+    if (!context?.machine?.tag || draftLoading) {
+      if (draftTimerRef.current) {
+        clearTimeout(draftTimerRef.current);
+        draftTimerRef.current = null;
+      }
+      return;
+    }
+    const draftState = buildCurrentDraftPayload();
+    const fingerprint = JSON.stringify(draftState);
+    if (fingerprint === lastDraftPayloadRef.current) {
+      return;
+    }
+    if (draftTimerRef.current) {
+      clearTimeout(draftTimerRef.current);
+    }
+    draftTimerRef.current = setTimeout(() => {
+      saveDraft("auto").catch(() => undefined);
+    }, 5000);
+    return () => {
+      if (draftTimerRef.current) {
+        clearTimeout(draftTimerRef.current);
+        draftTimerRef.current = null;
+      }
+    };
+  }, [buildCurrentDraftPayload, context?.machine?.tag, draftLoading, saveDraft]);
 
   /* ===== Derivados ===== */
   const hasNC = useMemo(() => Object.values(itemsState).some((i) => i.resultado === "NC"), [itemsState]);
@@ -162,6 +448,20 @@ export default function InspectionPage() {
     }
     return set;
   }, [context?.openIssues]);
+
+  const draftStatusMessage = useMemo(() => {
+    if (draftSaving) return "Salvando rascunho...";
+    if (autoSavingDraft) return "Salvando rascunho automaticamente...";
+    if (draftLoading) return "Carregando rascunho...";
+    if (lastDraftUpdatedAt) {
+      try {
+        return `Rascunho salvo em ${new Date(lastDraftUpdatedAt).toLocaleString("pt-BR")}`;
+      } catch {
+        return "Rascunho salvo.";
+      }
+    }
+    return "Rascunho automático ativo.";
+  }, [autoSavingDraft, draftLoading, draftSaving, lastDraftUpdatedAt]);
 
   /* ===== Handlers (mesmos nomes/contratos) ===== */
   const handleResultadoChange = useCallback((itemId: string, value: "C" | "NC" | "NA") => {
@@ -184,6 +484,22 @@ export default function InspectionPage() {
     setResolveIssues((prev) => ({ ...prev, [issueId]: checked }));
   }, []);
 
+  const handleSignatureEnd = useCallback(() => {
+    setSignatureTouched(true);
+    if (signatureRef.current?.isEmpty && signatureRef.current.isEmpty()) {
+      setSignatureDataUrl(null);
+      return;
+    }
+    if (signatureRef.current?.toDataURL) {
+      try {
+        const dataUrl = signatureRef.current.toDataURL("image/png");
+        setSignatureDataUrl(dataUrl);
+      } catch {
+        // ignore export errors
+      }
+    }
+  }, []);
+
   const submitInspection = useCallback(
     async (mode: "save" | "save-new") => {
       if (!context?.machine?.tag) { setFeedback({ type: "error", message: "Máquina sem TAG configurada." }); return; }
@@ -203,6 +519,8 @@ export default function InspectionPage() {
         let assinaturaDataUrl: string | undefined;
         if (signatureRef.current?.isEmpty && !signatureRef.current.isEmpty()) {
           assinaturaDataUrl = signatureRef.current.toDataURL("image/png");
+        } else if (signatureDataUrl) {
+          assinaturaDataUrl = signatureDataUrl;
         }
         const resolveIds = Object.entries(resolveIssues).filter(([, c]) => c).map(([id]) => id);
 
@@ -222,6 +540,16 @@ export default function InspectionPage() {
         const inspectionId = data?.id ? String(data.id) : null;
         if (inspectionId) setLastInspectionId(inspectionId);
 
+        await fetch(`/api/inspecoes/drafts/${encodeURIComponent(context.machine.tag)}`, { method: "DELETE" }).catch(() => undefined);
+        lastDraftPayloadRef.current = null;
+        setLastDraftUpdatedAt(null);
+        setDraftFeedback(null);
+        setDraftError(null);
+        if (draftTimerRef.current) {
+          clearTimeout(draftTimerRef.current);
+          draftTimerRef.current = null;
+        }
+
         refreshContext();
         if (mode === "save") {
           router.replace(`/inspecao/${encodeURIComponent(context.machine.tag)}?ok=1${inspectionId ? `&id=${inspectionId}` : ""}`);
@@ -235,7 +563,19 @@ export default function InspectionPage() {
         setFeedback({ type: "error", message: err instanceof Error && err.message ? err.message : "Falha ao salvar inspeção." });
       } finally { setSaving(false); setSavingAction(null); }
     },
-    [context, itemsState, observacoes, osNumero, refreshContext, resetForm, resolveIssues, router, saving, sortedItems]
+    [
+      context,
+      itemsState,
+      observacoes,
+      osNumero,
+      refreshContext,
+      resetForm,
+      resolveIssues,
+      router,
+      saving,
+      signatureDataUrl,
+      sortedItems,
+    ]
   );
 
   /* ===== Render ===== */
@@ -298,6 +638,22 @@ export default function InspectionPage() {
             {feedback.message}
           </div>
         )}
+        {draftFeedback && (
+          <div
+            className={`rounded-md border px-4 py-3 text-sm ${
+              draftFeedback.type === "success"
+                ? "border-blue-200 bg-blue-50 text-blue-700"
+                : "border-red-200 bg-red-50 text-red-700"
+            }`}
+          >
+            {draftFeedback.message}
+          </div>
+        )}
+        {draftError && !draftFeedback && (
+          <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            {draftError}
+          </div>
+        )}
       </header>
 
       {/* Identificação da máquina (visual novo) */}
@@ -352,15 +708,22 @@ export default function InspectionPage() {
           <div className="h-40 w-full overflow-hidden rounded-md border border-dashed border-gray-300 bg-gray-50">
             {typeof window !== "undefined" && (
               <SignatureCanvas
-                ref={signatureRef} penColor="#111827" backgroundColor="transparent"
-                onEnd={() => setSignatureTouched(true)} canvasProps={{ className: "h-full w-full" }}
+                ref={signatureRef}
+                penColor="#111827"
+                backgroundColor="transparent"
+                onEnd={handleSignatureEnd}
+                canvasProps={{ className: "h-full w-full" }}
               />
             )}
           </div>
           <div className="flex items-center gap-3 text-sm">
             <button
               type="button"
-              onClick={() => { signatureRef.current?.clear?.(); setSignatureTouched(false); }}
+              onClick={() => {
+                signatureRef.current?.clear?.();
+                setSignatureTouched(false);
+                setSignatureDataUrl(null);
+              }}
               className="inline-flex items-center justify-center rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-600 transition hover:bg-gray-100"
             >
               Limpar assinatura
@@ -503,35 +866,53 @@ export default function InspectionPage() {
         </section>
       )}
 
-      {/* Footer fixo com ações (mesmo fluxo) */}
-      <footer className="sticky bottom-0 left-0 right-0 z-10 -mx-4 border-t border-gray-200 bg-white/90 px-4 py-4 backdrop-blur">
-        <div className="mx-auto flex max-w-5xl flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div className="flex items-center gap-3">
+      {/* Footer com ações (mesmo fluxo) */}
+      <footer className="mt-8 border-t border-gray-200 bg-white px-4 py-4">
+        <div className="mx-auto flex max-w-5xl flex-col gap-4 md:flex-row md:items-start md:justify-between">
+          <div className="flex flex-col gap-2 text-sm text-gray-600">
             <a
               href={lastInspectionId ? `/api/inspecoes/${lastInspectionId}/pdf` : "#"}
-              target="_blank" rel="noreferrer"
-              className={`inline-flex items-center justify-center rounded-md border px-4 py-2 text-sm font-medium transition ${
-                lastInspectionId ? "border-blue-600 bg-blue-50 text-blue-700 hover:bg-blue-100"
-                : "cursor-not-allowed border-gray-200 bg-gray-100 text-gray-400"
-              }`} aria-disabled={!lastInspectionId}>
+              target="_blank"
+              rel="noreferrer"
+              className={`inline-flex w-fit items-center justify-center rounded-md border px-4 py-2 text-sm font-medium transition ${
+                lastInspectionId
+                  ? "border-blue-600 bg-blue-50 text-blue-700 hover:bg-blue-100"
+                  : "cursor-not-allowed border-gray-200 bg-gray-100 text-gray-400"
+              }`}
+              aria-disabled={!lastInspectionId}
+            >
               Gerar PDF
             </a>
+            <p className="text-xs text-gray-500">{draftStatusMessage}</p>
+            <p className="text-xs text-gray-400">Fotos anexadas não são salvas nos rascunhos automáticos.</p>
           </div>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <button
-              type="button" disabled={saving}
-              onClick={() => submitInspection("save")}
-              className="inline-flex items-center justify-center rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {saving && savingAction === "save" ? "Salvando..." : "Salvar"}
-            </button>
-            <button
-              type="button" disabled={saving}
-              onClick={() => submitInspection("save-new")}
-              className="inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {saving && savingAction === "save-new" ? "Salvando..." : "Salvar & Nova"}
-            </button>
+          <div className="flex flex-col gap-2 md:items-end">
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
+              <button
+                type="button"
+                onClick={handleManualDraftSave}
+                disabled={draftSaving || saving || draftLoading}
+                className="inline-flex items-center justify-center rounded-md bg-amber-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {draftSaving ? "Salvando..." : "Salvar rascunho"}
+              </button>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => submitInspection("save")}
+                className="inline-flex items-center justify-center rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {saving && savingAction === "save" ? "Salvando..." : "Salvar"}
+              </button>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => submitInspection("save-new")}
+                className="inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {saving && savingAction === "save-new" ? "Salvando..." : "Salvar & Nova"}
+              </button>
+            </div>
           </div>
         </div>
       </footer>

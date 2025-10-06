@@ -18,6 +18,21 @@ type MachineRecord = {
   fotoUrl: string | null;
 };
 
+type DraftSummary = {
+  id: string;
+  machineId: string | null;
+  machineTag: string | null;
+  machineNome: string | null;
+  machineSetor: string | null;
+  machineUnidade: string | null;
+  templateId: string | null;
+  templateNome: string | null;
+  answeredItens: number;
+  totalItens: number;
+  progressPercent: number;
+  updatedAt: string | null;
+};
+
 export default function HomeMaint() {
   const router = useRouter();
   const [sessionLoading, setSessionLoading] = useState(true);
@@ -26,8 +41,11 @@ export default function HomeMaint() {
   const [machinesError, setMachinesError] = useState<string | null>(null);
   const [session, setSession] = useState<MaintSessionInfo | null>(null);
   const [machines, setMachines] = useState<MachineRecord[]>([]);
+  const [drafts, setDrafts] = useState<DraftSummary[]>([]);
   const [searchTag, setSearchTag] = useState("");
   const [logoutLoading, setLogoutLoading] = useState(false);
+  const [draftsLoading, setDraftsLoading] = useState(true);
+  const [draftsError, setDraftsError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -114,6 +132,68 @@ export default function HomeMaint() {
     };
   }, [session]);
 
+  useEffect(() => {
+    let cancelled = false;
+    async function loadDrafts() {
+      if (!session) {
+        setDrafts([]);
+        setDraftsLoading(false);
+        setDraftsError(null);
+        return;
+      }
+      setDraftsLoading(true);
+      setDraftsError(null);
+      try {
+        const response = await fetch("/api/inspecoes/drafts", { cache: "no-store" });
+        if (response.status === 401) {
+          window.location.href = "/login";
+          return;
+        }
+        if (!response.ok) {
+          const payload = await response.json().catch(() => null);
+          throw new Error(typeof payload?.error === "string" ? payload.error : "Falha ao carregar rascunhos");
+        }
+        const data = await response.json();
+        if (!cancelled) {
+          const normalized = Array.isArray(data)
+            ? (data as DraftSummary[]).map(draft => ({
+                id: String(draft.id ?? ""),
+                machineId: draft.machineId ?? null,
+                machineTag: draft.machineTag ?? null,
+                machineNome: draft.machineNome ?? null,
+                machineSetor: draft.machineSetor ?? null,
+                machineUnidade: draft.machineUnidade ?? null,
+                templateId: draft.templateId ?? null,
+                templateNome: draft.templateNome ?? null,
+                answeredItens: Number.isFinite(draft.answeredItens) ? Number(draft.answeredItens) : 0,
+                totalItens: Number.isFinite(draft.totalItens) ? Number(draft.totalItens) : 0,
+                progressPercent:
+                  typeof draft.progressPercent === "number" && Number.isFinite(draft.progressPercent)
+                    ? Math.max(0, Math.min(100, Math.round(draft.progressPercent)))
+                    : 0,
+                updatedAt: draft.updatedAt ?? null,
+              }))
+            : [];
+          setDrafts(normalized);
+        }
+      } catch (err: unknown) {
+        if (!cancelled) {
+          const message = err instanceof Error && err.message ? err.message : "Falha ao carregar rascunhos";
+          setDraftsError(message);
+          setDrafts([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setDraftsLoading(false);
+        }
+      }
+    }
+    loadDrafts();
+    return () => {
+      cancelled = true;
+    };
+  }, [session]);
+
   const greeting = useMemo(() => {
     if (!session) return null;
     const nome = session.nome ? String(session.nome) : "";
@@ -136,6 +216,14 @@ export default function HomeMaint() {
       setLogoutLoading(false);
     }
   }, []);
+
+  const handleOpenDraft = useCallback(
+    (tag: string | null) => {
+      if (!tag) return;
+      router.push(`/inspecao/${encodeURIComponent(tag)}`);
+    },
+    [router]
+  );
 
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-8">
@@ -160,6 +248,95 @@ export default function HomeMaint() {
           </button>
         )}
       </header>
+
+      {greeting && (draftsLoading || draftsError || drafts.length > 0) && (
+        <section className="space-y-4 rounded-lg border border-blue-100 bg-white p-4 shadow-sm">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-xl font-semibold text-gray-900">Inspeções em andamento</h2>
+              <p className="text-sm text-gray-600">Continue de onde parou seus rascunhos.</p>
+            </div>
+            <span className="text-xs text-gray-500">
+              {draftsLoading ? "Carregando..." : drafts.length === 0 ? "Nenhum rascunho" : `${drafts.length} rascunho(s)`}
+            </span>
+          </div>
+          {draftsLoading ? (
+            <div className="flex gap-4 overflow-x-auto pb-2">
+              {Array.from({ length: 3 }).map((_, index) => (
+                <div
+                  key={index}
+                  className="min-w-[16rem] flex-shrink-0 rounded-lg border border-gray-200 bg-gray-100 p-4 shadow-sm"
+                >
+                  <div className="h-4 w-32 animate-pulse rounded bg-gray-300" />
+                  <div className="mt-3 h-2 w-full animate-pulse rounded bg-gray-300" />
+                  <div className="mt-2 h-2 w-2/3 animate-pulse rounded bg-gray-200" />
+                </div>
+              ))}
+            </div>
+          ) : draftsError ? (
+            <p className="text-sm text-red-600">{draftsError}</p>
+          ) : drafts.length === 0 ? (
+            <p className="text-sm text-gray-600">Nenhuma inspeção em andamento no momento.</p>
+          ) : (
+            <div className="flex gap-4 overflow-x-auto pb-2">
+              {drafts.map(draft => {
+                const progress = Math.max(
+                  0,
+                  Math.min(
+                    100,
+                    typeof draft.progressPercent === "number" && Number.isFinite(draft.progressPercent)
+                      ? Math.round(draft.progressPercent)
+                      : 0,
+                  ),
+                );
+                const answered = Number.isFinite(draft.answeredItens) ? draft.answeredItens : 0;
+                const total = Number.isFinite(draft.totalItens) ? draft.totalItens : 0;
+                const updatedLabel = draft.updatedAt ? new Date(draft.updatedAt).toLocaleString("pt-BR") : null;
+                const hasTag = Boolean(draft.machineTag);
+
+                return (
+                  <button
+                    key={draft.id}
+                    type="button"
+                    onClick={() => handleOpenDraft(draft.machineTag)}
+                    disabled={!hasTag}
+                    className={`min-w-[16rem] flex-shrink-0 rounded-lg border px-4 py-3 text-left shadow-sm transition ${
+                      hasTag
+                        ? "border-gray-200 bg-white hover:-translate-y-1 hover:border-blue-400 hover:shadow-md"
+                        : "cursor-not-allowed border-gray-200 bg-gray-100 text-gray-400"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="truncate text-sm font-semibold text-gray-900">
+                        {draft.machineNome ?? draft.machineTag ?? "Máquina"}
+                      </p>
+                      <span className="text-xs text-gray-500">TAG {draft.machineTag ?? "-"}</span>
+                    </div>
+                    <p className="mt-1 text-xs text-gray-500">
+                      {draft.machineSetor ?? "-"} • {draft.machineUnidade ?? "-"}
+                    </p>
+                    <div className="mt-3 space-y-1">
+                      <div className="flex items-center justify-between text-xs text-gray-600">
+                        <span>Progresso</span>
+                        <span>{progress}%</span>
+                      </div>
+                      <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200">
+                        <div className="h-full rounded-full bg-blue-500 transition-all" style={{ width: `${progress}%` }} />
+                      </div>
+                      <p className="text-[0.7rem] text-gray-500">
+                        {answered}/{total} itens respondidos
+                      </p>
+                      {updatedLabel && (
+                        <p className="text-[0.65rem] text-gray-400">Atualizado em {updatedLabel}</p>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      )}
 
       {greeting && (
         <section className="space-y-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
