@@ -52,140 +52,144 @@ export default function LoginPage() {
     return (
         <>
             <Head>
-                <title>Lar Cooperativa Agroindustrial - Sistema de Inspeção</title>
+                <title>Lar Cooperativa Agroindustrial - Acesso do Mantenedor</title>
                 <meta charSet="UTF-8" />
                 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
                 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
-                <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
             </Head>
-            <style jsx global>{`
-                body {
-                    font-family: 'Inter', sans-serif;
-                    background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
-                }
-                .card-shadow {
-                    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
-                }
-                .btn-primary {
-                    background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
-                    transition: all 0.3s ease;
-                }
-                .btn-primary:hover:not(:disabled) {
-                    opacity: 0.9;
-                    transform: translateY(-1px);
-                }
-            `}</style>
-            <main className="min-h-screen flex items-center justify-center p-4">
-                <div className="max-w-md w-full">
-                    {/* Cabeçalho */}
-                    <div className="text-center mb-8">
-                        <div className="flex items-center justify-center mb-4">
-                            <div className="w-12 h-12 rounded-full bg-blue-600 flex items-center justify-center mr-3">
-                                <i className="fas fa-tractor text-white text-xl"></i>
-                            </div>
-                            <h1 className="text-2xl font-bold text-gray-900">Unidade Indsutrial de Soja</h1>
-                        </div>
-                        <h2 className="text-xl font-semibold text-gray-700">Sistema de Inspeção de Rotas</h2>
-                    </div>
 
-                    {/* Card de Login */}
-                    <div className="bg-white rounded-2xl card-shadow p-8">
-                        <div className="text-center mb-6">
-                            <div className="w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center mx-auto mb-3">
-                                <i className="fas fa-user-cog text-blue-600 text-2xl"></i>
+            <main className="relative mx-auto flex min-h-screen w-full max-w-5xl items-center justify-center px-6 py-20">
+                <div className="grid w-full gap-10 lg:grid-cols-[1.1fr_0.9fr]">
+                    <section className="glass-card hidden flex-col justify-center gap-6 rounded-[36px] px-10 py-12 text-left lg:flex">
+                        <span className="surface-pill text-xs font-semibold uppercase tracking-wide text-[var(--primary)]">
+                            <i className="fas fa-route" aria-hidden />
+                            Inspeções de rota
+                        </span>
+                        <h1 className="text-4xl font-semibold leading-tight text-[var(--text)]">
+                            Conecte-se ao painel do mantenedor
+                        </h1>
+                        <p className="max-w-md text-base text-[var(--muted)]">
+                            Acompanhe as rotas planejadas, registre inspeções com fotos e mantenha o histórico sempre disponível.
+                        </p>
+                        <div className="muted-card space-y-2 text-sm text-[var(--muted)]">
+                            <div className="flex items-center gap-3">
+                                <span className="status-dot success" />
+                                Sincronização automática com o PCM
                             </div>
-                            <h3 className="text-2xl font-bold text-gray-900">Login — Mantenedor</h3>
-                            <p className="text-gray-600 mt-2">Acesso para mantenedores</p>
+                            <div className="flex items-center gap-3">
+                                <span className="status-dot warning" />
+                                Alertas instantâneos de não conformidades
+                            </div>
+                            <div className="flex items-center gap-3">
+                                <span className="status-dot" style={{ background: "var(--primary)" }} />
+                                Checklist inteligente por máquina
+                            </div>
+                        </div>
+                    </section>
+
+                    <section className="glass-card rounded-[32px] px-8 py-10 shadow-elevated">
+                        <div className="text-center">
+                            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-[color-mix(in_srgb,var(--primary)_20%,rgba(37,99,235,0.08)_80%)] text-2xl text-[var(--primary)] shadow-[0_18px_36px_-22px_rgba(37,99,235,0.5)]">
+                                <i className="fas fa-user-cog" aria-hidden />
+                            </div>
+                            <div className="mt-4 space-y-1">
+                                <h2 className="text-2xl font-semibold text-[var(--text)]">Login do mantenedor</h2>
+                                <p className="text-sm text-[var(--muted)]">Acesse com sua matrícula e senha fornecidas pelo PCM.</p>
+                            </div>
                         </div>
 
-                        <form className="space-y-5" onSubmit={handleSubmit}>
-                            <div>
-                                <label htmlFor="matricula" className="block text-sm font-medium text-gray-700 mb-2">Matrícula</label>
+                        <form className="mt-8 space-y-5" onSubmit={handleSubmit}>
+                            <div className="space-y-2">
+                                <label htmlFor="matricula" className="text-sm font-medium text-[var(--text)]">
+                                    Matrícula
+                                </label>
                                 <div className="relative">
                                     <input
                                         id="matricula"
                                         name="matricula"
                                         type="text"
                                         required
-                                        className="w-full px-4 py-3 border border-gray-300 rounded-lg placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition duration-150 ease-in-out"
+                                        className="w-full rounded-2xl border border-[color-mix(in_srgb,var(--primary)_15%,transparent_85%)] bg-[color-mix(in_srgb,var(--surface)_95%,rgba(255,255,255,0.85)_5%)] px-4 py-3 text-sm text-[var(--text)] shadow-[0_12px_32px_-24px_rgb(var(--shadow-color)/55%)] outline-none transition focus:border-[var(--primary)] focus:shadow-ring"
                                         placeholder="Digite sua matrícula"
                                         value={matricula}
                                         onChange={e => setMatricula(e.target.value)}
                                     />
-                                    <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-                                        <i className="fas fa-id-card text-gray-400"></i>
+                                    <div className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-[var(--hint)]">
+                                        <i className="fas fa-id-card" aria-hidden />
                                     </div>
                                 </div>
                             </div>
 
-                            <div>
-                                <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-2">Senha</label>
+                            <div className="space-y-2">
+                                <label htmlFor="password" className="text-sm font-medium text-[var(--text)]">
+                                    Senha
+                                </label>
                                 <div className="relative">
                                     <input
                                         id="password"
                                         name="password"
                                         type="password"
                                         required
-                                        className="w-full px-4 py-3 border border-gray-300 rounded-lg placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition duration-150 ease-in-out"
+                                        className="w-full rounded-2xl border border-[color-mix(in_srgb,var(--primary)_15%,transparent_85%)] bg-[color-mix(in_srgb,var(--surface)_95%,rgba(255,255,255,0.85)_5%)] px-4 py-3 text-sm text-[var(--text)] shadow-[0_12px_32px_-24px_rgb(var(--shadow-color)/55%)] outline-none transition focus:border-[var(--primary)] focus:shadow-ring"
                                         placeholder="Digite sua senha"
                                         value={password}
                                         onChange={e => setPassword(e.target.value)}
                                     />
-                                    <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-                                        <i className="fas fa-lock text-gray-400"></i>
+                                    <div className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-[var(--hint)]">
+                                        <i className="fas fa-lock" aria-hidden />
                                     </div>
                                 </div>
                             </div>
 
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center">
+                            <div className="flex flex-col gap-3 text-sm text-[var(--muted)] sm:flex-row sm:items-center sm:justify-between">
+                                <label className="inline-flex items-center gap-2 text-[var(--text)]">
                                     <input
                                         id="remember"
                                         name="remember"
                                         type="checkbox"
-                                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                                        className="h-4 w-4 rounded border-[color-mix(in_srgb,var(--primary)_20%,transparent_80%)] text-[var(--primary)] focus:ring-[var(--primary)]"
                                         checked={remember}
                                         onChange={e => setRemember(e.target.checked)}
                                     />
-                                    <label htmlFor="remember" className="ml-2 block text-sm text-gray-700">
-                                        Lembrar de mim
-                                    </label>
-                                </div>
-                                <a href="#" className="text-sm font-medium text-blue-600 hover:text-blue-500 transition duration-150 ease-in-out">
+                                    Lembrar de mim
+                                </label>
+                                <a href="#" className="text-[var(--primary)] transition hover:underline">
                                     Esqueceu a senha?
                                 </a>
                             </div>
 
                             <button
                                 type="submit"
-                                className="w-full py-3 px-4 rounded-lg text-white font-medium btn-primary focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition duration-150 ease-in-out"
+                                className="floating-action flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-base font-semibold transition disabled:cursor-not-allowed disabled:opacity-70"
                                 disabled={loading}
                             >
                                 {!loading && <span>Entrar</span>}
                                 {loading && (
-                                    <span>
-                                        <i className="fas fa-spinner fa-spin mr-2"></i> Entrando...
+                                    <span className="flex items-center gap-2">
+                                        <i className="fas fa-spinner fa-spin" aria-hidden /> Entrando...
                                     </span>
                                 )}
                             </button>
 
                             {message && (
-                                <div className="text-center text-sm mt-4 text-green-600">{message}</div>
+                                <div className="rounded-2xl border border-[color-mix(in_srgb,var(--success)_30%,transparent_70%)] bg-[color-mix(in_srgb,var(--success)_12%,rgba(16,185,129,0.08)_88%)] px-4 py-3 text-center text-sm font-medium text-[var(--success)]">
+                                    {message}
+                                </div>
                             )}
                             {error && (
-                                <div className="text-center text-sm mt-4 text-red-600">{error}</div>
+                                <div className="rounded-2xl border border-[color-mix(in_srgb,var(--danger)_35%,transparent_65%)] bg-[color-mix(in_srgb,var(--danger)_12%,rgba(220,38,38,0.08)_88%)] px-4 py-3 text-center text-sm font-medium text-[var(--danger)]">
+                                    {error}
+                                </div>
                             )}
                         </form>
 
-                        <div className="mt-6 pt-6 border-t border-gray-200 text-center">
-                            <p className="text-sm text-gray-600">
-                                Voltar para
-                                <Link href="/" className="font-medium text-blue-600 hover:text-blue-500 ml-1 transition duration-150 ease-in-out">
-                                    seleção de módulos
-                                </Link>
-                            </p>
+                        <div className="mt-8 flex items-center justify-center gap-2 text-sm text-[var(--muted)]">
+                            <span>Preferir outro módulo?</span>
+                            <Link href="/" className="font-medium text-[var(--primary)] hover:underline">
+                                Voltar à seleção
+                            </Link>
                         </div>
-                    </div>
+                    </section>
                 </div>
             </main>
         </>
