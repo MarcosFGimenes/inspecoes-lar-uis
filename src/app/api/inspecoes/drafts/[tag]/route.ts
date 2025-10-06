@@ -8,10 +8,19 @@ import { requireMaint } from "@/lib/guards";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const itemPhotoSchema = z.union([
+  z.string().trim().min(1),
+  z.object({
+    dataUrl: z.string().trim().min(1),
+    name: z.string().trim().max(200).optional(),
+  }),
+]);
+
 const itemSchema = z.object({
   templateItemId: z.string().trim().min(1),
   resultado: z.enum(["", "C", "NC", "NA"]).default(""),
   observacao: z.string().trim().max(4000).optional(),
+  fotos: z.array(itemPhotoSchema).max(3).optional(),
 });
 
 const payloadSchema = z.object({
@@ -33,6 +42,59 @@ function ensureDataUrl(value: string | null | undefined) {
 
 function coerceString(value: unknown) {
   return typeof value === "string" ? value : null;
+}
+
+type DraftFoto = { dataUrl: string; name: string | null };
+
+function normalizeFotosPayload(value: unknown): DraftFoto[] {
+  if (!Array.isArray(value)) return [];
+  const result: DraftFoto[] = [];
+  for (const entry of value) {
+    if (typeof entry === "string") {
+      try {
+        const dataUrl = ensureDataUrl(entry);
+        if (dataUrl) {
+          result.push({ dataUrl, name: null });
+        }
+      } catch {
+        // ignore invalid data URL
+      }
+      continue;
+    }
+    if (entry && typeof entry === "object" && "dataUrl" in entry) {
+      try {
+        const dataUrl = ensureDataUrl((entry as { dataUrl?: string }).dataUrl ?? null);
+        if (!dataUrl) {
+          continue;
+        }
+        const rawName = (entry as { name?: string }).name;
+        const name = typeof rawName === "string" && rawName.trim().length > 0 ? rawName.trim().slice(0, 200) : null;
+        result.push({ dataUrl, name });
+      } catch {
+        // ignore invalid photo entries
+      }
+    }
+  }
+  return result.slice(0, 3);
+}
+
+function extractFotosFromData(value: unknown): DraftFoto[] {
+  if (!Array.isArray(value)) return [];
+  const result: DraftFoto[] = [];
+  for (const entry of value) {
+    if (entry && typeof entry === "object") {
+      const dataUrl = coerceString((entry as Record<string, unknown>).dataUrl);
+      if (dataUrl && dataUrl.trim()) {
+        const nameValue = coerceString((entry as Record<string, unknown>).name);
+        result.push({ dataUrl, name: nameValue?.trim() ? nameValue.trim() : null });
+      }
+      continue;
+    }
+    if (typeof entry === "string" && entry.trim()) {
+      result.push({ dataUrl: entry, name: null });
+    }
+  }
+  return result.slice(0, 3);
 }
 
 function buildDraftId(maintainerId: string, machineId: string) {
@@ -133,10 +195,12 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       const entry = itensData[item.id as string] as Record<string, unknown> | undefined;
       const resultado = coerceString(entry?.resultado) ?? "";
       const observacao = coerceString(entry?.observacao) ?? "";
+      const fotos = extractFotosFromData(entry?.fotos);
       return {
         templateItemId: item.id as string,
         resultado,
         observacao,
+        fotos,
       };
     });
 
@@ -192,13 +256,14 @@ export async function PUT(req: NextRequest, context: RouteContext) {
   const resolveIssuesIds = Array.isArray(payload.resolveIssues)
     ? payload.resolveIssues.filter(id => typeof id === "string" && id.trim().length > 0)
     : [];
-  const itensMap: Record<string, { resultado: string; observacao: string | null }> = {};
+  const itensMap: Record<string, { resultado: string; observacao: string | null; fotos: DraftFoto[] }> = {};
 
   let answered = 0;
   for (const item of itens) {
     const resultado = item.resultado ?? "";
     const observacao = item.observacao?.trim() ? item.observacao.trim() : null;
-    itensMap[item.templateItemId] = { resultado, observacao };
+    const fotos = normalizeFotosPayload(item.fotos);
+    itensMap[item.templateItemId] = { resultado, observacao, fotos };
     if (resultado === "C" || resultado === "NC" || resultado === "NA") {
       answered += 1;
     }
@@ -247,6 +312,7 @@ export async function PUT(req: NextRequest, context: RouteContext) {
         templateItemId,
         resultado: value.resultado,
         observacao: value.observacao ?? "",
+        fotos: value.fotos,
       })),
       totalItens: total,
       answeredItens: answered,

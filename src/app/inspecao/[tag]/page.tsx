@@ -23,9 +23,23 @@ type TemplateInfo = { id: string; nome: string | null; imagemUrl?: string | null
 type IssueRecord = { id: string; templateItemId: string | null; descricao: string | null; osNumero: string | null; createdAt: string | null };
 type InspectionContext = { maintainer: MaintainerInfo; machine: MachineInfo; template: TemplateInfo; openIssues: IssueRecord[] };
 
-type ItemFormState = { resultado: "" | "C" | "NC" | "NA"; observacao: string; fotos: File[]; fileKey: number };
+type ItemPhotoState = {
+  id: string;
+  name: string;
+  dataUrl: string;
+  file?: File | null;
+  origin: "local" | "draft";
+};
+
+type ItemFormState = { resultado: "" | "C" | "NC" | "NA"; observacao: string; fotos: ItemPhotoState[]; fileKey: number };
 type FeedbackState = { type: "success" | "error"; message: string };
-type DraftItemState = { templateItemId: string; resultado: "" | "C" | "NC" | "NA"; observacao: string };
+type DraftItemPhotoState = { dataUrl: string; name?: string | null };
+type DraftItemState = {
+  templateItemId: string;
+  resultado: "" | "C" | "NC" | "NA";
+  observacao: string;
+  fotos: DraftItemPhotoState[];
+};
 type DraftDataState = {
   osNumero: string;
   observacoes: string;
@@ -49,6 +63,10 @@ async function fileToDataUrl(file: File) {
     reader.onerror = () => reject(reader.error ?? new Error("Falha ao ler arquivo"));
     reader.readAsDataURL(file);
   });
+}
+
+function createPhotoId() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 /* ===== Botão C/NC/N/A no novo visual (mantém handlers) ===== */
@@ -95,7 +113,19 @@ export default function InspectionPage() {
   const [saving, setSaving] = useState(false);
   const [savingAction, setSavingAction] = useState<"save" | "save-new" | null>(null);
   const [lastInspectionId, setLastInspectionId] = useState<string | null>(null);
-  const [reloadCounter, setReloadCounter] = useState(0);
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [cancelConfirmText, setCancelConfirmText] = useState("");
+  const [cancelError, setCancelError] = useState<string | null>(null);
+  const [cancelLoading, setCancelLoading] = useState(false);
+
+  const [draftLoading, setDraftLoading] = useState(false);
+  const [draftError, setDraftError] = useState<string | null>(null);
+  const [draftSaving, setDraftSaving] = useState(false);
+  const [autoSavingDraft, setAutoSavingDraft] = useState(false);
+  const [draftFeedback, setDraftFeedback] = useState<FeedbackState | null>(null);
+  const [lastDraftUpdatedAt, setLastDraftUpdatedAt] = useState<string | null>(null);
+  const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastDraftPayloadRef = useRef<string | null>(null);
 
   const [draftLoading, setDraftLoading] = useState(false);
   const [draftError, setDraftError] = useState<string | null>(null);
@@ -107,6 +137,7 @@ export default function InspectionPage() {
   const lastDraftPayloadRef = useRef<string | null>(null);
 
   const signatureRef = useRef<SignatureCanvasInstance | null>(null);
+  const cancelInputRef = useRef<HTMLInputElement | null>(null);
   const [signatureTouched, setSignatureTouched] = useState(false);
   const [signatureDataUrl, setSignatureDataUrl] = useState<string | null>(null);
 
@@ -116,13 +147,19 @@ export default function InspectionPage() {
     if (idParam) setLastInspectionId(idParam);
   }, [searchParams]);
 
+  useEffect(() => {
+    if (!showCancelModal) return;
+    const timer = setTimeout(() => {
+      cancelInputRef.current?.focus();
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [showCancelModal]);
+
   /* ===== Organização visual ===== */
   const sortedItems = useMemo(() => {
     if (!context?.template?.itens) return [] as TemplateItem[];
     return [...context.template.itens].sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0));
   }, [context?.template?.itens]);
-
-  const refreshContext = useCallback(() => setReloadCounter((p) => p + 1), []);
 
   /* ===== Carrega contexto (sem mexer na lógica) ===== */
   useEffect(() => {
@@ -155,7 +192,7 @@ export default function InspectionPage() {
     }
     loadContext();
     return () => { cancelled = true; };
-  }, [tag, reloadCounter]);
+  }, [tag]);
 
   /* ===== Reset do formulário ===== */
   const resetForm = useCallback(() => {
@@ -189,10 +226,23 @@ export default function InspectionPage() {
         if (!item.id) return;
         const saved = itemsMap.get(item.id);
         const resultado = saved?.resultado === "C" || saved?.resultado === "NC" || saved?.resultado === "NA" ? saved.resultado : "";
+        const savedFotos = Array.isArray(saved?.fotos) ? (saved?.fotos as DraftItemPhotoState[]) : [];
+        const rawSavedFotos = savedFotos.filter(foto => typeof foto?.dataUrl === "string" && foto.dataUrl.trim());
+        const fotos: ItemPhotoState[] = rawSavedFotos.slice(0, 3).map((foto, fotoIdx) => {
+          const dataUrl = String(foto.dataUrl);
+          const name = foto?.name?.trim() ? foto.name.trim()! : `Imagem ${fotoIdx + 1}`;
+          return {
+            id: createPhotoId(),
+            name,
+            dataUrl,
+            file: null,
+            origin: "draft" as const,
+          } satisfies ItemPhotoState;
+        });
         base[item.id] = {
           resultado,
           observacao: saved?.observacao ?? "",
-          fotos: [],
+          fotos,
           fileKey: now + idx,
         };
       });
@@ -231,12 +281,21 @@ export default function InspectionPage() {
           const saved = itemsMap.get(item.id as string);
           const resultado = saved?.resultado === "C" || saved?.resultado === "NC" || saved?.resultado === "NA" ? saved.resultado : "";
           const observacao = saved?.observacao?.trim() ?? "";
-          return {
-            templateItemId: item.id as string,
-            resultado,
-            observacao,
-          };
-        });
+            const rawFotos = Array.isArray(saved?.fotos)
+              ? (saved?.fotos as DraftItemPhotoState[]).filter(
+                  foto => typeof foto?.dataUrl === "string" && foto.dataUrl.trim()
+                )
+              : [];
+            return {
+              templateItemId: item.id as string,
+              resultado,
+              observacao,
+              fotos: rawFotos.slice(0, 3).map(foto => ({
+                dataUrl: String(foto.dataUrl),
+                name: foto?.name?.trim() ? foto.name.trim() : null,
+              })),
+            };
+          });
       const normalizedPayload: DraftDataState = {
         osNumero: (draft.osNumero ?? "").trim().toUpperCase(),
         observacoes: (draft.observacoes ?? "").trim(),
@@ -283,7 +342,16 @@ export default function InspectionPage() {
             osNumero: draft.osNumero ?? "",
             observacoes: draft.observacoes ?? "",
             assinaturaDataUrl: draft.assinaturaDataUrl ?? null,
-            itens: Array.isArray(draft.itens) ? draft.itens : [],
+            itens: Array.isArray(draft.itens)
+              ? draft.itens.map((item: DraftItemState) => ({
+                  templateItemId: item.templateItemId,
+                  resultado: item.resultado ?? "",
+                  observacao: item.observacao ?? "",
+                  fotos: Array.isArray(item.fotos)
+                    ? item.fotos.filter(photo => typeof photo?.dataUrl === "string" && photo.dataUrl.trim())
+                    : [],
+                }))
+              : [],
             resolveIssues: Array.isArray(draft.resolveIssues) ? draft.resolveIssues : [],
             updatedAt: draft.updatedAt ?? null,
           });
@@ -317,10 +385,20 @@ export default function InspectionPage() {
       const st = itemsState[item.id];
       const resultado = st?.resultado === "C" || st?.resultado === "NC" || st?.resultado === "NA" ? st.resultado : "";
       const observacao = st?.observacao?.trim() ?? "";
+      const fotos = Array.isArray(st?.fotos)
+        ? (st?.fotos as ItemPhotoState[])
+            .filter(foto => typeof foto?.dataUrl === "string" && foto.dataUrl.trim())
+            .slice(0, 3)
+            .map(foto => ({
+              dataUrl: foto.dataUrl,
+              name: foto.name ?? null,
+            }))
+        : [];
       itens.push({
         templateItemId: item.id,
         resultado,
         observacao,
+        fotos,
       });
     });
     const resolveIds = Object.entries(resolveIssues)
@@ -410,6 +488,54 @@ export default function InspectionPage() {
     saveDraft("manual").catch(() => undefined);
   }, [saveDraft]);
 
+  const openCancelModal = useCallback(() => {
+    if (saving || lastInspectionId) return;
+    setCancelConfirmText("");
+    setCancelError(null);
+    setShowCancelModal(true);
+  }, [lastInspectionId, saving]);
+
+  const closeCancelModal = useCallback(() => {
+    if (cancelLoading) return;
+    setShowCancelModal(false);
+    setCancelConfirmText("");
+    setCancelError(null);
+  }, [cancelLoading]);
+
+  const confirmCancelInspection = useCallback(async () => {
+    if (cancelLoading) return;
+    if (!context?.machine?.tag) {
+      setCancelError("Máquina sem TAG configurada.");
+      return;
+    }
+    if (cancelConfirmText.trim().toLowerCase() !== "cancelar") {
+      setCancelError('Digite "cancelar" para confirmar.');
+      return;
+    }
+    setCancelLoading(true);
+    try {
+      await fetch(`/api/inspecoes/drafts/${encodeURIComponent(context.machine.tag)}`, { method: "DELETE" }).catch(() => undefined);
+      if (draftTimerRef.current) {
+        clearTimeout(draftTimerRef.current);
+        draftTimerRef.current = null;
+      }
+      lastDraftPayloadRef.current = null;
+      setLastDraftUpdatedAt(null);
+      setDraftFeedback(null);
+      setDraftError(null);
+      setAutoSavingDraft(false);
+      setShowCancelModal(false);
+      setCancelConfirmText("");
+      setCancelError(null);
+      router.replace("/home");
+    } catch (err: unknown) {
+      const message = err instanceof Error && err.message ? err.message : "Não foi possível cancelar a inspeção.";
+      setCancelError(message);
+    } finally {
+      setCancelLoading(false);
+    }
+  }, [cancelConfirmText, cancelLoading, context?.machine?.tag, router]);
+
   useEffect(() => {
     if (!context?.machine?.tag || draftLoading) {
       if (draftTimerRef.current) {
@@ -472,12 +598,61 @@ export default function InspectionPage() {
     setItemsState((prev) => ({ ...prev, [itemId]: { ...(prev[itemId] ?? { resultado: "", observacao: "", fotos: [], fileKey: Date.now() }), observacao: value } }));
   }, []);
 
-  const handleFotosChange = useCallback((itemId: string, event: ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files ?? []).slice(0, 3);
-    setItemsState((prev) => ({
-      ...prev,
-      [itemId]: { ...(prev[itemId] ?? { resultado: "", observacao: "", fotos: [], fileKey: Date.now() }), fotos: files, fileKey: (prev[itemId]?.fileKey ?? Date.now()) + 1 },
-    }));
+  const handleFotosChange = useCallback(
+    (itemId: string, event: ChangeEvent<HTMLInputElement>) => {
+      const input = event.target;
+      const files = Array.from(input.files ?? []);
+      input.value = "";
+      if (!files.length) return;
+
+      Promise.all(
+        files.slice(0, 3).map(async (file) => {
+          const dataUrl = await fileToDataUrl(file);
+          return {
+            id: createPhotoId(),
+            name: file.name || "Imagem",
+            dataUrl,
+            file,
+            origin: "local" as const,
+          } satisfies ItemPhotoState;
+        })
+      )
+        .then((newPhotos) => {
+          setItemsState(prev => {
+            const prevItem = prev[itemId] ?? { resultado: "", observacao: "", fotos: [], fileKey: Date.now() };
+            const existingFotos = Array.isArray(prevItem.fotos) ? prevItem.fotos : [];
+            const combined = [...existingFotos, ...newPhotos].slice(0, 3);
+            return {
+              ...prev,
+              [itemId]: {
+                ...prevItem,
+                fotos: combined,
+                fileKey: Date.now(),
+              },
+            };
+          });
+        })
+        .catch(() => {
+          setFeedback({ type: "error", message: "Não foi possível processar as imagens selecionadas." });
+        });
+    },
+    [setFeedback]
+  );
+
+  const handleRemoveFoto = useCallback((itemId: string, fotoId: string) => {
+    setItemsState(prev => {
+      const prevItem = prev[itemId];
+      if (!prevItem) return prev;
+      const remaining = prevItem.fotos.filter(foto => foto.id !== fotoId);
+      return {
+        ...prev,
+        [itemId]: {
+          ...prevItem,
+          fotos: remaining,
+          fileKey: Date.now(),
+        },
+      };
+    });
   }, []);
 
   const handleResolveIssue = useCallback((issueId: string, checked: boolean) => {
@@ -511,7 +686,26 @@ export default function InspectionPage() {
           if (!item.id) continue;
           const st = itemsState[item.id];
           if (!st || !st.resultado) { setFeedback({ type: "error", message: "Selecione C / NC / N/A para todos os itens." }); setSaving(false); setSavingAction(null); return; }
-          const fotosBase64 = st.fotos.length ? await Promise.all(st.fotos.map(fileToDataUrl)) : undefined;
+          let fotosBase64: string[] | undefined;
+          if (st.fotos.length) {
+            const fotosValues = await Promise.all(
+              st.fotos.slice(0, 3).map(async (foto) => {
+                if (typeof foto.dataUrl === "string" && foto.dataUrl.startsWith("data:")) {
+                  return foto.dataUrl;
+                }
+                if (foto.file) {
+                  try {
+                    return await fileToDataUrl(foto.file);
+                  } catch {
+                    return null;
+                  }
+                }
+                return null;
+              })
+            );
+            const normalized = fotosValues.filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+            fotosBase64 = normalized.length ? normalized : undefined;
+          }
           payloadItems.push({ templateItemId: item.id, resultado: st.resultado, observacaoItem: st.observacao.trim() || undefined, fotos: fotosBase64 });
         }
         if (!payloadItems.length) { setFeedback({ type: "error", message: "Template sem itens configurados." }); setSaving(false); setSavingAction(null); return; }
@@ -550,15 +744,12 @@ export default function InspectionPage() {
           draftTimerRef.current = null;
         }
 
-        refreshContext();
-        if (mode === "save") {
-          router.replace(`/inspecao/${encodeURIComponent(context.machine.tag)}?ok=1${inspectionId ? `&id=${inspectionId}` : ""}`);
-        } else {
-          setFeedback({ type: "success", message: "Inspeção salva" });
-          resetForm();
-          if (inspectionId) setLastInspectionId(inspectionId);
-          window.scrollTo({ top: 0, behavior: "smooth" });
+        const params = new URLSearchParams();
+        params.set("ok", "1");
+        if (inspectionId) {
+          params.set("inspecaoId", inspectionId);
         }
+        router.replace(`/home?${params.toString()}`);
       } catch (err: unknown) {
         setFeedback({ type: "error", message: err instanceof Error && err.message ? err.message : "Falha ao salvar inspeção." });
       } finally { setSaving(false); setSavingAction(null); }
@@ -568,8 +759,6 @@ export default function InspectionPage() {
       itemsState,
       observacoes,
       osNumero,
-      refreshContext,
-      resetForm,
       resolveIssues,
       router,
       saving,
@@ -824,8 +1013,34 @@ export default function InspectionPage() {
                     </label>
 
                     {st?.fotos?.length ? (
-                      <ul className="list-disc space-y-1 pl-5 text-xs text-gray-600">
-                        {st.fotos.map((f) => <li key={f.name}>{f.name}</li>)}
+                      <ul className="flex flex-wrap gap-2 text-xs text-gray-700">
+                        {st.fotos.map(foto => (
+                          <li
+                            key={foto.id}
+                            className="flex items-center gap-2 rounded-md border border-gray-200 bg-gray-100 px-2 py-1"
+                          >
+                            <span className="max-w-[8rem] truncate" title={foto.name}>
+                              {foto.name || "Imagem anexada"}
+                            </span>
+                            <div className="flex items-center gap-1">
+                              <a
+                                href={foto.dataUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-blue-600 hover:underline"
+                              >
+                                Ver
+                              </a>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveFoto(item.id!, foto.id)}
+                                className="text-red-500 transition hover:text-red-600"
+                              >
+                                Remover
+                              </button>
+                            </div>
+                          </li>
+                        ))}
                       </ul>
                     ) : null}
                   </div>
@@ -884,21 +1099,29 @@ export default function InspectionPage() {
               Gerar PDF
             </a>
             <p className="text-xs text-gray-500">{draftStatusMessage}</p>
-            <p className="text-xs text-gray-400">Fotos anexadas não são salvas nos rascunhos automáticos.</p>
+            <p className="text-xs text-gray-400">Fotos anexadas são incluídas nos rascunhos e serão enviadas com a inspeção.</p>
           </div>
           <div className="flex flex-col gap-2 md:items-end">
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
               <button
                 type="button"
+                onClick={openCancelModal}
+                disabled={saving || draftSaving || draftLoading || cancelLoading}
+                className="inline-flex items-center justify-center rounded-md border border-red-500 px-4 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:border-red-200 disabled:text-red-300"
+              >
+                Cancelar inspeção
+              </button>
+              <button
+                type="button"
                 onClick={handleManualDraftSave}
-                disabled={draftSaving || saving || draftLoading}
+                disabled={draftSaving || saving || draftLoading || cancelLoading}
                 className="inline-flex items-center justify-center rounded-md bg-amber-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {draftSaving ? "Salvando..." : "Salvar rascunho"}
               </button>
               <button
                 type="button"
-                disabled={saving}
+                disabled={saving || cancelLoading}
                 onClick={() => submitInspection("save")}
                 className="inline-flex items-center justify-center rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
@@ -906,7 +1129,7 @@ export default function InspectionPage() {
               </button>
               <button
                 type="button"
-                disabled={saving}
+                disabled={saving || cancelLoading}
                 onClick={() => submitInspection("save-new")}
                 className="inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
@@ -916,6 +1139,46 @@ export default function InspectionPage() {
           </div>
         </div>
       </footer>
+      {showCancelModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 px-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+            <h2 className="text-lg font-semibold text-gray-900">Cancelar inspeção</h2>
+            <p className="mt-2 text-sm text-gray-600">
+              Digite <strong>cancelar</strong> para confirmar o cancelamento desta inspeção. Essa ação descarta o rascunho atual.
+            </p>
+            <input
+              ref={cancelInputRef}
+              type="text"
+              value={cancelConfirmText}
+              onChange={event => {
+                setCancelConfirmText(event.target.value);
+                if (cancelError) setCancelError(null);
+              }}
+              placeholder="Digite cancelar"
+              className="mt-4 w-full rounded-md border border-gray-300 px-3 py-2 text-sm uppercase tracking-wide text-gray-900 outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-200"
+            />
+            {cancelError && <p className="mt-2 text-sm text-red-600">{cancelError}</p>}
+            <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={closeCancelModal}
+                disabled={cancelLoading}
+                className="inline-flex items-center justify-center rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Voltar
+              </button>
+              <button
+                type="button"
+                onClick={confirmCancelInspection}
+                disabled={cancelLoading}
+                className="inline-flex items-center justify-center rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                {cancelLoading ? "Cancelando..." : "Confirmar cancelamento"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

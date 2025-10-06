@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { adminDb } from "@/lib/firebase-admin";
-import { requireAdminFromRequest } from "@/lib/guards";
+import { requireAdminFromRequest, requireMaint } from "@/lib/guards";
 import { uploadToImgbbFromDataUrl } from "@/lib/imgbb";
 import type {
   ChecklistAnswer,
@@ -121,9 +121,14 @@ function ensureChecklistResponse(docId: string, data: Record<string, unknown>): 
 }
 
 export async function GET(req: NextRequest, context: RouteContext) {
-  const authorized = await requireAdminFromRequest(req);
-  if (!authorized) {
-    return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 });
+  const isAdmin = await requireAdminFromRequest(req);
+  let maintSession: Awaited<ReturnType<typeof requireMaint>> | null = null;
+  if (!isAdmin) {
+    const maint = await requireMaint();
+    if (!maint.ok) {
+      return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: maint.status });
+    }
+    maintSession = maint;
   }
 
   const params = (await context.params) ?? {};
@@ -140,6 +145,13 @@ export async function GET(req: NextRequest, context: RouteContext) {
     }
 
     const data = docSnap.data() ?? {};
+    if (maintSession) {
+      const maintainer = (data.maintainer ?? {}) as Record<string, unknown>;
+      const ownerId = typeof maintainer?.maintId === "string" ? maintainer.maintId : null;
+      if (!ownerId || ownerId !== maintSession.store.id) {
+        return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
+      }
+    }
     const inspection = ensureChecklistResponse(docSnap.id, data);
 
     const templateId = inspection.template?.id || inspection.machine?.templateId || null;
