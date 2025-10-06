@@ -128,17 +128,34 @@ async function findMachineByTagInCollection(
   collectionName: string,
   tag: string,
 ): Promise<MachineDoc | null> {
-  const snapshot = await adminDb
-    .collection(collectionName)
-    .where("tag", "==", tag)
-    .limit(1)
-    .get();
-
-  if (snapshot.empty) {
+  const trimmedTag = tag.trim();
+  if (!trimmedTag) {
     return null;
   }
 
-  return mapMachineDoc(snapshot.docs[0]!);
+  const collectionRef = adminDb.collection(collectionName);
+
+  const snapshot = await collectionRef.where("tag", "==", trimmedTag).limit(1).get();
+
+  if (!snapshot.empty) {
+    return mapMachineDoc(snapshot.docs[0]!);
+  }
+
+  if (/^\d+$/.test(trimmedTag)) {
+    const numericTag = Number(trimmedTag);
+    if (Number.isSafeInteger(numericTag)) {
+      const numericSnapshot = await collectionRef
+        .where("tag", "==", numericTag)
+        .limit(1)
+        .get();
+
+      if (!numericSnapshot.empty) {
+        return mapMachineDoc(numericSnapshot.docs[0]!);
+      }
+    }
+  }
+
+  return null;
 }
 
 export async function findMachineByTag(tag: string): Promise<MachineDoc | null> {
