@@ -23,8 +23,31 @@ type TemplateInfo = { id: string; nome: string | null; imagemUrl?: string | null
 type IssueRecord = { id: string; templateItemId: string | null; descricao: string | null; osNumero: string | null; createdAt: string | null };
 type InspectionContext = { maintainer: MaintainerInfo; machine: MachineInfo; template: TemplateInfo; openIssues: IssueRecord[] };
 
-type ItemFormState = { resultado: "" | "C" | "NC" | "NA"; observacao: string; fotos: File[]; fileKey: number };
+type ItemPhotoState = {
+  id: string;
+  name: string;
+  dataUrl: string;
+  file?: File | null;
+  origin: "local" | "draft";
+};
+
+type ItemFormState = { resultado: "" | "C" | "NC" | "NA"; observacao: string; fotos: ItemPhotoState[]; fileKey: number };
 type FeedbackState = { type: "success" | "error"; message: string };
+type DraftItemPhotoState = { dataUrl: string; name?: string | null };
+type DraftItemState = {
+  templateItemId: string;
+  resultado: "" | "C" | "NC" | "NA";
+  observacao: string;
+  fotos: DraftItemPhotoState[];
+};
+type DraftDataState = {
+  osNumero: string;
+  observacoes: string;
+  assinaturaDataUrl: string | null;
+  itens: DraftItemState[];
+  resolveIssues: string[];
+  updatedAt?: string | null;
+};
 
 const RESULT_OPTIONS: Array<{ value: "C" | "NC" | "NA"; label: string; tone: "ok" | "nc" | "na" }> = [
   { value: "C", label: "C", tone: "ok" },
@@ -40,6 +63,10 @@ async function fileToDataUrl(file: File) {
     reader.onerror = () => reject(reader.error ?? new Error("Falha ao ler arquivo"));
     reader.readAsDataURL(file);
   });
+}
+
+function createPhotoId() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 /* ===== Botão C/NC/N/A no novo visual (mantém handlers) ===== */
@@ -86,10 +113,24 @@ export default function InspectionPage() {
   const [saving, setSaving] = useState(false);
   const [savingAction, setSavingAction] = useState<"save" | "save-new" | null>(null);
   const [lastInspectionId, setLastInspectionId] = useState<string | null>(null);
-  const [reloadCounter, setReloadCounter] = useState(0);
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [cancelConfirmText, setCancelConfirmText] = useState("");
+  const [cancelError, setCancelError] = useState<string | null>(null);
+  const [cancelLoading, setCancelLoading] = useState(false);
+
+  const [isDraftLoading, setDraftLoading] = useState(false);
+  const [draftError, setDraftError] = useState<string | null>(null);
+  const [draftSaving, setDraftSaving] = useState(false);
+  const [autoSavingDraft, setAutoSavingDraft] = useState(false);
+  const [draftFeedback, setDraftFeedback] = useState<FeedbackState | null>(null);
+  const [lastDraftUpdatedAt, setLastDraftUpdatedAt] = useState<string | null>(null);
+  const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastDraftPayloadRef = useRef<string | null>(null);
 
   const signatureRef = useRef<SignatureCanvasInstance | null>(null);
+  const cancelInputRef = useRef<HTMLInputElement | null>(null);
   const [signatureTouched, setSignatureTouched] = useState(false);
+  const [signatureDataUrl, setSignatureDataUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (searchParams?.get("ok") === "1") setFeedback({ type: "success", message: "Inspeção salva" });
@@ -97,13 +138,19 @@ export default function InspectionPage() {
     if (idParam) setLastInspectionId(idParam);
   }, [searchParams]);
 
+  useEffect(() => {
+    if (!showCancelModal) return;
+    const timer = setTimeout(() => {
+      cancelInputRef.current?.focus();
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [showCancelModal]);
+
   /* ===== Organização visual ===== */
   const sortedItems = useMemo(() => {
     if (!context?.template?.itens) return [] as TemplateItem[];
     return [...context.template.itens].sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0));
   }, [context?.template?.itens]);
-
-  const refreshContext = useCallback(() => setReloadCounter((p) => p + 1), []);
 
   /* ===== Carrega contexto (sem mexer na lógica) ===== */
   useEffect(() => {
@@ -136,20 +183,376 @@ export default function InspectionPage() {
     }
     loadContext();
     return () => { cancelled = true; };
-  }, [tag, reloadCounter]);
+  }, [tag]);
 
   /* ===== Reset do formulário ===== */
   const resetForm = useCallback(() => {
     if (!context?.template?.itens) return;
     const initial: Record<string, ItemFormState> = {};
-    context.template.itens.filter((i) => i.id).forEach((i, idx) => {
-      initial[i.id!] = { resultado: "", observacao: "", fotos: [], fileKey: Date.now() + idx };
-    });
-    setItemsState(initial); setOsNumero(""); setObservacoes(""); setResolveIssues({});
-    setSignatureTouched(false); signatureRef.current?.clear?.();
+    context.template.itens
+      .filter(i => i.id)
+      .forEach((i, idx) => {
+        initial[i.id!] = { resultado: "", observacao: "", fotos: [], fileKey: Date.now() + idx };
+      });
+    setItemsState(initial);
+    setOsNumero("");
+    setObservacoes("");
+    setResolveIssues({});
+    setDraftFeedback(null);
+    setLastDraftUpdatedAt(null);
+    lastDraftPayloadRef.current = null;
+    setSignatureTouched(false);
+    setSignatureDataUrl(null);
+    signatureRef.current?.clear?.();
   }, [context?.template?.itens]);
 
   useEffect(() => { if (context) resetForm(); }, [context, resetForm]);
+
+  const applyDraft = useCallback(
+    (draft: DraftDataState) => {
+      const itemsMap = new Map(draft.itens.map(item => [item.templateItemId, item] as const));
+      const base: Record<string, ItemFormState> = {};
+      const now = Date.now();
+      sortedItems.forEach((item, idx) => {
+        if (!item.id) return;
+        const saved = itemsMap.get(item.id);
+        const resultado = saved?.resultado === "C" || saved?.resultado === "NC" || saved?.resultado === "NA" ? saved.resultado : "";
+        const savedFotos = Array.isArray(saved?.fotos) ? (saved?.fotos as DraftItemPhotoState[]) : [];
+        const rawSavedFotos = savedFotos.filter(foto => typeof foto?.dataUrl === "string" && foto.dataUrl.trim());
+        const fotos: ItemPhotoState[] = rawSavedFotos.slice(0, 3).map((foto, fotoIdx) => {
+          const dataUrl = String(foto.dataUrl);
+          const name = foto?.name?.trim() ? foto.name.trim()! : `Imagem ${fotoIdx + 1}`;
+          return {
+            id: createPhotoId(),
+            name,
+            dataUrl,
+            file: null,
+            origin: "draft" as const,
+          } satisfies ItemPhotoState;
+        });
+        base[item.id] = {
+          resultado,
+          observacao: saved?.observacao ?? "",
+          fotos,
+          fileKey: now + idx,
+        };
+      });
+      setItemsState(base);
+      setOsNumero(draft.osNumero ?? "");
+      setObservacoes(draft.observacoes ?? "");
+      const validResolveIds = draft.resolveIssues
+        .filter(id => typeof id === "string" && id.trim().length > 0)
+        .map(id => id.trim())
+        .sort();
+      const resolveMap: Record<string, boolean> = {};
+      validResolveIds.forEach(id => {
+        resolveMap[id] = true;
+      });
+      setResolveIssues(resolveMap);
+      setDraftFeedback(null);
+      const updatedAt = draft.updatedAt ?? null;
+      setLastDraftUpdatedAt(updatedAt);
+      const signatureValue = draft.assinaturaDataUrl ?? null;
+      setSignatureDataUrl(signatureValue);
+      setSignatureTouched(!!signatureValue);
+      if (signatureValue) {
+        setTimeout(() => {
+          try {
+            signatureRef.current?.fromDataURL?.(signatureValue);
+          } catch {
+            // ignore load errors
+          }
+        }, 0);
+      } else {
+        signatureRef.current?.clear?.();
+      }
+      const normalizedItems: DraftItemState[] = sortedItems
+        .filter(item => item?.id)
+        .map(item => {
+          const saved = itemsMap.get(item.id as string);
+          const resultado = saved?.resultado === "C" || saved?.resultado === "NC" || saved?.resultado === "NA" ? saved.resultado : "";
+          const observacao = saved?.observacao?.trim() ?? "";
+            const rawFotos = Array.isArray(saved?.fotos)
+              ? (saved?.fotos as DraftItemPhotoState[]).filter(
+                  foto => typeof foto?.dataUrl === "string" && foto.dataUrl.trim()
+                )
+              : [];
+            return {
+              templateItemId: item.id as string,
+              resultado,
+              observacao,
+              fotos: rawFotos.slice(0, 3).map(foto => ({
+                dataUrl: String(foto.dataUrl),
+                name: foto?.name?.trim() ? foto.name.trim() : null,
+              })),
+            };
+          });
+      const normalizedPayload: DraftDataState = {
+        osNumero: (draft.osNumero ?? "").trim().toUpperCase(),
+        observacoes: (draft.observacoes ?? "").trim(),
+        assinaturaDataUrl: signatureValue,
+        itens: normalizedItems,
+        resolveIssues: validResolveIds,
+        updatedAt,
+      };
+      lastDraftPayloadRef.current = JSON.stringify(normalizedPayload);
+      if (draftTimerRef.current) {
+        clearTimeout(draftTimerRef.current);
+        draftTimerRef.current = null;
+      }
+    },
+    [sortedItems]
+  );
+
+  useEffect(() => {
+    if (!context?.machine?.tag) {
+      return;
+    }
+    let cancelled = false;
+    const currentTag = context.machine.tag ?? tag;
+    async function loadDraft() {
+      setDraftLoading(true);
+      setDraftError(null);
+      try {
+        const response = await fetch(`/api/inspecoes/drafts/${encodeURIComponent(currentTag)}` , {
+          cache: "no-store",
+        });
+        if (response.status === 401) {
+          window.location.href = "/login";
+          return;
+        }
+        if (!response.ok) {
+          const payload = await response.json().catch(() => null);
+          throw new Error(typeof payload?.error === "string" ? payload.error : "Falha ao carregar rascunho");
+        }
+        const data = await response.json();
+        if (cancelled) return;
+        const draft = data?.draft;
+        if (draft) {
+          applyDraft({
+            osNumero: draft.osNumero ?? "",
+            observacoes: draft.observacoes ?? "",
+            assinaturaDataUrl: draft.assinaturaDataUrl ?? null,
+            itens: Array.isArray(draft.itens)
+              ? draft.itens.map((item: DraftItemState) => ({
+                  templateItemId: item.templateItemId,
+                  resultado: item.resultado ?? "",
+                  observacao: item.observacao ?? "",
+                  fotos: Array.isArray(item.fotos)
+                    ? item.fotos.filter(photo => typeof photo?.dataUrl === "string" && photo.dataUrl.trim())
+                    : [],
+                }))
+              : [],
+            resolveIssues: Array.isArray(draft.resolveIssues) ? draft.resolveIssues : [],
+            updatedAt: draft.updatedAt ?? null,
+          });
+        } else {
+          lastDraftPayloadRef.current = null;
+          setLastDraftUpdatedAt(null);
+        }
+      } catch (err: unknown) {
+        if (!cancelled) {
+          const message = err instanceof Error && err.message ? err.message : "Falha ao carregar rascunho";
+          setDraftError(message);
+        }
+      } finally {
+        if (!cancelled) {
+          setDraftLoading(false);
+        }
+      }
+    }
+    loadDraft();
+    return () => {
+      cancelled = true;
+    };
+  }, [context?.machine?.tag, applyDraft, tag]);
+
+  const buildCurrentDraftPayload = useCallback((): DraftDataState => {
+    const normalizedOs = osNumero.trim().toUpperCase();
+    const normalizedObs = observacoes.trim();
+    const itens: DraftItemState[] = [];
+    sortedItems.forEach(item => {
+      if (!item?.id) return;
+      const st = itemsState[item.id];
+      const resultado = st?.resultado === "C" || st?.resultado === "NC" || st?.resultado === "NA" ? st.resultado : "";
+      const observacao = st?.observacao?.trim() ?? "";
+      const fotos = Array.isArray(st?.fotos)
+        ? (st?.fotos as ItemPhotoState[])
+            .filter(foto => typeof foto?.dataUrl === "string" && foto.dataUrl.trim())
+            .slice(0, 3)
+            .map(foto => ({
+              dataUrl: foto.dataUrl,
+              name: foto.name ?? null,
+            }))
+        : [];
+      itens.push({
+        templateItemId: item.id,
+        resultado,
+        observacao,
+        fotos,
+      });
+    });
+    const resolveIds = Object.entries(resolveIssues)
+      .filter(([, checked]) => checked)
+      .map(([id]) => id)
+      .sort();
+    return {
+      osNumero: normalizedOs,
+      observacoes: normalizedObs,
+      assinaturaDataUrl: signatureDataUrl ?? null,
+      itens,
+      resolveIssues: resolveIds,
+    };
+  }, [itemsState, observacoes, osNumero, resolveIssues, signatureDataUrl, sortedItems]);
+
+  const saveDraft = useCallback(
+    async (mode: "manual" | "auto") => {
+      if (!context?.machine?.tag) return;
+      const draftState = buildCurrentDraftPayload();
+      const fingerprint = JSON.stringify(draftState);
+      if (mode === "auto" && lastDraftPayloadRef.current === fingerprint) {
+        return;
+      }
+      if (mode === "manual" && lastDraftPayloadRef.current === fingerprint) {
+        setDraftFeedback({ type: "success", message: "Rascunho já está atualizado." });
+        return;
+      }
+
+      const payload = {
+        osNumero: draftState.osNumero || undefined,
+        observacoes: draftState.observacoes || undefined,
+        assinaturaDataUrl: draftState.assinaturaDataUrl,
+        itens: draftState.itens,
+        resolveIssues: draftState.resolveIssues,
+      };
+
+      try {
+        if (mode === "manual") {
+          setDraftSaving(true);
+          setDraftFeedback(null);
+        } else {
+          setAutoSavingDraft(true);
+        }
+        const response = await fetch(`/api/inspecoes/drafts/${encodeURIComponent(context.machine.tag)}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (response.status === 401) {
+          window.location.href = "/login";
+          return;
+        }
+        if (!response.ok) {
+          const payloadError = await response.json().catch(() => null);
+          throw new Error(typeof payloadError?.error === "string" ? payloadError.error : "Falha ao salvar rascunho");
+        }
+        const data = await response.json();
+        lastDraftPayloadRef.current = fingerprint;
+        const updatedAt = data?.draft?.updatedAt ?? new Date().toISOString();
+        setLastDraftUpdatedAt(updatedAt);
+        setDraftError(null);
+        if (draftTimerRef.current) {
+          clearTimeout(draftTimerRef.current);
+          draftTimerRef.current = null;
+        }
+        if (mode === "manual") {
+          setDraftFeedback({ type: "success", message: "Rascunho salvo com sucesso." });
+        }
+      } catch (err: unknown) {
+        const message = err instanceof Error && err.message ? err.message : "Falha ao salvar rascunho";
+        setDraftError(message);
+        if (mode === "manual") {
+          setDraftFeedback({ type: "error", message });
+        }
+      } finally {
+        if (mode === "manual") {
+          setDraftSaving(false);
+        } else {
+          setAutoSavingDraft(false);
+        }
+      }
+    },
+    [buildCurrentDraftPayload, context?.machine?.tag]
+  );
+
+  const handleManualDraftSave = useCallback(() => {
+    saveDraft("manual").catch(() => undefined);
+  }, [saveDraft]);
+
+  const openCancelModal = useCallback(() => {
+    if (saving || lastInspectionId) return;
+    setCancelConfirmText("");
+    setCancelError(null);
+    setShowCancelModal(true);
+  }, [lastInspectionId, saving]);
+
+  const closeCancelModal = useCallback(() => {
+    if (cancelLoading) return;
+    setShowCancelModal(false);
+    setCancelConfirmText("");
+    setCancelError(null);
+  }, [cancelLoading]);
+
+  const confirmCancelInspection = useCallback(async () => {
+    if (cancelLoading) return;
+    if (!context?.machine?.tag) {
+      setCancelError("Máquina sem TAG configurada.");
+      return;
+    }
+    if (cancelConfirmText.trim().toLowerCase() !== "cancelar") {
+      setCancelError('Digite "cancelar" para confirmar.');
+      return;
+    }
+    setCancelLoading(true);
+    try {
+      await fetch(`/api/inspecoes/drafts/${encodeURIComponent(context.machine.tag)}`, { method: "DELETE" }).catch(() => undefined);
+      if (draftTimerRef.current) {
+        clearTimeout(draftTimerRef.current);
+        draftTimerRef.current = null;
+      }
+      lastDraftPayloadRef.current = null;
+      setLastDraftUpdatedAt(null);
+      setDraftFeedback(null);
+      setDraftError(null);
+      setAutoSavingDraft(false);
+      setShowCancelModal(false);
+      setCancelConfirmText("");
+      setCancelError(null);
+      router.replace("/home");
+    } catch (err: unknown) {
+      const message = err instanceof Error && err.message ? err.message : "Não foi possível cancelar a inspeção.";
+      setCancelError(message);
+    } finally {
+      setCancelLoading(false);
+    }
+  }, [cancelConfirmText, cancelLoading, context?.machine?.tag, router]);
+
+  useEffect(() => {
+    if (!context?.machine?.tag || isDraftLoading) {
+      if (draftTimerRef.current) {
+        clearTimeout(draftTimerRef.current);
+        draftTimerRef.current = null;
+      }
+      return;
+    }
+    const draftState = buildCurrentDraftPayload();
+    const fingerprint = JSON.stringify(draftState);
+    if (fingerprint === lastDraftPayloadRef.current) {
+      return;
+    }
+    if (draftTimerRef.current) {
+      clearTimeout(draftTimerRef.current);
+    }
+    draftTimerRef.current = setTimeout(() => {
+      saveDraft("auto").catch(() => undefined);
+    }, 5000);
+    return () => {
+      if (draftTimerRef.current) {
+        clearTimeout(draftTimerRef.current);
+        draftTimerRef.current = null;
+      }
+    };
+  }, [buildCurrentDraftPayload, context?.machine?.tag, isDraftLoading, saveDraft]);
 
   /* ===== Derivados ===== */
   const hasNC = useMemo(() => Object.values(itemsState).some((i) => i.resultado === "NC"), [itemsState]);
@@ -163,6 +566,20 @@ export default function InspectionPage() {
     return set;
   }, [context?.openIssues]);
 
+  const draftStatusMessage = useMemo(() => {
+    if (draftSaving) return "Salvando rascunho...";
+    if (autoSavingDraft) return "Salvando rascunho automaticamente...";
+    if (isDraftLoading) return "Carregando rascunho...";
+    if (lastDraftUpdatedAt) {
+      try {
+        return `Rascunho salvo em ${new Date(lastDraftUpdatedAt).toLocaleString("pt-BR")}`;
+      } catch {
+        return "Rascunho salvo.";
+      }
+    }
+    return "Rascunho automático ativo.";
+  }, [autoSavingDraft, draftSaving, isDraftLoading, lastDraftUpdatedAt]);
+
   /* ===== Handlers (mesmos nomes/contratos) ===== */
   const handleResultadoChange = useCallback((itemId: string, value: "C" | "NC" | "NA") => {
     setItemsState((prev) => ({ ...prev, [itemId]: { ...(prev[itemId] ?? { resultado: "", observacao: "", fotos: [], fileKey: Date.now() }), resultado: value } }));
@@ -172,16 +589,81 @@ export default function InspectionPage() {
     setItemsState((prev) => ({ ...prev, [itemId]: { ...(prev[itemId] ?? { resultado: "", observacao: "", fotos: [], fileKey: Date.now() }), observacao: value } }));
   }, []);
 
-  const handleFotosChange = useCallback((itemId: string, event: ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files ?? []).slice(0, 3);
-    setItemsState((prev) => ({
-      ...prev,
-      [itemId]: { ...(prev[itemId] ?? { resultado: "", observacao: "", fotos: [], fileKey: Date.now() }), fotos: files, fileKey: (prev[itemId]?.fileKey ?? Date.now()) + 1 },
-    }));
+  const handleFotosChange = useCallback(
+    (itemId: string, event: ChangeEvent<HTMLInputElement>) => {
+      const input = event.target;
+      const files = Array.from(input.files ?? []);
+      input.value = "";
+      if (!files.length) return;
+
+      Promise.all(
+        files.slice(0, 3).map(async (file) => {
+          const dataUrl = await fileToDataUrl(file);
+          return {
+            id: createPhotoId(),
+            name: file.name || "Imagem",
+            dataUrl,
+            file,
+            origin: "local" as const,
+          } satisfies ItemPhotoState;
+        })
+      )
+        .then((newPhotos) => {
+          setItemsState(prev => {
+            const prevItem = prev[itemId] ?? { resultado: "", observacao: "", fotos: [], fileKey: Date.now() };
+            const existingFotos = Array.isArray(prevItem.fotos) ? prevItem.fotos : [];
+            const combined = [...existingFotos, ...newPhotos].slice(0, 3);
+            return {
+              ...prev,
+              [itemId]: {
+                ...prevItem,
+                fotos: combined,
+                fileKey: Date.now(),
+              },
+            };
+          });
+        })
+        .catch(() => {
+          setFeedback({ type: "error", message: "Não foi possível processar as imagens selecionadas." });
+        });
+    },
+    [setFeedback]
+  );
+
+  const handleRemoveFoto = useCallback((itemId: string, fotoId: string) => {
+    setItemsState(prev => {
+      const prevItem = prev[itemId];
+      if (!prevItem) return prev;
+      const remaining = prevItem.fotos.filter(foto => foto.id !== fotoId);
+      return {
+        ...prev,
+        [itemId]: {
+          ...prevItem,
+          fotos: remaining,
+          fileKey: Date.now(),
+        },
+      };
+    });
   }, []);
 
   const handleResolveIssue = useCallback((issueId: string, checked: boolean) => {
     setResolveIssues((prev) => ({ ...prev, [issueId]: checked }));
+  }, []);
+
+  const handleSignatureEnd = useCallback(() => {
+    setSignatureTouched(true);
+    if (signatureRef.current?.isEmpty && signatureRef.current.isEmpty()) {
+      setSignatureDataUrl(null);
+      return;
+    }
+    if (signatureRef.current?.toDataURL) {
+      try {
+        const dataUrl = signatureRef.current.toDataURL("image/png");
+        setSignatureDataUrl(dataUrl);
+      } catch {
+        // ignore export errors
+      }
+    }
   }, []);
 
   const submitInspection = useCallback(
@@ -195,7 +677,26 @@ export default function InspectionPage() {
           if (!item.id) continue;
           const st = itemsState[item.id];
           if (!st || !st.resultado) { setFeedback({ type: "error", message: "Selecione C / NC / N/A para todos os itens." }); setSaving(false); setSavingAction(null); return; }
-          const fotosBase64 = st.fotos.length ? await Promise.all(st.fotos.map(fileToDataUrl)) : undefined;
+          let fotosBase64: string[] | undefined;
+          if (st.fotos.length) {
+            const fotosValues = await Promise.all(
+              st.fotos.slice(0, 3).map(async (foto) => {
+                if (typeof foto.dataUrl === "string" && foto.dataUrl.startsWith("data:")) {
+                  return foto.dataUrl;
+                }
+                if (foto.file) {
+                  try {
+                    return await fileToDataUrl(foto.file);
+                  } catch {
+                    return null;
+                  }
+                }
+                return null;
+              })
+            );
+            const normalized = fotosValues.filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+            fotosBase64 = normalized.length ? normalized : undefined;
+          }
           payloadItems.push({ templateItemId: item.id, resultado: st.resultado, observacaoItem: st.observacao.trim() || undefined, fotos: fotosBase64 });
         }
         if (!payloadItems.length) { setFeedback({ type: "error", message: "Template sem itens configurados." }); setSaving(false); setSavingAction(null); return; }
@@ -203,6 +704,8 @@ export default function InspectionPage() {
         let assinaturaDataUrl: string | undefined;
         if (signatureRef.current?.isEmpty && !signatureRef.current.isEmpty()) {
           assinaturaDataUrl = signatureRef.current.toDataURL("image/png");
+        } else if (signatureDataUrl) {
+          assinaturaDataUrl = signatureDataUrl;
         }
         const resolveIds = Object.entries(resolveIssues).filter(([, c]) => c).map(([id]) => id);
 
@@ -222,20 +725,37 @@ export default function InspectionPage() {
         const inspectionId = data?.id ? String(data.id) : null;
         if (inspectionId) setLastInspectionId(inspectionId);
 
-        refreshContext();
-        if (mode === "save") {
-          router.replace(`/inspecao/${encodeURIComponent(context.machine.tag)}?ok=1${inspectionId ? `&id=${inspectionId}` : ""}`);
-        } else {
-          setFeedback({ type: "success", message: "Inspeção salva" });
-          resetForm();
-          if (inspectionId) setLastInspectionId(inspectionId);
-          window.scrollTo({ top: 0, behavior: "smooth" });
+        await fetch(`/api/inspecoes/drafts/${encodeURIComponent(context.machine.tag)}`, { method: "DELETE" }).catch(() => undefined);
+        lastDraftPayloadRef.current = null;
+        setLastDraftUpdatedAt(null);
+        setDraftFeedback(null);
+        setDraftError(null);
+        if (draftTimerRef.current) {
+          clearTimeout(draftTimerRef.current);
+          draftTimerRef.current = null;
         }
+
+        const params = new URLSearchParams();
+        params.set("ok", "1");
+        if (inspectionId) {
+          params.set("inspecaoId", inspectionId);
+        }
+        router.replace(`/home?${params.toString()}`);
       } catch (err: unknown) {
         setFeedback({ type: "error", message: err instanceof Error && err.message ? err.message : "Falha ao salvar inspeção." });
       } finally { setSaving(false); setSavingAction(null); }
     },
-    [context, itemsState, observacoes, osNumero, refreshContext, resetForm, resolveIssues, router, saving, sortedItems]
+    [
+      context,
+      itemsState,
+      observacoes,
+      osNumero,
+      resolveIssues,
+      router,
+      saving,
+      signatureDataUrl,
+      sortedItems,
+    ]
   );
 
   /* ===== Render ===== */
@@ -298,6 +818,22 @@ export default function InspectionPage() {
             {feedback.message}
           </div>
         )}
+        {draftFeedback && (
+          <div
+            className={`rounded-md border px-4 py-3 text-sm ${
+              draftFeedback.type === "success"
+                ? "border-blue-200 bg-blue-50 text-blue-700"
+                : "border-red-200 bg-red-50 text-red-700"
+            }`}
+          >
+            {draftFeedback.message}
+          </div>
+        )}
+        {draftError && !draftFeedback && (
+          <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            {draftError}
+          </div>
+        )}
       </header>
 
       {/* Identificação da máquina (visual novo) */}
@@ -352,15 +888,22 @@ export default function InspectionPage() {
           <div className="h-40 w-full overflow-hidden rounded-md border border-dashed border-gray-300 bg-gray-50">
             {typeof window !== "undefined" && (
               <SignatureCanvas
-                ref={signatureRef} penColor="#111827" backgroundColor="transparent"
-                onEnd={() => setSignatureTouched(true)} canvasProps={{ className: "h-full w-full" }}
+                ref={signatureRef}
+                penColor="#111827"
+                backgroundColor="transparent"
+                onEnd={handleSignatureEnd}
+                canvasProps={{ className: "h-full w-full" }}
               />
             )}
           </div>
           <div className="flex items-center gap-3 text-sm">
             <button
               type="button"
-              onClick={() => { signatureRef.current?.clear?.(); setSignatureTouched(false); }}
+              onClick={() => {
+                signatureRef.current?.clear?.();
+                setSignatureTouched(false);
+                setSignatureDataUrl(null);
+              }}
               className="inline-flex items-center justify-center rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-600 transition hover:bg-gray-100"
             >
               Limpar assinatura
@@ -461,8 +1004,34 @@ export default function InspectionPage() {
                     </label>
 
                     {st?.fotos?.length ? (
-                      <ul className="list-disc space-y-1 pl-5 text-xs text-gray-600">
-                        {st.fotos.map((f) => <li key={f.name}>{f.name}</li>)}
+                      <ul className="flex flex-wrap gap-2 text-xs text-gray-700">
+                        {st.fotos.map(foto => (
+                          <li
+                            key={foto.id}
+                            className="flex items-center gap-2 rounded-md border border-gray-200 bg-gray-100 px-2 py-1"
+                          >
+                            <span className="max-w-[8rem] truncate" title={foto.name}>
+                              {foto.name || "Imagem anexada"}
+                            </span>
+                            <div className="flex items-center gap-1">
+                              <a
+                                href={foto.dataUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-blue-600 hover:underline"
+                              >
+                                Ver
+                              </a>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveFoto(item.id!, foto.id)}
+                                className="text-red-500 transition hover:text-red-600"
+                              >
+                                Remover
+                              </button>
+                            </div>
+                          </li>
+                        ))}
                       </ul>
                     ) : null}
                   </div>
@@ -503,38 +1072,104 @@ export default function InspectionPage() {
         </section>
       )}
 
-      {/* Footer fixo com ações (mesmo fluxo) */}
-      <footer className="sticky bottom-0 left-0 right-0 z-10 -mx-4 border-t border-gray-200 bg-white/90 px-4 py-4 backdrop-blur">
-        <div className="mx-auto flex max-w-5xl flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div className="flex items-center gap-3">
+      {/* Footer com ações (mesmo fluxo) */}
+      <footer className="mt-8 border-t border-gray-200 bg-white px-4 py-4">
+        <div className="mx-auto flex max-w-5xl flex-col gap-4 md:flex-row md:items-start md:justify-between">
+          <div className="flex flex-col gap-2 text-sm text-gray-600">
             <a
               href={lastInspectionId ? `/api/inspecoes/${lastInspectionId}/pdf` : "#"}
-              target="_blank" rel="noreferrer"
-              className={`inline-flex items-center justify-center rounded-md border px-4 py-2 text-sm font-medium transition ${
-                lastInspectionId ? "border-blue-600 bg-blue-50 text-blue-700 hover:bg-blue-100"
-                : "cursor-not-allowed border-gray-200 bg-gray-100 text-gray-400"
-              }`} aria-disabled={!lastInspectionId}>
+              target="_blank"
+              rel="noreferrer"
+              className={`inline-flex w-fit items-center justify-center rounded-md border px-4 py-2 text-sm font-medium transition ${
+                lastInspectionId
+                  ? "border-blue-600 bg-blue-50 text-blue-700 hover:bg-blue-100"
+                  : "cursor-not-allowed border-gray-200 bg-gray-100 text-gray-400"
+              }`}
+              aria-disabled={!lastInspectionId}
+            >
               Gerar PDF
             </a>
+            <p className="text-xs text-gray-500">{draftStatusMessage}</p>
+            <p className="text-xs text-gray-400">Fotos anexadas são incluídas nos rascunhos e serão enviadas com a inspeção.</p>
           </div>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <button
-              type="button" disabled={saving}
-              onClick={() => submitInspection("save")}
-              className="inline-flex items-center justify-center rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {saving && savingAction === "save" ? "Salvando..." : "Salvar"}
-            </button>
-            <button
-              type="button" disabled={saving}
-              onClick={() => submitInspection("save-new")}
-              className="inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {saving && savingAction === "save-new" ? "Salvando..." : "Salvar & Nova"}
-            </button>
+          <div className="flex flex-col gap-2 md:items-end">
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
+              <button
+                type="button"
+                onClick={openCancelModal}
+                disabled={saving || draftSaving || isDraftLoading || cancelLoading}
+                className="inline-flex items-center justify-center rounded-md border border-red-500 px-4 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:border-red-200 disabled:text-red-300"
+              >
+                Cancelar inspeção
+              </button>
+              <button
+                type="button"
+                onClick={handleManualDraftSave}
+                disabled={draftSaving || saving || isDraftLoading || cancelLoading}
+                className="inline-flex items-center justify-center rounded-md bg-amber-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {draftSaving ? "Salvando..." : "Salvar rascunho"}
+              </button>
+              <button
+                type="button"
+                disabled={saving || cancelLoading}
+                onClick={() => submitInspection("save")}
+                className="inline-flex items-center justify-center rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {saving && savingAction === "save" ? "Salvando..." : "Salvar"}
+              </button>
+              <button
+                type="button"
+                disabled={saving || cancelLoading}
+                onClick={() => submitInspection("save-new")}
+                className="inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {saving && savingAction === "save-new" ? "Salvando..." : "Salvar & Nova"}
+              </button>
+            </div>
           </div>
         </div>
       </footer>
+      {showCancelModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 px-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+            <h2 className="text-lg font-semibold text-gray-900">Cancelar inspeção</h2>
+            <p className="mt-2 text-sm text-gray-600">
+              Digite <strong>cancelar</strong> para confirmar o cancelamento desta inspeção. Essa ação descarta o rascunho atual.
+            </p>
+            <input
+              ref={cancelInputRef}
+              type="text"
+              value={cancelConfirmText}
+              onChange={event => {
+                setCancelConfirmText(event.target.value);
+                if (cancelError) setCancelError(null);
+              }}
+              placeholder="Digite cancelar"
+              className="mt-4 w-full rounded-md border border-gray-300 px-3 py-2 text-sm uppercase tracking-wide text-gray-900 outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-200"
+            />
+            {cancelError && <p className="mt-2 text-sm text-red-600">{cancelError}</p>}
+            <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={closeCancelModal}
+                disabled={cancelLoading}
+                className="inline-flex items-center justify-center rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Voltar
+              </button>
+              <button
+                type="button"
+                onClick={confirmCancelInspection}
+                disabled={cancelLoading}
+                className="inline-flex items-center justify-center rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                {cancelLoading ? "Cancelando..." : "Confirmar cancelamento"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
