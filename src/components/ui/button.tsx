@@ -13,22 +13,22 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const variantClasses: Record<ButtonVariant, string> = {
   default:
-    "bg-[var(--primary)] text-white hover:bg-[var(--primary-700)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--primary)]",
+    "bg-gradient-to-r from-[var(--primary)] via-[var(--primary-600)] to-[color-mix(in_srgb,var(--primary)_82%,var(--primary-700)_18%)] text-white shadow-[0_18px_36px_-22px_rgba(37,99,235,0.55)] hover:shadow-elevated focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color-mix(in_srgb,var(--primary)_65%,var(--primary-700)_35%)]",
   outline:
-    "border border-[var(--border)] text-[var(--text)] hover:bg-[var(--surface)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--primary)]",
+    "border border-[color-mix(in_srgb,var(--border)_85%,transparent_15%)] bg-[color-mix(in_srgb,var(--surface)_96%,rgba(255,255,255,0.8)_4%)] text-[var(--text)] hover:bg-[color-mix(in_srgb,var(--surface)_90%,rgba(148,163,184,0.08)_10%)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--primary)]",
   ghost:
-    "text-[var(--text)] hover:bg-[var(--surface)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--primary)]",
+    "text-[var(--text)] hover:bg-[color-mix(in_srgb,var(--surface)_88%,rgba(148,163,184,0.12)_12%)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--primary)]",
   secondary:
-    "bg-[var(--surface)] text-[var(--text)] hover:bg-[color-mix(in_oklab,var(--surface),#000_5%)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--primary)]",
+    "bg-[color-mix(in_srgb,var(--surface)_92%,rgba(148,163,184,0.12)_8%)] text-[var(--text)] shadow-[0_10px_30px_-24px_rgb(var(--shadow-color)/55%)] hover:bg-[color-mix(in_srgb,var(--surface)_88%,rgba(148,163,184,0.16)_12%)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--primary)]",
   destructive:
-    "bg-[var(--danger)] text-white hover:bg-[color-mix(in_oklab,var(--danger),#000_8%)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--danger)]",
+    "bg-gradient-to-r from-[var(--danger)] to-[color-mix(in_srgb,var(--danger)_85%,#991b1b_15%)] text-white shadow-[0_18px_36px_-22px_rgba(220,38,38,0.55)] hover:shadow-elevated focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--danger)]",
 };
 
 const sizeClasses: Record<ButtonSize, string> = {
-  sm: "h-9 px-3 text-sm",
-  md: "h-10 px-4 text-sm",
-  lg: "h-11 px-6 text-base",
-  icon: "h-10 w-10",
+  sm: "h-9 rounded-xl px-3.5 text-sm",
+  md: "h-11 rounded-2xl px-4 text-sm",
+  lg: "h-12 rounded-3xl px-6 text-base",
+  icon: "h-11 w-11 rounded-2xl",
 };
 
 interface ButtonStyleOptions {
@@ -39,7 +39,7 @@ interface ButtonStyleOptions {
 
 export function buttonStyles({ variant = "default", size = "md", className }: ButtonStyleOptions = {}) {
   return cn(
-    "inline-flex items-center justify-center gap-2 rounded-md font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60",
+    "inline-flex items-center justify-center gap-2 font-semibold transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-60",
     variantClasses[variant],
     sizeClasses[size],
     className

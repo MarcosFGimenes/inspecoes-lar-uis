@@ -87,28 +87,30 @@ export default function HomeNavigation() {
   );
 
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-50 border-t border-slate-200 bg-white/95 shadow-lg backdrop-blur">
-      <div className="mx-auto flex max-w-3xl items-center justify-around px-4 py-3 text-sm font-medium text-slate-500">
-        {items.map(item => {
-          const active =
-            pathname === item.href ||
-            (item.href !== "/home" && pathname.startsWith(item.href));
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`flex min-w-[5rem] flex-col items-center gap-1 rounded-xl px-3 py-2 transition ${
-                active
-                  ? "bg-blue-50 text-blue-700 shadow-sm"
-                  : "hover:bg-slate-100"
-              }`}
-              aria-current={active ? "page" : undefined}
-            >
-              {item.icon(active)}
-              <span>{item.label}</span>
-            </Link>
-          );
-        })}
+    <nav className="pointer-events-none fixed inset-x-0 bottom-0 z-50 pb-5">
+      <div className="pointer-events-auto mx-auto w-[calc(100%-2rem)] max-w-3xl rounded-[26px] border border-[color-mix(in_srgb,var(--border)_80%,transparent_20%)] bg-[color-mix(in_srgb,var(--surface)_94%,rgba(255,255,255,0.75)_6%)] px-4 py-3 text-sm font-medium text-[var(--muted)] shadow-[0_-12px_45px_-28px_rgb(var(--shadow-color)/55%)] backdrop-blur-xl">
+        <div className="flex items-center justify-around gap-2">
+          {items.map(item => {
+            const active =
+              pathname === item.href ||
+              (item.href !== "/home" && pathname.startsWith(item.href));
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`flex min-w-[5.5rem] flex-col items-center gap-1 rounded-xl px-3 py-2 transition ${
+                  active
+                    ? "bg-[color-mix(in_srgb,var(--primary)_14%,rgba(37,99,235,0.08)_86%)] text-[var(--primary)] shadow-[0_12px_30px_-20px_rgba(37,99,235,0.45)]"
+                    : "hover:bg-[color-mix(in_srgb,var(--surface)_88%,rgba(148,163,184,0.08)_12%)]"
+                }`}
+                aria-current={active ? "page" : undefined}
+              >
+                {item.icon(active)}
+                <span className="text-xs font-semibold uppercase tracking-wide">{item.label}</span>
+              </Link>
+            );
+          })}
+        </div>
       </div>
     </nav>
   );
