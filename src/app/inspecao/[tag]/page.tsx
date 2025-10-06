@@ -866,8 +866,8 @@ export default function InspectionPage() {
         </section>
       )}
 
-      {/* Footer fixo com ações (mesmo fluxo) */}
-      <footer className="sticky bottom-0 left-0 right-0 z-10 -mx-4 border-t border-gray-200 bg-white/90 px-4 py-4 backdrop-blur">
+      {/* Footer com ações (mesmo fluxo) */}
+      <footer className="mt-8 border-t border-gray-200 bg-white px-4 py-4">
         <div className="mx-auto flex max-w-5xl flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div className="flex flex-col gap-2 text-sm text-gray-600">
             <a
