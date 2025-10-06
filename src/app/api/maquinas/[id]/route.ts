@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { adminDb } from "@/lib/firebase-admin";
 import { requireAdminFromRequest } from "@/lib/guards";
 import { machineSchema } from "@/lib/machines-schema";
+import { findMachineByTag, resolveMachineDocumentById } from "@/lib/db/machines";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,13 +21,6 @@ function resolveId(params: Record<string, string | string[] | undefined>) {
   return Array.isArray(idValue) ? idValue[0] ?? null : idValue ?? null;
 }
 
-function mapMachine(doc: FirebaseFirestore.DocumentSnapshot) {
-  const data = doc.data() ?? {};
-  const record = { id: doc.id, ...data } as Record<string, unknown>;
-  delete record.id;
-  return { id: doc.id, ...record };
-}
-
 export async function GET(req: NextRequest, context: RouteContext) {
   const authorized = await requireAdminFromRequest(req);
   if (!authorized) {
@@ -41,11 +34,11 @@ export async function GET(req: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "Missing id" }, { status: 400 });
     }
 
-    const doc = await adminDb.collection("machines").doc(id).get();
-    if (!doc.exists) {
+    const handle = await resolveMachineDocumentById(id);
+    if (!handle) {
       return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
     }
-    return NextResponse.json(mapMachine(doc));
+    return NextResponse.json(handle.data);
   } catch (err: unknown) {
     return NextResponse.json(
       { error: extractMessage(err, "INTERNAL_ERROR") },
@@ -66,9 +59,8 @@ export async function PUT(req: NextRequest, context: RouteContext) {
     return NextResponse.json({ error: "Missing id" }, { status: 400 });
   }
 
-  const docRef = adminDb.collection("machines").doc(id);
-  const snapshot = await docRef.get();
-  if (!snapshot.exists) {
+  const handle = await resolveMachineDocumentById(id);
+  if (!handle) {
     return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
   }
 
@@ -84,18 +76,14 @@ export async function PUT(req: NextRequest, context: RouteContext) {
   }
 
   try {
-    if (parsed.tag !== snapshot.data()?.tag) {
-      const duplicate = await adminDb
-        .collection("machines")
-        .where("tag", "==", parsed.tag)
-        .limit(1)
-        .get();
-      if (!duplicate.empty) {
+    if ((parsed.tag ?? "") !== (handle.data.tag ?? "")) {
+      const duplicate = await findMachineByTag(parsed.tag);
+      if (duplicate && duplicate.id !== id) {
         return NextResponse.json({ error: "TAG_DUPLICATE" }, { status: 409 });
       }
     }
 
-    await docRef.update({
+    await handle.ref.update({
       ...parsed,
       fotoUrl: parsed.fotoUrl ?? null,
     });
@@ -103,7 +91,7 @@ export async function PUT(req: NextRequest, context: RouteContext) {
     return NextResponse.json({
       id,
       ...parsed,
-      createdAt: snapshot.data()?.createdAt ?? null,
+      createdAt: handle.data.createdAt ?? null,
     });
   } catch (err: unknown) {
     return NextResponse.json(
@@ -126,7 +114,12 @@ export async function DELETE(req: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "Missing id" }, { status: 400 });
     }
 
-    await adminDb.collection("machines").doc(id).delete();
+    const handle = await resolveMachineDocumentById(id);
+    if (!handle) {
+      return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
+    }
+
+    await handle.ref.delete();
     return NextResponse.json({ ok: true });
   } catch (err: unknown) {
     return NextResponse.json(
