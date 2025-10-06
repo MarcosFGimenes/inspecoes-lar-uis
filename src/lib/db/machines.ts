@@ -19,12 +19,54 @@ export type MachineDoc = {
   [key: string]: unknown;
 };
 
-function mapMachineDoc(docSnap: FirebaseFirestore.DocumentSnapshot): MachineDoc {
+export function mapMachineDoc(docSnap: FirebaseFirestore.DocumentSnapshot): MachineDoc {
   const data = docSnap.data() ?? {};
   const record: MachineDoc = { id: docSnap.id, ...data } as MachineDoc;
   delete (record as Record<string, unknown>).id;
   record.id = docSnap.id;
   return record;
+}
+
+export type MachineDocumentHandle = {
+  ref: FirebaseFirestore.DocumentReference;
+  snapshot: FirebaseFirestore.DocumentSnapshot;
+  collection: string;
+  data: MachineDoc;
+};
+
+async function fetchMachineSnapshotById(
+  collectionName: string,
+  id: string,
+): Promise<MachineDocumentHandle | null> {
+  const ref = adminDb.collection(collectionName).doc(id);
+  const snapshot = await ref.get();
+  if (!snapshot.exists) {
+    return null;
+  }
+
+  return {
+    ref,
+    snapshot,
+    collection: collectionName,
+    data: mapMachineDoc(snapshot),
+  };
+}
+
+export async function resolveMachineDocumentById(id: string): Promise<MachineDocumentHandle | null> {
+  const primaryHandle = await fetchMachineSnapshotById(PRIMARY_COLLECTION, id);
+  if (primaryHandle) {
+    return primaryHandle;
+  }
+
+  for (const legacyCollection of LEGACY_COLLECTIONS) {
+    const legacyHandle = await fetchMachineSnapshotById(legacyCollection, id);
+    if (legacyHandle) {
+      console.debug("[machines-repo] resolved legacy machine", { id, legacyCollection });
+      return legacyHandle;
+    }
+  }
+
+  return null;
 }
 
 function chunkIds(ids: string[], size = 10): string[][] {
@@ -217,34 +259,57 @@ export async function listActiveMachines(): Promise<MachineDoc[]> {
   return combined;
 }
 
-export async function listAllMachines(limit = 100): Promise<MachineDoc[]> {
-  const snapshot = await adminDb
-    .collection(PRIMARY_COLLECTION)
-    .orderBy("createdAt", "desc")
-    .limit(limit)
-    .get();
-
+async function fetchAllMachinesFromCollection(
+  collectionName: string,
+  batchSize = 500,
+): Promise<MachineDoc[]> {
   const records: MachineDoc[] = [];
-  snapshot.forEach(docSnap => {
-    records.push(mapMachineDoc(docSnap));
-  });
+  let lastDoc: FirebaseFirestore.QueryDocumentSnapshot | null = null;
 
-  if (records.length < limit) {
-    for (const legacyCollection of LEGACY_COLLECTIONS) {
-      const legacySnapshot = await adminDb
-        .collection(legacyCollection)
-        .orderBy("createdAt", "desc")
-        .limit(limit)
-        .get();
+  while (true) {
+    let query = adminDb
+      .collection(collectionName)
+      .orderBy("createdAt", "desc")
+      .limit(batchSize);
 
-      legacySnapshot.forEach(docSnap => {
-        const record = mapMachineDoc(docSnap);
-        if (!records.some(item => item.id === record.id)) {
-          records.push(record);
-        }
-      });
+    if (lastDoc) {
+      query = query.startAfter(lastDoc);
+    }
+
+    const snapshot = await query.get();
+    if (snapshot.empty) {
+      break;
+    }
+
+    snapshot.forEach(docSnap => {
+      records.push(mapMachineDoc(docSnap));
+    });
+
+    const docs = snapshot.docs;
+    lastDoc = docs[docs.length - 1] ?? null;
+
+    if (docs.length < batchSize || !lastDoc) {
+      break;
     }
   }
 
   return records;
+}
+
+export async function listAllMachines(batchSize = 500): Promise<MachineDoc[]> {
+  const primaryRecords = await fetchAllMachinesFromCollection(PRIMARY_COLLECTION, batchSize);
+  const combined = [...primaryRecords];
+  const seenIds = new Set(primaryRecords.map(record => record.id));
+
+  for (const legacyCollection of LEGACY_COLLECTIONS) {
+    const legacyRecords = await fetchAllMachinesFromCollection(legacyCollection, batchSize);
+    for (const record of legacyRecords) {
+      if (!seenIds.has(record.id)) {
+        combined.push(record);
+        seenIds.add(record.id);
+      }
+    }
+  }
+
+  return combined;
 }

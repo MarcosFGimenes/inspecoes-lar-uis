@@ -9,6 +9,8 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 
+const PAGE_SIZE = 25;
+
 interface MachineListItem {
   id: string;
   tag: string;
@@ -39,6 +41,7 @@ export default function MachinesPage() {
   const [machines, setMachines] = useState<MachineListItem[]>([]);
   const [templates, setTemplates] = useState<TemplateSummary[]>([]);
   const [query, setQuery] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
     let cancelled = false;
@@ -100,6 +103,25 @@ export default function MachinesPage() {
     });
   }, [machines, query]);
 
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [query]);
+
+  useEffect(() => {
+    setCurrentPage(prevPage => {
+      const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+      return prevPage > totalPages ? totalPages : prevPage;
+    });
+  }, [filtered.length]);
+
+  const goToPage = (page: number) => {
+    setCurrentPage(prevPage => {
+      const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+      const nextPage = Math.min(Math.max(page, 1), totalPages);
+      return nextPage === prevPage ? prevPage : nextPage;
+    });
+  };
+
   const content = () => {
     if (loading) {
       return (
@@ -125,36 +147,71 @@ export default function MachinesPage() {
       );
     }
 
+    const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+    const safePage = Math.max(1, Math.min(currentPage, totalPages));
+    const startIndex = (safePage - 1) * PAGE_SIZE;
+    const visibleMachines = filtered.slice(startIndex, startIndex + PAGE_SIZE);
+    const showingStart = visibleMachines.length > 0 ? startIndex + 1 : 0;
+    const showingEnd = startIndex + visibleMachines.length;
+
     return (
-      <div className="divide-y divide-[var(--border)] rounded-lg border border-[var(--border)]">
-        {filtered.map(machine => {
-          const templateLabel = machine.templateId ? templateMap.get(machine.templateId) ?? "-" : "-";
-          const createdLabel = machine.createdAt ? new Date(machine.createdAt).toLocaleString("pt-BR") : "-";
-          return (
-            <Link
-              key={machine.id}
-              href={`/admin/maquinas/${machine.id}`}
-              className="flex flex-col gap-3 p-4 transition-colors hover:bg-[var(--surface-strong)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)] focus-visible:ring-offset-2"
-            >
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-base font-semibold text-[var(--text)]">{machine.tag} — {machine.nome}</p>
-                  <p className="text-xs text-[var(--muted)]">Template: {templateLabel}</p>
-                  <p className="text-xs text-[var(--muted)]">Criada em {createdLabel}</p>
+      <div className="space-y-4">
+        <div className="divide-y divide-[var(--border)] rounded-lg border border-[var(--border)]">
+          {visibleMachines.map(machine => {
+            const templateLabel = machine.templateId ? templateMap.get(machine.templateId) ?? "-" : "-";
+            const createdLabel = machine.createdAt ? new Date(machine.createdAt).toLocaleString("pt-BR") : "-";
+            return (
+              <Link
+                key={machine.id}
+                href={`/admin/maquinas/${machine.id}`}
+                className="flex flex-col gap-3 p-4 transition-colors hover:bg-[var(--surface-strong)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)] focus-visible:ring-offset-2"
+              >
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-base font-semibold text-[var(--text)]">{machine.tag} — {machine.nome}</p>
+                    <p className="text-xs text-[var(--muted)]">Template: {templateLabel}</p>
+                    <p className="text-xs text-[var(--muted)]">Criada em {createdLabel}</p>
+                  </div>
+                  <span
+                    className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${
+                      machine.ativo
+                        ? "bg-emerald-100 text-emerald-700"
+                        : "bg-rose-100 text-rose-700"
+                    }`}
+                  >
+                    {machine.ativo ? "Ativa" : "Inativa"}
+                  </span>
                 </div>
-                <span
-                  className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${
-                    machine.ativo
-                      ? "bg-emerald-100 text-emerald-700"
-                      : "bg-rose-100 text-rose-700"
-                  }`}
-                >
-                  {machine.ativo ? "Ativa" : "Inativa"}
-                </span>
-              </div>
-            </Link>
-          );
-        })}
+              </Link>
+            );
+          })}
+        </div>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-[var(--muted)]">
+            Mostrando {showingStart}–{showingEnd} de {filtered.length} máquinas
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => goToPage(safePage - 1)}
+              disabled={safePage <= 1}
+              className={buttonStyles({ variant: "outline", size: "sm" })}
+            >
+              Anterior
+            </button>
+            <span className="text-sm text-[var(--muted)]">
+              Página {safePage} de {totalPages}
+            </span>
+            <button
+              type="button"
+              onClick={() => goToPage(safePage + 1)}
+              disabled={safePage >= totalPages}
+              className={buttonStyles({ variant: "outline", size: "sm" })}
+            >
+              Próxima
+            </button>
+          </div>
+        </div>
       </div>
     );
   };

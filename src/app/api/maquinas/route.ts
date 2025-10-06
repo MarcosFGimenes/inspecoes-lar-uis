@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const q = req.nextUrl.searchParams.get("q")?.trim().toLowerCase();
-    const records = await listAllMachines(100);
+    const records = await listAllMachines();
 
     const filtered = q
       ? records.filter(item => {
