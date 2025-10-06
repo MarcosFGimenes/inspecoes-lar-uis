@@ -127,6 +127,15 @@ export default function InspectionPage() {
   const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastDraftPayloadRef = useRef<string | null>(null);
 
+  const [draftLoading, setDraftLoading] = useState(false);
+  const [draftError, setDraftError] = useState<string | null>(null);
+  const [draftSaving, setDraftSaving] = useState(false);
+  const [autoSavingDraft, setAutoSavingDraft] = useState(false);
+  const [draftFeedback, setDraftFeedback] = useState<FeedbackState | null>(null);
+  const [lastDraftUpdatedAt, setLastDraftUpdatedAt] = useState<string | null>(null);
+  const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastDraftPayloadRef = useRef<string | null>(null);
+
   const signatureRef = useRef<SignatureCanvasInstance | null>(null);
   const cancelInputRef = useRef<HTMLInputElement | null>(null);
   const [signatureTouched, setSignatureTouched] = useState(false);
