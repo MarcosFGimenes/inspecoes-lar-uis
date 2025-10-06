@@ -118,16 +118,7 @@ export default function InspectionPage() {
   const [cancelError, setCancelError] = useState<string | null>(null);
   const [cancelLoading, setCancelLoading] = useState(false);
 
-  const [draftLoading, setDraftLoading] = useState(false);
-  const [draftError, setDraftError] = useState<string | null>(null);
-  const [draftSaving, setDraftSaving] = useState(false);
-  const [autoSavingDraft, setAutoSavingDraft] = useState(false);
-  const [draftFeedback, setDraftFeedback] = useState<FeedbackState | null>(null);
-  const [lastDraftUpdatedAt, setLastDraftUpdatedAt] = useState<string | null>(null);
-  const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastDraftPayloadRef = useRef<string | null>(null);
-
-  const [draftLoading, setDraftLoading] = useState(false);
+  const [isDraftLoading, setDraftLoading] = useState(false);
   const [draftError, setDraftError] = useState<string | null>(null);
   const [draftSaving, setDraftSaving] = useState(false);
   const [autoSavingDraft, setAutoSavingDraft] = useState(false);
@@ -537,7 +528,7 @@ export default function InspectionPage() {
   }, [cancelConfirmText, cancelLoading, context?.machine?.tag, router]);
 
   useEffect(() => {
-    if (!context?.machine?.tag || draftLoading) {
+    if (!context?.machine?.tag || isDraftLoading) {
       if (draftTimerRef.current) {
         clearTimeout(draftTimerRef.current);
         draftTimerRef.current = null;
@@ -561,7 +552,7 @@ export default function InspectionPage() {
         draftTimerRef.current = null;
       }
     };
-  }, [buildCurrentDraftPayload, context?.machine?.tag, draftLoading, saveDraft]);
+  }, [buildCurrentDraftPayload, context?.machine?.tag, isDraftLoading, saveDraft]);
 
   /* ===== Derivados ===== */
   const hasNC = useMemo(() => Object.values(itemsState).some((i) => i.resultado === "NC"), [itemsState]);
@@ -578,7 +569,7 @@ export default function InspectionPage() {
   const draftStatusMessage = useMemo(() => {
     if (draftSaving) return "Salvando rascunho...";
     if (autoSavingDraft) return "Salvando rascunho automaticamente...";
-    if (draftLoading) return "Carregando rascunho...";
+    if (isDraftLoading) return "Carregando rascunho...";
     if (lastDraftUpdatedAt) {
       try {
         return `Rascunho salvo em ${new Date(lastDraftUpdatedAt).toLocaleString("pt-BR")}`;
@@ -587,7 +578,7 @@ export default function InspectionPage() {
       }
     }
     return "Rascunho automático ativo.";
-  }, [autoSavingDraft, draftLoading, draftSaving, lastDraftUpdatedAt]);
+  }, [autoSavingDraft, draftSaving, isDraftLoading, lastDraftUpdatedAt]);
 
   /* ===== Handlers (mesmos nomes/contratos) ===== */
   const handleResultadoChange = useCallback((itemId: string, value: "C" | "NC" | "NA") => {
@@ -1106,7 +1097,7 @@ export default function InspectionPage() {
               <button
                 type="button"
                 onClick={openCancelModal}
-                disabled={saving || draftSaving || draftLoading || cancelLoading}
+                disabled={saving || draftSaving || isDraftLoading || cancelLoading}
                 className="inline-flex items-center justify-center rounded-md border border-red-500 px-4 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:border-red-200 disabled:text-red-300"
               >
                 Cancelar inspeção
@@ -1114,7 +1105,7 @@ export default function InspectionPage() {
               <button
                 type="button"
                 onClick={handleManualDraftSave}
-                disabled={draftSaving || saving || draftLoading || cancelLoading}
+                disabled={draftSaving || saving || isDraftLoading || cancelLoading}
                 className="inline-flex items-center justify-center rounded-md bg-amber-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {draftSaving ? "Salvando..." : "Salvar rascunho"}
