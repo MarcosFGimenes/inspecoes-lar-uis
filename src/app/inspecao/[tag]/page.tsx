@@ -113,6 +113,10 @@ export default function InspectionPage() {
   const [saving, setSaving] = useState(false);
   const [savingAction, setSavingAction] = useState<"save" | "save-new" | null>(null);
   const [lastInspectionId, setLastInspectionId] = useState<string | null>(null);
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [cancelConfirmText, setCancelConfirmText] = useState("");
+  const [cancelError, setCancelError] = useState<string | null>(null);
+  const [cancelLoading, setCancelLoading] = useState(false);
 
   const [draftLoading, setDraftLoading] = useState(false);
   const [draftError, setDraftError] = useState<string | null>(null);
@@ -124,6 +128,7 @@ export default function InspectionPage() {
   const lastDraftPayloadRef = useRef<string | null>(null);
 
   const signatureRef = useRef<SignatureCanvasInstance | null>(null);
+  const cancelInputRef = useRef<HTMLInputElement | null>(null);
   const [signatureTouched, setSignatureTouched] = useState(false);
   const [signatureDataUrl, setSignatureDataUrl] = useState<string | null>(null);
 
@@ -132,6 +137,14 @@ export default function InspectionPage() {
     const idParam = searchParams?.get("id");
     if (idParam) setLastInspectionId(idParam);
   }, [searchParams]);
+
+  useEffect(() => {
+    if (!showCancelModal) return;
+    const timer = setTimeout(() => {
+      cancelInputRef.current?.focus();
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [showCancelModal]);
 
   /* ===== Organização visual ===== */
   const sortedItems = useMemo(() => {
@@ -465,6 +478,54 @@ export default function InspectionPage() {
   const handleManualDraftSave = useCallback(() => {
     saveDraft("manual").catch(() => undefined);
   }, [saveDraft]);
+
+  const openCancelModal = useCallback(() => {
+    if (saving || lastInspectionId) return;
+    setCancelConfirmText("");
+    setCancelError(null);
+    setShowCancelModal(true);
+  }, [lastInspectionId, saving]);
+
+  const closeCancelModal = useCallback(() => {
+    if (cancelLoading) return;
+    setShowCancelModal(false);
+    setCancelConfirmText("");
+    setCancelError(null);
+  }, [cancelLoading]);
+
+  const confirmCancelInspection = useCallback(async () => {
+    if (cancelLoading) return;
+    if (!context?.machine?.tag) {
+      setCancelError("Máquina sem TAG configurada.");
+      return;
+    }
+    if (cancelConfirmText.trim().toLowerCase() !== "cancelar") {
+      setCancelError('Digite "cancelar" para confirmar.');
+      return;
+    }
+    setCancelLoading(true);
+    try {
+      await fetch(`/api/inspecoes/drafts/${encodeURIComponent(context.machine.tag)}`, { method: "DELETE" }).catch(() => undefined);
+      if (draftTimerRef.current) {
+        clearTimeout(draftTimerRef.current);
+        draftTimerRef.current = null;
+      }
+      lastDraftPayloadRef.current = null;
+      setLastDraftUpdatedAt(null);
+      setDraftFeedback(null);
+      setDraftError(null);
+      setAutoSavingDraft(false);
+      setShowCancelModal(false);
+      setCancelConfirmText("");
+      setCancelError(null);
+      router.replace("/home");
+    } catch (err: unknown) {
+      const message = err instanceof Error && err.message ? err.message : "Não foi possível cancelar a inspeção.";
+      setCancelError(message);
+    } finally {
+      setCancelLoading(false);
+    }
+  }, [cancelConfirmText, cancelLoading, context?.machine?.tag, router]);
 
   useEffect(() => {
     if (!context?.machine?.tag || draftLoading) {
@@ -1035,15 +1096,23 @@ export default function InspectionPage() {
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
               <button
                 type="button"
+                onClick={openCancelModal}
+                disabled={saving || draftSaving || draftLoading || cancelLoading}
+                className="inline-flex items-center justify-center rounded-md border border-red-500 px-4 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:border-red-200 disabled:text-red-300"
+              >
+                Cancelar inspeção
+              </button>
+              <button
+                type="button"
                 onClick={handleManualDraftSave}
-                disabled={draftSaving || saving || draftLoading}
+                disabled={draftSaving || saving || draftLoading || cancelLoading}
                 className="inline-flex items-center justify-center rounded-md bg-amber-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {draftSaving ? "Salvando..." : "Salvar rascunho"}
               </button>
               <button
                 type="button"
-                disabled={saving}
+                disabled={saving || cancelLoading}
                 onClick={() => submitInspection("save")}
                 className="inline-flex items-center justify-center rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
@@ -1051,7 +1120,7 @@ export default function InspectionPage() {
               </button>
               <button
                 type="button"
-                disabled={saving}
+                disabled={saving || cancelLoading}
                 onClick={() => submitInspection("save-new")}
                 className="inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
@@ -1061,6 +1130,46 @@ export default function InspectionPage() {
           </div>
         </div>
       </footer>
+      {showCancelModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 px-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+            <h2 className="text-lg font-semibold text-gray-900">Cancelar inspeção</h2>
+            <p className="mt-2 text-sm text-gray-600">
+              Digite <strong>cancelar</strong> para confirmar o cancelamento desta inspeção. Essa ação descarta o rascunho atual.
+            </p>
+            <input
+              ref={cancelInputRef}
+              type="text"
+              value={cancelConfirmText}
+              onChange={event => {
+                setCancelConfirmText(event.target.value);
+                if (cancelError) setCancelError(null);
+              }}
+              placeholder="Digite cancelar"
+              className="mt-4 w-full rounded-md border border-gray-300 px-3 py-2 text-sm uppercase tracking-wide text-gray-900 outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-200"
+            />
+            {cancelError && <p className="mt-2 text-sm text-red-600">{cancelError}</p>}
+            <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={closeCancelModal}
+                disabled={cancelLoading}
+                className="inline-flex items-center justify-center rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Voltar
+              </button>
+              <button
+                type="button"
+                onClick={confirmCancelInspection}
+                disabled={cancelLoading}
+                className="inline-flex items-center justify-center rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                {cancelLoading ? "Cancelando..." : "Confirmar cancelamento"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
