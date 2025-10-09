@@ -28,6 +28,7 @@ interface ApiAnswer {
   response: "c" | "nc" | "na";
   observation?: string | null;
   photoUrls?: string[];
+  itemOsNumero?: string | null;
 }
 
 interface ApiInspection {
@@ -85,6 +86,7 @@ interface FormItem {
   previousResponse: "c" | "nc" | "na";
   response: "c" | "nc" | "na";
   observation: string;
+  itemOsNumero: string;
   existingPhotos: string[];
   newPhotos: NewPhoto[];
 }
@@ -205,6 +207,7 @@ export default function EditInspectionPage() {
           previousResponse: response,
           response,
           observation: answer?.observation ?? "",
+          itemOsNumero: answer?.itemOsNumero ? String(answer.itemOsNumero).toUpperCase() : "",
           existingPhotos: Array.isArray(answer?.photoUrls) ? answer!.photoUrls!.filter(Boolean) : [],
           newPhotos: [],
         };
@@ -224,6 +227,7 @@ export default function EditInspectionPage() {
             previousResponse: answer.response,
             response: answer.response,
             observation: answer.observation ?? "",
+            itemOsNumero: answer.itemOsNumero ? String(answer.itemOsNumero).toUpperCase() : "",
             existingPhotos: Array.isArray(answer.photoUrls) ? answer.photoUrls.filter(Boolean) : [],
             newPhotos: [],
           });
@@ -278,6 +282,18 @@ export default function EditInspectionPage() {
       return {
         ...prev,
         items: prev.items.map(item => (item.questionId === questionId ? { ...item, observation: value } : item)),
+      };
+    });
+  }, []);
+
+  const handleItemOsChange = useCallback((questionId: string, value: string) => {
+    setForm(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        items: prev.items.map(item =>
+          item.questionId === questionId ? { ...item, itemOsNumero: value.toUpperCase() } : item
+        ),
       };
     });
   }, []);
@@ -344,6 +360,13 @@ export default function EditInspectionPage() {
         setSaveError(null);
         setSaveSuccess(null);
 
+        const missingOs = form.items.some(item => item.response === "nc" && !item.itemOsNumero.trim());
+        if (missingOs) {
+          setSaveError("Informe o Nº da O.S. para todos os itens marcados como NC.");
+          setSaving(false);
+          return;
+        }
+
         const itensPayload = form.items.map(item => {
           const photosPayload: Array<string | { dataUrl: string; name?: string } | undefined> = [];
           item.existingPhotos.forEach(url => {
@@ -357,6 +380,7 @@ export default function EditInspectionPage() {
             response: item.response,
             observation: item.observation.trim() ? item.observation.trim() : undefined,
             photoUrls: photosPayload.length > 0 ? photosPayload : undefined,
+            osNumeroItem: item.response === "nc" ? item.itemOsNumero.trim().toUpperCase() : undefined,
           };
         });
 
@@ -603,6 +627,18 @@ export default function EditInspectionPage() {
                       placeholder="Detalhe o ocorrido"
                     />
                   </label>
+
+                  {item.response === "nc" && (
+                    <label className="space-y-1 text-sm">
+                      <span className="text-[var(--muted)]">Nº da O.S. deste item</span>
+                      <Input
+                        value={item.itemOsNumero}
+                        onChange={event => handleItemOsChange(item.questionId, event.target.value)}
+                        placeholder="Informe o número da O.S."
+                        className="uppercase"
+                      />
+                    </label>
+                  )}
 
                   {item.existingPhotos.length > 0 && (
                     <div className="space-y-2">

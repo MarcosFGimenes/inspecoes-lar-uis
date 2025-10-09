@@ -35,6 +35,7 @@ const patchSchema = z.object({
         response: z.enum(["c", "nc", "na"]),
         observation: z.string().trim().optional(),
         photoUrls: z.array(itemPhotoSchema).max(5).optional(),
+        osNumeroItem: z.string().trim().min(1).optional(),
       })
     )
     .optional(),
@@ -70,6 +71,7 @@ function normalizeAnswers(data: Record<string, unknown>, templateItemsMap: Map<s
         observation: item.observation ?? null,
         photoUrls: Array.isArray(item.photoUrls) ? item.photoUrls.filter(Boolean) : [],
         recurrence: item.recurrence ?? false,
+        itemOsNumero: item.itemOsNumero ?? null,
       }));
   }
 
@@ -88,6 +90,9 @@ function normalizeAnswers(data: Record<string, unknown>, templateItemsMap: Map<s
         observation: typeof item.observacaoItem === "string" ? item.observacaoItem : null,
         photoUrls: Array.isArray(item.fotos) ? item.fotos.filter(Boolean).map(String) : [],
         recurrence: false,
+        itemOsNumero: typeof item.osNumeroItem === "string" && item.osNumeroItem.trim()
+          ? item.osNumeroItem.trim().toUpperCase()
+          : null,
       } satisfies ChecklistAnswer;
     });
 }
@@ -271,6 +276,7 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       observation: answer.observation ?? null,
       photoUrls: Array.isArray(answer.photoUrls) ? answer.photoUrls.filter(Boolean) : [],
       recurrence: answer.recurrence ?? false,
+      itemOsNumero: answer.itemOsNumero ?? null,
     }));
     const answersPersistMap = new Map(answersToPersist.map(answer => [answer.questionId, answer]));
     const itensToPersist: Array<Record<string, unknown>> = Array.isArray(data.itens)
@@ -287,11 +293,6 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
     const issuesCriadas = Array.isArray(data.issuesCriadas) ? [...(data.issuesCriadas as string[])] : [];
     const issuesResolvidas = Array.isArray(data.issuesResolvidas) ? [...(data.issuesResolvidas as string[])] : [];
 
-    const osNumeroValue =
-      typeof updates.osNumero !== "undefined"
-        ? (updates.osNumero as string | null)
-        : inspection.osNumero ?? null;
-
     if (payload.itens) {
       for (const item of payload.itens) {
         const templateItem = templateItemsMap.get(item.questionId) ?? null;
@@ -303,6 +304,10 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
           existingAnswer.questionText = templateItem.oQueChecar ?? templateItem.criterio ?? existingAnswer.questionText ?? null;
         }
         const response = item.response;
+        const osNumeroItem = item.osNumeroItem?.trim() ? item.osNumeroItem.trim().toUpperCase() : null;
+        if (response === "nc" && !osNumeroItem) {
+          return NextResponse.json({ error: "ITEM_OS_REQUIRED" }, { status: 422 });
+        }
 
         const photoUrls: string[] = [];
         if (Array.isArray(item.photoUrls)) {
@@ -326,6 +331,7 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
           if (photoUrls.length > 0 || item.photoUrls) {
             existingAnswer.photoUrls = photoUrls;
           }
+          existingAnswer.itemOsNumero = response === "nc" ? osNumeroItem : null;
         } else {
           const created = {
             questionId: item.questionId,
@@ -333,6 +339,7 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
             response,
             observation,
             photoUrls,
+            itemOsNumero: response === "nc" ? osNumeroItem : null,
           } satisfies ChecklistAnswer;
           answersToPersist.push(created);
           answersPersistMap.set(item.questionId, created);
@@ -345,12 +352,18 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
           if (photoUrls.length > 0 || item.photoUrls) {
             existingItemEntry.fotos = photoUrls;
           }
+          if (response === "nc") {
+            existingItemEntry.osNumeroItem = osNumeroItem;
+          } else if (existingItemEntry.osNumeroItem) {
+            existingItemEntry.osNumeroItem = null;
+          }
         } else {
           itensToPersist.push({
             templateItemId: item.questionId,
             resultado: response.toUpperCase(),
             observacaoItem: observation,
             fotos: photoUrls,
+            osNumeroItem: response === "nc" ? osNumeroItem : null,
           });
         }
 
@@ -369,28 +382,39 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
               };
           treatmentsMap.set(item.questionId, updatedTreatment);
 
-          if (openIssuesMap.has(item.questionId)) {
-            const issueDoc = openIssuesMap.get(item.questionId)!;
-            if (osNumeroValue && issueDoc.data()?.osNumero !== osNumeroValue) {
-              await issueDoc.ref.update({ osNumero: osNumeroValue });
+        if (openIssuesMap.has(item.questionId)) {
+          const issueDoc = openIssuesMap.get(item.questionId)!;
+          const updatesIssue: Record<string, unknown> = {};
+          if (response === "nc" && item.osNumeroItem?.trim()) {
+            const osValue = item.osNumeroItem.trim().toUpperCase();
+            if (issueDoc.data()?.osNumero !== osValue) {
+              updatesIssue.osNumero = osValue;
             }
-          } else if (inspection.machine?.machineId) {
-            const issueRef = adminDb.collection("issues").doc();
-            await issueRef.set({
-              machineId: inspection.machine.machineId,
-              tag: inspection.machine.tag ?? null,
-              templateItemId: item.questionId,
-              descricao:
-                observation ||
-                templateItem?.criterio ||
-                templateItem?.oQueChecar ||
-                "NC registrada na edição da inspeção",
-              osNumero: osNumeroValue,
-              status: "aberta",
-              abertaEmInspecaoId: id,
-              createdAt: nowIso,
-            });
-            issuesCriadas.push(issueRef.id);
+          }
+          if (photoUrls.length > 0) {
+            updatesIssue.fotos = photoUrls;
+          }
+          if (Object.keys(updatesIssue).length > 0) {
+            await issueDoc.ref.update(updatesIssue);
+          }
+        } else if (inspection.machine?.machineId) {
+          const issueRef = adminDb.collection("issues").doc();
+          await issueRef.set({
+            machineId: inspection.machine.machineId,
+            tag: inspection.machine.tag ?? null,
+            templateItemId: item.questionId,
+            descricao:
+              observation ||
+              templateItem?.criterio ||
+              templateItem?.oQueChecar ||
+              "NC registrada na edição da inspeção",
+            osNumero: response === "nc" && item.osNumeroItem?.trim() ? item.osNumeroItem.trim().toUpperCase() : null,
+            fotos: photoUrls,
+            status: "aberta",
+            abertaEmInspecaoId: id,
+            createdAt: nowIso,
+          });
+          issuesCriadas.push(issueRef.id);
           }
         } else {
           if (existingTreatment) {

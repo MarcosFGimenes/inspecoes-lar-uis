@@ -262,6 +262,11 @@ export default function MaintInspectionDetailPage() {
                     Observação: <span className="font-medium text-gray-800">{answer.observation}</span>
                   </p>
                 )}
+                {answer.itemOsNumero?.trim() && (
+                  <p className="text-xs text-gray-600">
+                    Nº da O.S. do item: <span className="font-medium text-gray-800">{answer.itemOsNumero}</span>
+                  </p>
+                )}
                 {answer.photoUrls.length > 0 && (
                   <div className="space-y-1 text-sm text-gray-700">
                     <p className="font-medium">Fotos anexadas:</p>

@@ -73,6 +73,7 @@ export async function GET(req: NextRequest) {
         templateItemId: data.templateItemId ?? null,
         descricao: data.descricao ?? null,
         osNumero: data.osNumero ?? null,
+        fotos: Array.isArray(data.fotos) ? data.fotos.filter(Boolean).map(String) : [],
         createdAt: data.createdAt ?? null,
       };
     });

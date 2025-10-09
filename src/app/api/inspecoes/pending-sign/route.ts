@@ -28,6 +28,7 @@ function normalizeAnswers(data: Record<string, unknown>): ChecklistAnswer[] {
         ...item,
         response: item.response === "nc" || item.response === "c" || item.response === "na" ? item.response : "c",
         photoUrls: Array.isArray(item.photoUrls) ? item.photoUrls.filter(Boolean) : [],
+        itemOsNumero: item.itemOsNumero ?? null,
       }));
   }
 
@@ -40,6 +41,9 @@ function normalizeAnswers(data: Record<string, unknown>): ChecklistAnswer[] {
       response: String(item.resultado || "C").toLowerCase() === "nc" ? "nc" : String(item.resultado || "C").toLowerCase() === "na" ? "na" : "c",
       observation: typeof item.observacaoItem === "string" ? item.observacaoItem : undefined,
       photoUrls: Array.isArray(item.fotos) ? item.fotos.filter(Boolean).map(String) : [],
+      itemOsNumero: typeof item.osNumeroItem === "string" && item.osNumeroItem.trim()
+        ? item.osNumeroItem.trim().toUpperCase()
+        : null,
     }));
 }
 

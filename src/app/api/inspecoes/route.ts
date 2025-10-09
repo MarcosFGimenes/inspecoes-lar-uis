@@ -24,6 +24,7 @@ const payloadSchema = z.object({
         resultado: z.enum(["C", "NC", "NA"]),
         observacaoItem: z.string().trim().optional(),
         fotos: z.array(z.string().trim().min(1)).max(3).optional(),
+        osNumeroItem: z.string().trim().min(1).optional(),
       })
     )
     .min(1),
@@ -169,11 +170,16 @@ export async function POST(req: NextRequest) {
       resultado: "C" | "NC" | "NA";
       observacaoItem: string | null;
       fotos: string[];
+      osNumeroItem: string | null;
     }> = [];
     const answersPayload: ChecklistAnswer[] = [];
     const treatmentsPayload: ChecklistNonConformityTreatment[] = [];
 
     for (const item of payload.itens) {
+      const osNumeroItem = item.osNumeroItem?.trim() ? item.osNumeroItem.trim().toUpperCase() : null;
+      if (item.resultado === "NC" && !osNumeroItem) {
+        return NextResponse.json({ error: "ITEM_OS_REQUIRED" }, { status: 422 });
+      }
       const fotosBase64 = item.fotos ? item.fotos.slice(0, 3) : [];
       const fotoUrls: string[] = [];
       for (let index = 0; index < fotosBase64.length; index += 1) {
@@ -192,6 +198,7 @@ export async function POST(req: NextRequest) {
         resultado: item.resultado,
         observacaoItem: item.observacaoItem?.trim() ? item.observacaoItem.trim() : null,
         fotos: fotoUrls,
+        osNumeroItem,
       });
 
       const templateItem = templateMap.get(item.templateItemId) ?? {};
@@ -202,6 +209,7 @@ export async function POST(req: NextRequest) {
         response,
         observation: item.observacaoItem?.trim() ? item.observacaoItem.trim() : null,
         photoUrls: fotoUrls,
+        itemOsNumero: osNumeroItem,
       });
 
       if (response === "nc") {
@@ -240,8 +248,15 @@ export async function POST(req: NextRequest) {
       }
       const existingIssue = openIssuesByTemplate.get(item.templateItemId);
       if (existingIssue) {
-        if (osNumero && existingIssue.data()?.osNumero !== osNumero) {
-          await existingIssue.ref.update({ osNumero });
+        const issueUpdates: Record<string, unknown> = {};
+        if (item.osNumeroItem && existingIssue.data()?.osNumero !== item.osNumeroItem) {
+          issueUpdates.osNumero = item.osNumeroItem;
+        }
+        if (item.fotos.length > 0) {
+          issueUpdates.fotos = item.fotos;
+        }
+        if (Object.keys(issueUpdates).length > 0) {
+          await existingIssue.ref.update(issueUpdates);
         }
         continue;
       }
@@ -254,7 +269,8 @@ export async function POST(req: NextRequest) {
         tag: machineRecord.tag ?? null,
         templateItemId: item.templateItemId,
         descricao,
-        osNumero: osNumero ?? null,
+        osNumero: item.osNumeroItem ?? null,
+        fotos: item.fotos,
         status: "aberta",
         abertaEmInspecaoId: inspectionId,
         createdAt: nowIso,

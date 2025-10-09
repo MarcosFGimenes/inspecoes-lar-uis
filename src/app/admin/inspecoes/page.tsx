@@ -38,6 +38,7 @@ interface InspectionListItem {
   signed: boolean;
   signedAt: string | null;
   pcmNome: string | null;
+  ncItems: Array<{ questionId: string; questionText: string | null; osNumero: string | null; photoUrls: string[] }>;
 }
 
 function formatDateTime(value: string | null) {
@@ -72,8 +73,34 @@ export default function AdminInspectionsPage() {
         const machine = (data.machine ?? {}) as Record<string, unknown>;
         const maintainer = (data.maintainer ?? {}) as Record<string, unknown>;
         const answers = Array.isArray(data.answers) ? (data.answers as ChecklistAnswer[]) : [];
-        const qtdNcFromAnswers = answers.filter(answer => answer?.response === "nc").length;
-        const qtdNc = typeof data.qtdNC === "number" ? data.qtdNC : qtdNcFromAnswers;
+        const itensRaw = Array.isArray(data.itens) ? (data.itens as Array<Record<string, unknown>>) : [];
+        const ncItems =
+          answers.length > 0
+            ? answers
+                .filter(answer => answer?.response === "nc")
+                .map(answer => ({
+                  questionId: answer.questionId,
+                  questionText: answer.questionText ?? null,
+                  osNumero: answer.itemOsNumero ?? null,
+                  photoUrls: Array.isArray(answer.photoUrls) ? answer.photoUrls.filter(Boolean) : [],
+                }))
+            : itensRaw
+                .filter(item => String(item.resultado ?? item.response ?? "C").toLowerCase() === "nc")
+                .map(item => ({
+                  questionId: String(item.templateItemId ?? item.questionId ?? ""),
+                  questionText:
+                    typeof item.componente === "string"
+                      ? item.componente
+                      : typeof item.criterio === "string"
+                      ? item.criterio
+                      : null,
+                  osNumero:
+                    typeof item.osNumeroItem === "string" && item.osNumeroItem.trim()
+                      ? item.osNumeroItem.trim().toUpperCase()
+                      : null,
+                  photoUrls: Array.isArray(item.fotos) ? item.fotos.filter(Boolean).map(String) : [],
+                }));
+        const qtdNc = typeof data.qtdNC === "number" ? data.qtdNC : ncItems.length;
         const pcmSign = (data.pcmSign ?? {}) as Record<string, unknown>;
 
         return {
@@ -89,6 +116,7 @@ export default function AdminInspectionsPage() {
           signed: Boolean(pcmSign && pcmSign.assinaturaUrl),
           signedAt: pcmSign?.signedAt ? String(pcmSign.signedAt) : null,
           pcmNome: pcmSign?.nome ? String(pcmSign.nome) : null,
+          ncItems,
         } satisfies InspectionListItem;
       });
 
@@ -269,7 +297,21 @@ export default function AdminInspectionsPage() {
                     <TableCell>{formatDateTime(item.createdAt)}</TableCell>
                     <TableCell>
                       {item.hasNc ? (
-                        <Badge variant="danger">{item.qtdNc} NC</Badge>
+                        <div className="space-y-2">
+                          <Badge variant="danger">{item.qtdNc} NC</Badge>
+                          {item.ncItems.length > 0 ? (
+                            <ul className="space-y-1 text-xs text-[var(--muted)]">
+                              {item.ncItems.map(nc => (
+                                <li key={`${item.id}-${nc.questionId}`} className="rounded border border-[var(--border)] bg-[var(--surface)] px-2 py-1">
+                                  <span className="font-medium text-[var(--text)]">{nc.questionText ?? `Item ${nc.questionId}`}</span>
+                                  {nc.osNumero ? <span className="ml-1 text-[var(--muted)]">• O.S.: {nc.osNumero}</span> : null}
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <p className="text-xs text-[var(--muted)]">Detalhes da NC indisponíveis.</p>
+                          )}
+                        </div>
                       ) : (
                         <Badge variant="success">Sem NC</Badge>
                       )}
