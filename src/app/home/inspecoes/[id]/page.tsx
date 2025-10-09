@@ -2,11 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import type { ChecklistAnswer } from "@/types";
 
-type InspectionAnswer = {
-  questionId: string;
+type InspectionAnswer = ChecklistAnswer & {
   questionText: string | null;
-  response: "c" | "nc" | "na";
   observation: string | null;
   photoUrls: string[];
 };
@@ -80,26 +79,31 @@ export default function MaintInspectionDetailPage() {
         if (cancelled) return;
         const inspectionData = data?.inspection ?? {};
         const machineData = (data?.machine ?? inspectionData.machine ?? {}) as Record<string, unknown>;
-        const answersData = Array.isArray(inspectionData.answers) ? (inspectionData.answers as InspectionAnswer[]) : [];
-        const normalizedAnswers: InspectionAnswer[] = answersData
-          .map(answer => {
-            const questionId = answer?.questionId ? String(answer.questionId) : "";
-            if (!questionId) {
-              return null;
-            }
-            const response: "c" | "nc" | "na" = answer?.response === "nc" ? "nc" : answer?.response === "na" ? "na" : "c";
-            const photoUrls = Array.isArray(answer?.photoUrls)
-              ? answer.photoUrls.filter((url): url is string => typeof url === "string" && url.trim().length > 0)
-              : [];
-            return {
-              questionId,
-              questionText: answer?.questionText ?? null,
-              response,
-              observation: answer?.observation ?? null,
-              photoUrls,
-            } satisfies InspectionAnswer;
-          })
-          .filter((answer): answer is InspectionAnswer => Boolean(answer));
+        const answersData = Array.isArray(inspectionData.answers)
+          ? (inspectionData.answers as ChecklistAnswer[])
+          : [];
+        const normalizedAnswers = answersData.reduce<InspectionAnswer[]>((acc, answer) => {
+          const questionId = answer?.questionId ? String(answer.questionId) : "";
+          if (!questionId) {
+            return acc;
+          }
+          const response: "c" | "nc" | "na" = answer?.response === "nc" ? "nc" : answer?.response === "na" ? "na" : "c";
+          const photoUrls = Array.isArray(answer?.photoUrls)
+            ? answer.photoUrls.filter((url): url is string => typeof url === "string" && url.trim().length > 0)
+            : [];
+          const itemOsNumero = typeof answer?.itemOsNumero === "string" && answer.itemOsNumero.trim().length > 0
+            ? answer.itemOsNumero.trim()
+            : null;
+          acc.push({
+            questionId,
+            questionText: answer?.questionText ?? null,
+            response,
+            observation: answer?.observation ?? null,
+            photoUrls,
+            itemOsNumero,
+          });
+          return acc;
+        }, []);
 
         const osNumero = typeof inspectionData.osNumero === "string" ? inspectionData.osNumero : null;
         const observacoes = typeof inspectionData.observacoes === "string" ? inspectionData.observacoes : null;
