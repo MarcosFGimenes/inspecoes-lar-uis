@@ -255,6 +255,10 @@ export async function POST(req: NextRequest) {
         if (item.fotos.length > 0) {
           issueUpdates.fotos = item.fotos;
         }
+        const novaDescricao = item.observacaoItem?.trim();
+        if (novaDescricao && existingIssue.data()?.descricao !== novaDescricao) {
+          issueUpdates.descricao = novaDescricao;
+        }
         if (Object.keys(issueUpdates).length > 0) {
           await existingIssue.ref.update(issueUpdates);
         }

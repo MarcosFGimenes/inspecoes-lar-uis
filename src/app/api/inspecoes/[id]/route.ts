@@ -382,39 +382,40 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
               };
           treatmentsMap.set(item.questionId, updatedTreatment);
 
-        if (openIssuesMap.has(item.questionId)) {
-          const issueDoc = openIssuesMap.get(item.questionId)!;
-          const updatesIssue: Record<string, unknown> = {};
-          if (response === "nc" && item.osNumeroItem?.trim()) {
-            const osValue = item.osNumeroItem.trim().toUpperCase();
-            if (issueDoc.data()?.osNumero !== osValue) {
+          if (openIssuesMap.has(item.questionId)) {
+            const issueDoc = openIssuesMap.get(item.questionId)!;
+            const updatesIssue: Record<string, unknown> = {};
+            const osValue = item.osNumeroItem?.trim() ? item.osNumeroItem.trim().toUpperCase() : null;
+            if (osValue && issueDoc.data()?.osNumero !== osValue) {
               updatesIssue.osNumero = osValue;
             }
-          }
-          if (photoUrls.length > 0) {
-            updatesIssue.fotos = photoUrls;
-          }
-          if (Object.keys(updatesIssue).length > 0) {
-            await issueDoc.ref.update(updatesIssue);
-          }
-        } else if (inspection.machine?.machineId) {
-          const issueRef = adminDb.collection("issues").doc();
-          await issueRef.set({
-            machineId: inspection.machine.machineId,
-            tag: inspection.machine.tag ?? null,
-            templateItemId: item.questionId,
-            descricao:
-              observation ||
-              templateItem?.criterio ||
-              templateItem?.oQueChecar ||
-              "NC registrada na edição da inspeção",
-            osNumero: response === "nc" && item.osNumeroItem?.trim() ? item.osNumeroItem.trim().toUpperCase() : null,
-            fotos: photoUrls,
-            status: "aberta",
-            abertaEmInspecaoId: id,
-            createdAt: nowIso,
-          });
-          issuesCriadas.push(issueRef.id);
+            if (photoUrls.length > 0) {
+              updatesIssue.fotos = photoUrls;
+            }
+            if (observation && issueDoc.data()?.descricao !== observation) {
+              updatesIssue.descricao = observation;
+            }
+            if (Object.keys(updatesIssue).length > 0) {
+              await issueDoc.ref.update(updatesIssue);
+            }
+          } else if (inspection.machine?.machineId) {
+            const issueRef = adminDb.collection("issues").doc();
+            await issueRef.set({
+              machineId: inspection.machine.machineId,
+              tag: inspection.machine.tag ?? null,
+              templateItemId: item.questionId,
+              descricao:
+                observation ||
+                templateItem?.criterio ||
+                templateItem?.oQueChecar ||
+                "NC registrada na edição da inspeção",
+              osNumero: item.osNumeroItem?.trim() ? item.osNumeroItem.trim().toUpperCase() : null,
+              fotos: photoUrls,
+              status: "aberta",
+              abertaEmInspecaoId: id,
+              createdAt: nowIso,
+            });
+            issuesCriadas.push(issueRef.id);
           }
         } else {
           if (existingTreatment) {
