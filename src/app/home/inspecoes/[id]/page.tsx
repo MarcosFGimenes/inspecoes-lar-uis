@@ -4,10 +4,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import type { ChecklistAnswer } from "@/types";
 
-type InspectionAnswer = ChecklistAnswer & {
+type InspectionAnswer = Omit<ChecklistAnswer, "questionText" | "observation" | "photoUrls" | "itemOsNumero"> & {
   questionText: string | null;
   observation: string | null;
   photoUrls: string[];
+  itemOsNumero: string | null;
 };
 
 type InspectionDetail = {
