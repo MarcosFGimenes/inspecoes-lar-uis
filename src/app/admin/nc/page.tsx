@@ -62,6 +62,7 @@ interface NonConformityItem {
   operatorMatricula: string | null;
   observation: string | null;
   photos: string[];
+  itemOsNumero: string | null;
   status: NonConformityStatus;
   summary: string;
   responsible: string;
@@ -110,6 +111,7 @@ function normalizeAnswers(
         observation: item.observation ?? null,
         photoUrls: Array.isArray(item.photoUrls) ? item.photoUrls.filter(Boolean) : [],
         recurrence: item.recurrence === true,
+        itemOsNumero: item.itemOsNumero ?? null,
       }));
   }
 
@@ -132,6 +134,9 @@ function normalizeAnswers(
         observation: typeof item.observacaoItem === "string" ? item.observacaoItem : null,
         photoUrls: Array.isArray(item.fotos) ? item.fotos.filter(Boolean).map(String) : [],
         recurrence: false,
+        itemOsNumero: typeof item.osNumeroItem === "string" && item.osNumeroItem.trim()
+          ? item.osNumeroItem.trim().toUpperCase()
+          : null,
       } satisfies ChecklistAnswer;
     });
 }
@@ -256,6 +261,7 @@ export default function AdminNonConformitiesPage() {
               operatorMatricula: maintainer.matricula ? String(maintainer.matricula) : null,
               observation: answer.observation ?? null,
               photos: Array.isArray(answer.photoUrls) ? answer.photoUrls.filter(Boolean) : [],
+              itemOsNumero: answer.itemOsNumero ?? null,
               status: treatment?.status ?? "open",
               summary: treatment?.summary ?? "",
               responsible: treatment?.responsible ?? "",
@@ -473,6 +479,9 @@ export default function AdminNonConformitiesPage() {
                       <div>
                         <span className="font-medium text-[var(--text)]">Operador:</span> {item.operatorNome || "-"}
                         {item.operatorMatricula ? ` (${item.operatorMatricula})` : ""}
+                      </div>
+                      <div className="md:col-span-2">
+                        <span className="font-medium text-[var(--text)]">Nº da O.S. do item:</span> {item.itemOsNumero ?? "-"}
                       </div>
                     </div>
                   </CardHeader>

@@ -252,6 +252,11 @@ function SignatureModal({
                               <span className="font-medium text-[var(--muted)]">Observação:</span> {answer.observation}
                             </p>
                           ) : null}
+                          {answer.itemOsNumero?.trim() ? (
+                            <p className="text-xs text-[var(--muted)]">
+                              Nº da O.S. do item: <span className="font-medium text-[var(--text)]">{answer.itemOsNumero}</span>
+                            </p>
+                          ) : null}
                           {Array.isArray(answer.photoUrls) && answer.photoUrls.length > 0 ? (
                             <div className="mt-3 flex flex-wrap gap-2">
                               {answer.photoUrls.map((url, index) => (

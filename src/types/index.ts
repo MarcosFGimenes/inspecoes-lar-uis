@@ -50,6 +50,7 @@ export type InspectionItemAnswer = {
   resultado: Resultado;
   observacaoItem?: string;
   fotos?: string[];
+  osNumeroItem?: string | null;
 };
 
 export type Inspection = {
@@ -88,6 +89,7 @@ export type Issue = {
   templateItemId: string;
   descricao: string;
   osNumero?: string;
+  fotos?: string[];
   status: "aberta" | "resolvida";
   abertaEmInspecaoId: string;
   resolvidaEmInspecaoId?: string;

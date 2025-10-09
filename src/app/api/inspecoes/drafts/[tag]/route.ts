@@ -21,6 +21,7 @@ const itemSchema = z.object({
   resultado: z.enum(["", "C", "NC", "NA"]).default(""),
   observacao: z.string().trim().max(4000).optional(),
   fotos: z.array(itemPhotoSchema).max(3).optional(),
+  osNumero: z.string().trim().max(120).optional(),
 });
 
 const payloadSchema = z.object({
@@ -196,10 +197,12 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       const resultado = coerceString(entry?.resultado) ?? "";
       const observacao = coerceString(entry?.observacao) ?? "";
       const fotos = extractFotosFromData(entry?.fotos);
+      const osNumero = coerceString(entry?.osNumero) ?? "";
       return {
         templateItemId: item.id as string,
         resultado,
         observacao,
+        osNumero,
         fotos,
       };
     });
@@ -256,14 +259,15 @@ export async function PUT(req: NextRequest, context: RouteContext) {
   const resolveIssuesIds = Array.isArray(payload.resolveIssues)
     ? payload.resolveIssues.filter(id => typeof id === "string" && id.trim().length > 0)
     : [];
-  const itensMap: Record<string, { resultado: string; observacao: string | null; fotos: DraftFoto[] }> = {};
+  const itensMap: Record<string, { resultado: string; observacao: string | null; osNumero: string | null; fotos: DraftFoto[] }> = {};
 
   let answered = 0;
   for (const item of itens) {
     const resultado = item.resultado ?? "";
     const observacao = item.observacao?.trim() ? item.observacao.trim() : null;
     const fotos = normalizeFotosPayload(item.fotos);
-    itensMap[item.templateItemId] = { resultado, observacao, fotos };
+    const osNumero = item.osNumero?.trim() ? item.osNumero.trim().toUpperCase() : null;
+    itensMap[item.templateItemId] = { resultado, observacao, osNumero, fotos };
     if (resultado === "C" || resultado === "NC" || resultado === "NA") {
       answered += 1;
     }
@@ -312,6 +316,7 @@ export async function PUT(req: NextRequest, context: RouteContext) {
         templateItemId,
         resultado: value.resultado,
         observacao: value.observacao ?? "",
+        osNumero: value.osNumero ?? undefined,
         fotos: value.fotos,
       })),
       totalItens: total,

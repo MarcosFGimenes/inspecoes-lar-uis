@@ -7,6 +7,7 @@ export interface ChecklistAnswer {
   observation?: string | null;
   photoUrls?: string[];
   recurrence?: boolean;
+  itemOsNumero?: string | null;
 }
 
 export interface ChecklistNonConformityTreatment {
