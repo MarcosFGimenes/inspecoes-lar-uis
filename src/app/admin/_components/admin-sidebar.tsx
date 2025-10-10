@@ -131,7 +131,7 @@ export function AdminSidebar() {
         </div>
       </nav>
 
-      <aside className="sticky top-0 hidden h-screen w-72 flex-shrink-0 border-r border-[var(--border)] bg-[color-mix(in_srgb,var(--surface)_94%,rgba(255,255,255,0.9)_6%)] px-4 py-6 backdrop-blur-lg md:flex md:flex-col">
+      <aside className="sticky top-0 hidden max-h-screen w-full flex-shrink-0 overflow-y-auto border-r border-[var(--border)] bg-[color-mix(in_srgb,var(--surface)_94%,rgba(255,255,255,0.9)_6%)] px-4 py-6 backdrop-blur-lg md:flex md:w-60 md:flex-col lg:w-72">
         <div className="flex items-center gap-3 px-2">
           <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-[var(--primary)] text-white shadow-[0_18px_36px_-22px_rgba(37,99,235,0.45)]">
             <i className="fas fa-shield-halved" aria-hidden />

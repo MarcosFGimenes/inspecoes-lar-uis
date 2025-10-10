@@ -43,7 +43,7 @@ type TemplateOption = {
 };
 
 type FilterState = {
-  machineId: string | "all";
+  machineTag?: string;
   maintainerId: string | "all";
   templateId: string | "all";
   hasNc: "all" | "yes" | "no";
@@ -137,7 +137,7 @@ export default function AdminChecklistsPage() {
   const [templates, setTemplates] = useState<TemplateOption[]>([]);
   const [rows, setRows] = useState<ChecklistRow[]>([]);
   const [filter, setFilter] = useState<FilterState>({
-    machineId: "all",
+    machineTag: "",
     maintainerId: "all",
     templateId: "all",
     hasNc: "all",
@@ -287,9 +287,16 @@ export default function AdminChecklistsPage() {
         } satisfies ChecklistRow;
       });
 
+      const machineQuery = filter.machineTag?.trim().toLowerCase();
+
       const filtered = allRows.filter(row => {
-        if (filter.machineId !== "all" && row.machineId !== filter.machineId) {
-          return false;
+        if (machineQuery) {
+          const tag = row.machineTag?.toLowerCase() ?? "";
+          const name = row.machineNome?.toLowerCase() ?? "";
+          const setor = row.machineSetor?.toLowerCase() ?? "";
+          if (!tag.includes(machineQuery) && !name.includes(machineQuery) && !setor.includes(machineQuery)) {
+            return false;
+          }
         }
         if (filter.maintainerId !== "all" && row.maintainerId !== filter.maintainerId) {
           return false;
@@ -460,19 +467,11 @@ export default function AdminChecklistsPage() {
             <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
               <div className="space-y-1">
                 <label className="text-xs uppercase tracking-wide text-[var(--hint)]">Máquina</label>
-                <select
-                  value={filter.machineId}
-                  onChange={event => onFilterChange({ machineId: event.target.value as FilterState["machineId"] })}
-                  className="h-11 w-full rounded-xl border border-[var(--border)] bg-white px-3 text-sm text-[var(--text)] shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
-                >
-                  <option value="all">Todas</option>
-                  {machines.map(machine => (
-                    <option key={machine.id} value={machine.id}>
-                      {machine.nome ?? machine.tag ?? machine.id}
-                      {machine.tag ? ` — ${machine.tag}` : ""}
-                    </option>
-                  ))}
-                </select>
+                <Input
+                  value={filter.machineTag ?? ""}
+                  onChange={event => onFilterChange({ machineTag: event.target.value })}
+                  placeholder="Digite a TAG ou nome"
+                />
               </div>
 
               <div className="space-y-1">
@@ -580,7 +579,7 @@ export default function AdminChecklistsPage() {
                   variant="outline"
                   onClick={() =>
                     setFilter({
-                      machineId: "all",
+                      machineTag: "",
                       maintainerId: "all",
                       templateId: "all",
                       hasNc: "all",
