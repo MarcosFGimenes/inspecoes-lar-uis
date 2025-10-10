@@ -684,7 +684,7 @@ export default function AdminChecklistsPage() {
                     </TableCell>
                     <TableCell>
                       {row.osNumero ? (
-                        <Badge variant="secondary">{row.osNumero}</Badge>
+                        <Badge variant="muted">{row.osNumero}</Badge>
                       ) : (
                         <span className="text-sm text-[var(--hint)]">—</span>
                       )}
