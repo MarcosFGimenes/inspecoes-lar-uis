@@ -37,6 +37,13 @@ const navigationItems: NavigationItem[] = [
     accentClass: "bg-amber-100 text-amber-600",
   },
   {
+    href: "/admin/checklists",
+    title: "Checklists enviados",
+    description: "Filtre registros enviados e exporte PDFs em lote",
+    icon: "fas fa-list-check",
+    accentClass: "bg-emerald-100 text-emerald-600",
+  },
+  {
     href: "/admin/templates",
     title: "Templates de checklist",
     description: "Mantenha os modelos de inspeção atualizados",
