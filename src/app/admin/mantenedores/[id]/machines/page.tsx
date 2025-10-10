@@ -3,6 +3,11 @@
 import { FormEvent, use, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
+import { Button, buttonStyles } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
+
 interface PageProps {
   params: Promise<{
     id: string;
@@ -19,6 +24,8 @@ interface MachineSummary {
   id: string;
   tag: string | null;
   nome: string | null;
+  setor?: string | null;
+  unidade?: string | null;
   ativo?: boolean | null;
 }
 
@@ -28,6 +35,15 @@ interface MachinesResponse {
   assignedDocs: MachineSummary[];
   activeDocs: MachineSummary[];
   inactiveOrMissingIds: string[];
+}
+
+function formatMachineLabel(machine: MachineSummary) {
+  const tag = machine.tag ?? undefined;
+  const name = machine.nome ?? undefined;
+  if (tag && name) {
+    return `${tag} — ${name}`;
+  }
+  return tag ?? name ?? machine.id;
 }
 
 export default function MaintainerMachinesPage({ params }: PageProps) {
@@ -41,6 +57,7 @@ export default function MaintainerMachinesPage({ params }: PageProps) {
   const [assignedDocs, setAssignedDocs] = useState<MachineSummary[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [initialInactiveOrMissing, setInitialInactiveOrMissing] = useState<string[]>([]);
+  const [machineQuery, setMachineQuery] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -94,11 +111,9 @@ export default function MaintainerMachinesPage({ params }: PageProps) {
     return activeDocs
       .filter(machine => machine.ativo !== false)
       .sort((a, b) => {
-        const tagA = (a.tag ?? "").toLowerCase();
-        const tagB = (b.tag ?? "").toLowerCase();
-        if (tagA < tagB) return -1;
-        if (tagA > tagB) return 1;
-        return 0;
+        const tagA = (a.tag ?? a.nome ?? "").toLowerCase();
+        const tagB = (b.tag ?? b.nome ?? "").toLowerCase();
+        return tagA.localeCompare(tagB);
       });
   }, [activeDocs]);
 
@@ -110,36 +125,37 @@ export default function MaintainerMachinesPage({ params }: PageProps) {
     return map;
   }, [assignedDocs]);
 
-  const activeMachineMap = useMemo(() => {
-    const map = new Map<string, MachineSummary>();
-    activeMachines.forEach(machine => {
-      map.set(machine.id, machine);
-    });
-    return map;
-  }, [activeMachines]);
-
   const inactiveOrMissingSelections = useMemo(() => {
-    return selected.filter(machineId => !activeMachineMap.has(machineId));
-  }, [activeMachineMap, selected]);
+    return selected.filter(machineId => !activeMachines.some(machine => machine.id === machineId));
+  }, [activeMachines, selected]);
 
-  useEffect(() => {
-    console.debug("[assign-machines] assignedIds", selected);
-    console.debug("[assign-machines] activeIds", activeMachines.map(machine => machine.id));
-    console.debug("[assign-machines] inactiveOrMissingIds", inactiveOrMissingSelections);
-  }, [selected, activeMachines, inactiveOrMissingSelections]);
+  const filteredActiveMachines = useMemo(() => {
+    if (!machineQuery) return activeMachines;
+    const query = machineQuery.toLowerCase();
+    return activeMachines.filter(machine => {
+      return (
+        (machine.tag ?? "").toLowerCase().includes(query) ||
+        (machine.nome ?? "").toLowerCase().includes(query) ||
+        (machine.setor ?? "").toLowerCase().includes(query) ||
+        (machine.unidade ?? "").toLowerCase().includes(query)
+      );
+    });
+  }, [activeMachines, machineQuery]);
 
-  function toggleMachine(id: string) {
+  const selectedCount = selected.length;
+
+  function toggleMachine(machineId: string) {
     setSelected(current => {
-      if (current.includes(id)) {
-        return current.filter(item => item !== id);
+      if (current.includes(machineId)) {
+        return current.filter(item => item !== machineId);
       }
-      return [...current, id];
+      return [...current, machineId];
     });
     setSuccess(null);
   }
 
-  function removeInactiveSelection(id: string) {
-    setSelected(current => current.filter(item => item !== id));
+  function removeInactiveSelection(machineId: string) {
+    setSelected(current => current.filter(item => item !== machineId));
     setSuccess(null);
   }
 
@@ -175,230 +191,199 @@ export default function MaintainerMachinesPage({ params }: PageProps) {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-green-50 to-blue-50 p-4">
-        <div className="max-w-4xl mx-auto">
-          <div className="bg-white rounded-2xl shadow-lg p-8 text-center">
-            <div className="w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center mx-auto mb-4">
-              <i className="fas fa-spinner fa-spin text-blue-600 text-xl"></i>
-            </div>
-            <p className="text-gray-600">Carregando...</p>
-          </div>
+      <div className="mx-auto max-w-6xl space-y-6 px-4 py-6 sm:px-6 lg:px-10">
+        <div className="flex items-center justify-between">
+          <div className="h-8 w-48 animate-pulse rounded-full bg-[color-mix(in_srgb,var(--surface)_88%,rgba(148,163,184,0.35)_12%)]" />
+          <div className="h-10 w-32 animate-pulse rounded-full bg-[color-mix(in_srgb,var(--surface)_88%,rgba(148,163,184,0.35)_12%)]" />
         </div>
+        <Card>
+          <CardContent className="space-y-4 py-8">
+            <Skeleton className="h-16 w-full" />
+            <Skeleton className="h-16 w-full" />
+            <Skeleton className="h-16 w-full" />
+          </CardContent>
+        </Card>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-green-50 to-blue-50 p-4">
-      <div className="max-w-4xl mx-auto">
-        {/* Cabeçalho */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 pt-6">
-          <div className="flex items-center mb-4 md:mb-0">
-            <div className="w-12 h-12 rounded-full bg-green-600 flex items-center justify-center mr-3">
-              <i className="fas fa-tractor text-white text-xl"></i>
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">Lar Cooperativa Agroindustrial</h1>
-              <p className="text-gray-600">Sistema de Manutenção de Rotas</p>
-            </div>
-          </div>
-          
-          <Link 
-            href="/admin/mantenedores"
-            className="flex items-center justify-center px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition duration-150 ease-in-out"
-          >
-            <i className="fas fa-arrow-left mr-2"></i>
-            Voltar aos Mantenedores
-          </Link>
-        </div>
-
-        {/* Conteúdo Principal */}
-        <div className="bg-white rounded-2xl shadow-lg p-6 md:p-8">
-          {error && !maintainer ? (
-            <div className="text-center py-8">
-              <div className="w-16 h-16 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
-                <i className="fas fa-exclamation-triangle text-red-600 text-2xl"></i>
-              </div>
-              <h3 className="text-xl font-bold text-gray-900 mb-2">Erro ao carregar</h3>
-              <p className="text-red-600 mb-4">{error}</p>
-              <Link 
-                href="/admin/mantenedores"
-                className="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition duration-150 ease-in-out"
-              >
-                <i className="fas fa-arrow-left mr-2"></i>
-                Voltar
-              </Link>
-            </div>
-          ) : (
-            <>
-              {/* Cabeçalho da Página */}
-              <div className="flex flex-col md:flex-row md:items-center justify-between mb-8">
-                <div className="mb-4 md:mb-0">
-                  <div className="flex items-center mb-2">
-                    <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center mr-3">
-                      <i className="fas fa-cogs text-orange-600"></i>
-                    </div>
-                    <h2 className="text-2xl font-bold text-gray-900">Gerenciar Máquinas</h2>
-                  </div>
-                  {maintainer && (
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 inline-block">
-                      <p className="text-blue-800 font-medium">
-                        {maintainer.nome ?? "—"}
-                        {maintainer.matricula && (
-                          <span className="text-blue-600 ml-2">• Matrícula {maintainer.matricula}</span>
-                        )}
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Mensagens de Status */}
-              {error && (
-                <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6 flex items-start">
-                  <i className="fas fa-exclamation-triangle text-red-600 mt-0.5 mr-3"></i>
-                  <div>
-                    <p className="text-red-800 font-medium">Erro</p>
-                    <p className="text-red-600 text-sm mt-1">{error}</p>
-                  </div>
-                </div>
-              )}
-
-              {success && (
-                <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6 flex items-start">
-                  <i className="fas fa-check-circle text-green-600 mt-0.5 mr-3"></i>
-                  <div>
-                    <p className="text-green-800 font-medium">Sucesso</p>
-                    <p className="text-green-600 text-sm mt-1">{success}</p>
-                  </div>
-                </div>
-              )}
-
-              <form onSubmit={handleSubmit} className="space-y-6">
-                {/* Lista de Máquinas Ativas */}
-                <div className="border border-gray-200 rounded-xl p-6">
-                  <div className="flex items-center mb-4">
-                    <i className="fas fa-list-check text-blue-600 mr-2"></i>
-                    <h3 className="text-lg font-semibold text-gray-900">Máquinas Ativas</h3>
-                    <span className="ml-2 bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">
-                      {activeMachines.length}
-                    </span>
-                  </div>
-                  
-                  {activeMachines.length === 0 ? (
-                    <div className="text-center py-8 text-gray-500">
-                      <i className="fas fa-inbox text-3xl mb-2 opacity-50"></i>
-                      <p>Nenhuma máquina ativa encontrada.</p>
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-96 overflow-y-auto p-2">
-                      {activeMachines.map(machine => {
-                        const checked = selected.includes(machine.id);
-                        return (
-                          <label 
-                            key={machine.id} 
-                            className={`flex items-start p-3 rounded-lg border cursor-pointer transition duration-150 ease-in-out ${
-                              checked 
-                                ? 'bg-blue-50 border-blue-300' 
-                                : 'bg-white border-gray-200 hover:bg-gray-50'
-                            }`}
-                          >
-                            <input
-                              type="checkbox"
-                              className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded mt-1"
-                              checked={checked}
-                              onChange={() => toggleMachine(machine.id)}
-                            />
-                            <div className="ml-3">
-                              <div className="font-medium text-gray-900">{machine.tag}</div>
-                              <div className="text-sm text-gray-600">{machine.nome}</div>
-                            </div>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-
-                {/* Aviso de Máquinas Orfãs */}
-                {inactiveOrMissingSelections.length > 0 && (
-                  <div className="border border-yellow-300 bg-yellow-50 rounded-xl p-4">
-                    <div className="flex items-start">
-                      <i className="fas fa-exclamation-triangle text-yellow-600 mt-0.5 mr-3"></i>
-                      <div>
-                        <p className="font-semibold text-yellow-800">Atenção</p>
-                        <p className="text-yellow-700 text-sm mt-1">
-                          Algumas máquinas atribuídas não foram encontradas como <strong>ativas</strong> (podem estar inativas ou ausentes por permissão/consulta). Elas continuam marcadas <strong>até você desmarcar</strong>:
-                        </p>
-                        <ul className="list-disc list-inside text-yellow-700 text-sm mt-2 space-y-1">
-                          {inactiveOrMissingSelections.map(machineId => {
-                            const machine = assignedDocsMap.get(machineId);
-                            return (
-                              <li key={machineId} className="flex items-center justify-between gap-4 font-mono">
-                                <span className="truncate">
-                                  {machine?.tag ?? machine?.nome ?? machineId}
-                                </span>
-                                <label className="flex items-center gap-2 text-xs font-sans">
-                                  <input
-                                    type="checkbox"
-                                    checked={selected.includes(machineId)}
-                                    onChange={() => removeInactiveSelection(machineId)}
-                                    className="h-4 w-4 text-yellow-600 focus:ring-yellow-500 border-yellow-300 rounded"
-                                  />
-                                  <span>Desmarcar</span>
-                                </label>
-                              </li>
-                            );
-                          })}
-                        </ul>
-                        {initialInactiveOrMissing.length > 0 && (
-                          <p className="text-yellow-700 text-xs mt-3">
-                            IDs recebidos: {initialInactiveOrMissing.join(", ")}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Botões de Ação */}
-                <div className="flex flex-col sm:flex-row gap-3 pt-4 border-t border-gray-200">
-                  <button
-                    type="submit"
-                    disabled={saving}
-                    className="flex-1 flex items-center justify-center px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg transition duration-150 ease-in-out"
-                  >
-                    {saving ? (
-                      <>
-                        <i className="fas fa-spinner fa-spin mr-2"></i>
-                        Salvando...
-                      </>
-                    ) : (
-                      <>
-                        <i className="fas fa-save mr-2"></i>
-                        Salvar Atribuições
-                      </>
-                    )}
-                  </button>
-                  
-                  <Link 
-                    href="/admin/mantenedores"
-                    className="flex-1 flex items-center justify-center px-6 py-3 bg-gray-500 hover:bg-gray-600 text-white rounded-lg transition duration-150 ease-in-out"
-                  >
-                    <i className="fas fa-times mr-2"></i>
-                    Cancelar
-                  </Link>
-                </div>
-              </form>
-            </>
+    <div className="mx-auto max-w-6xl space-y-6 px-4 py-6 sm:px-6 lg:px-10">
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="space-y-1">
+          <h1 className="text-3xl font-semibold text-[var(--text)]">Gerenciar máquinas</h1>
+          {maintainer && (
+            <p className="text-sm text-[var(--muted)]">
+              Atualize as máquinas atribuídas a <span className="font-semibold text-[var(--text)]">{maintainer.nome ?? "—"}</span>
+              {maintainer.matricula ? ` • Matrícula ${maintainer.matricula}` : ""}.
+            </p>
           )}
         </div>
-
-        {/* Rodapé */}
-        <div className="text-center text-gray-500 text-sm mt-8 pb-4">
-          <p>Lar Cooperativa Agroindustrial &copy; {new Date().getFullYear()}</p>
+        <div className="flex flex-wrap gap-2">
+          <Link href="/admin/mantenedores" className={buttonStyles({ variant: "secondary" })}>
+            <i className="fas fa-arrow-left" aria-hidden />
+            Voltar para a lista
+          </Link>
+          <Link href={`/admin/mantenedores/${id}`} className={buttonStyles({ variant: "outline" })}>
+            <i className="fas fa-pen" aria-hidden />
+            Editar mantenedor
+          </Link>
         </div>
-      </div>
+      </header>
+
+      <Card>
+        <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <CardTitle>Atribuições de máquinas</CardTitle>
+            <CardDescription>
+              Pesquise pelo tag, nome ou setor para localizar rapidamente e marcar as máquinas disponíveis.
+            </CardDescription>
+          </div>
+          <div className="text-sm text-[var(--muted)]">
+            {selectedCount > 0 ? (
+              <span>
+                {selectedCount} máquina{selectedCount === 1 ? "" : "s"} selecionada{selectedCount === 1 ? "" : "s"}
+              </span>
+            ) : (
+              <span>Nenhuma máquina selecionada</span>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent>
+          {error && (
+            <div className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+              <div className="flex items-start gap-3">
+                <i className="fas fa-circle-exclamation mt-1" aria-hidden />
+                <div>
+                  <p className="font-medium">Não foi possível concluir a ação.</p>
+                  <p>{error}</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {success && (
+            <div className="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+              <div className="flex items-start gap-3">
+                <i className="fas fa-check-circle mt-1" aria-hidden />
+                <div>
+                  <p className="font-medium">Tudo certo!</p>
+                  <p>{success}</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <form className="space-y-6" onSubmit={handleSubmit}>
+            <div className="space-y-3">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <Input
+                  value={machineQuery}
+                  onChange={event => setMachineQuery(event.target.value)}
+                  placeholder="Buscar por TAG, nome, setor ou unidade"
+                  aria-label="Buscar máquina"
+                />
+                {machineQuery && (
+                  <Button type="button" variant="ghost" onClick={() => setMachineQuery("")}
+                    className="self-start sm:self-auto"
+                  >
+                    Limpar filtro
+                  </Button>
+                )}
+              </div>
+              <div className="rounded-[30px] border border-[color-mix(in_srgb,var(--border)_75%,transparent_25%)] bg-[color-mix(in_srgb,var(--surface)_96%,rgba(255,255,255,0.85)_4%)] px-4 py-4">
+                {filteredActiveMachines.length === 0 ? (
+                  <div className="flex flex-col items-center gap-2 py-10 text-center text-sm text-[var(--muted)]">
+                    <i className="fas fa-search text-lg" aria-hidden />
+                    <p>Nenhuma máquina encontrada com o filtro informado.</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    {filteredActiveMachines.map(machine => {
+                      const checked = selected.includes(machine.id);
+                      return (
+                        <label
+                          key={machine.id}
+                          className={`flex cursor-pointer items-start gap-3 rounded-2xl border px-4 py-3 transition ${
+                            checked
+                              ? "border-[var(--primary)] bg-[color-mix(in_srgb,var(--primary)_12%,transparent_88%)] shadow-[0_18px_36px_-22px_rgba(37,99,235,0.45)]"
+                              : "border-[color-mix(in_srgb,var(--border)_70%,transparent_30%)] bg-[color-mix(in_srgb,var(--surface)_96%,rgba(148,163,184,0.16)_4%)] hover:border-[var(--primary)]"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            className="mt-1 h-4 w-4 rounded border-[var(--border)] text-[var(--primary)] focus:ring-[var(--primary)]"
+                            checked={checked}
+                            onChange={() => toggleMachine(machine.id)}
+                          />
+                          <div className="min-w-0 space-y-1">
+                            <div className="text-sm font-medium text-[var(--text)]">{formatMachineLabel(machine)}</div>
+                            {(machine.setor || machine.unidade) && (
+                              <p className="text-xs text-[var(--muted)]">
+                                {[machine.setor, machine.unidade].filter(Boolean).join(" • ")}
+                              </p>
+                            )}
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {inactiveOrMissingSelections.length > 0 && (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-800">
+                <div className="flex items-start gap-3">
+                  <i className="fas fa-triangle-exclamation mt-1" aria-hidden />
+                  <div className="space-y-2">
+                    <p className="font-semibold">Máquinas fora da lista ativa</p>
+                    <p>
+                      Mantivemos selecionadas as máquinas que não aparecem como ativas. Desmarque manualmente se não quiser
+                      vinculá-las.
+                    </p>
+                    <ul className="space-y-2 text-xs text-amber-700">
+                      {inactiveOrMissingSelections.map(machineId => {
+                        const machine = assignedDocsMap.get(machineId);
+                        return (
+                          <li key={machineId} className="flex items-center justify-between gap-3 rounded-xl bg-white/70 px-3 py-2">
+                            <span className="truncate font-medium text-amber-900">
+                              {machine ? formatMachineLabel(machine) : machineId}
+                            </span>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="text-amber-700 hover:bg-amber-100 hover:text-amber-900"
+                              onClick={() => removeInactiveSelection(machineId)}
+                            >
+                              Remover
+                            </Button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                    {initialInactiveOrMissing.length > 0 && (
+                      <p className="text-[0.7rem] uppercase tracking-wide text-amber-600">
+                        IDs originais: {initialInactiveOrMissing.join(", ")}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="flex flex-col gap-3 border-t border-[color-mix(in_srgb,var(--border)_75%,transparent_25%)] pt-6 sm:flex-row sm:justify-end">
+              <Button type="button" variant="ghost" onClick={() => window.history.back()}>
+                Cancelar
+              </Button>
+              <Button type="submit" loading={saving}>
+                Salvar alterações
+              </Button>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
     </div>
   );
 }
