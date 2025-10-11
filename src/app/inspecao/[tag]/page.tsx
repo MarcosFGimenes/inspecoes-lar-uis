@@ -163,8 +163,25 @@ export default function InspectionPage() {
   /* ===== Organização visual ===== */
   const sortedItems = useMemo(() => {
     if (!context?.template?.itens) return [] as TemplateItem[];
-    return [...context.template.itens].sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0));
-  }, [context?.template?.itens]);
+    const baseOrder = [...context.template.itens].sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0));
+    const openIssueIds = new Set(
+      (context?.openIssues ?? [])
+        .map(issue => (typeof issue?.templateItemId === "string" ? issue.templateItemId.trim() : ""))
+        .filter((id): id is string => Boolean(id))
+    );
+    if (!openIssueIds.size) return baseOrder;
+
+    const withIssue: TemplateItem[] = [];
+    const withoutIssue: TemplateItem[] = [];
+    for (const item of baseOrder) {
+      if (item?.id && openIssueIds.has(item.id)) {
+        withIssue.push(item);
+      } else {
+        withoutIssue.push(item);
+      }
+    }
+    return [...withIssue, ...withoutIssue];
+  }, [context?.openIssues, context?.template?.itens]);
 
   /* ===== Carrega contexto (sem mexer na lógica) ===== */
   useEffect(() => {
@@ -991,6 +1008,88 @@ export default function InspectionPage() {
         </div>
       </section>
 
+      {/* Não conformidades anteriores */}
+      {context && (
+        <section className="space-y-3 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-lg font-semibold text-gray-900">Não conformidades anteriores</h2>
+            {context.openIssues.length > 0 && (
+              <span className="rounded-full bg-red-100 px-3 py-1 text-xs font-medium text-red-700">
+                {context.openIssues.length === 1
+                  ? "1 item pendente"
+                  : `${context.openIssues.length} itens pendentes`}
+              </span>
+            )}
+          </div>
+          {context.openIssues.length === 0 ? (
+            <p className="text-sm text-gray-600">Nenhuma não conformidade aberta para esta TAG.</p>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {context.openIssues.map(issue => (
+                <label
+                  key={issue.id}
+                  className="flex cursor-pointer flex-col gap-1 rounded-md border border-gray-200 bg-white p-3 text-sm text-gray-700 transition hover:border-blue-300 hover:bg-blue-50"
+                >
+                  <div className="flex items-start gap-2">
+                    <input
+                      type="checkbox"
+                      checked={!!resolveIssues[issue.id]}
+                      onChange={e => handleResolveIssue(issue.id, e.target.checked)}
+                      className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <div className="flex-1 space-y-1">
+                      <p className="font-medium text-gray-800">
+                        {(() => {
+                          if (issue.templateItemId) {
+                            const itemData = templateItemsMap.get(issue.templateItemId);
+                            if (itemData) {
+                              return itemData.componente || itemData.criterio || itemData.oQueChecar || `Item ${itemData.id}`;
+                            }
+                          }
+                          return issue.descricao ?? "Item sem identificação";
+                        })()}
+                      </p>
+                      {issue.descricao && (
+                        <p className="text-sm text-gray-600">
+                          <span className="font-medium text-gray-700">Descrição:</span> {issue.descricao}
+                        </p>
+                      )}
+                      {issue.osNumero && <p className="text-xs text-gray-500">Nº da O.S.: {issue.osNumero}</p>}
+                      {issue.createdAt && (
+                        <p className="text-xs text-gray-400">Aberta em {new Date(issue.createdAt).toLocaleString("pt-BR")}</p>
+                      )}
+                      {issue.fotos?.length ? (
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {issue.fotos.map((foto, index) => (
+                            <a
+                              key={`${issue.id}-list-foto-${index}`}
+                              href={foto}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="block overflow-hidden rounded border border-blue-200"
+                            >
+                              <Image
+                                src={foto}
+                                alt={`Foto da NC anterior`}
+                                width={96}
+                                height={72}
+                                className="h-16 w-24 object-cover"
+                                unoptimized
+                              />
+                            </a>
+                          ))}
+                        </div>
+                      ) : null}
+                      <p className="text-xs text-gray-600">Marcar como resolvida nesta inspeção</p>
+                    </div>
+                  </div>
+                </label>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
       {/* Checklist – layout novo + destaque amarelo quando houver issue aberta */}
       <section className="space-y-4">
         <div>
@@ -1180,73 +1279,6 @@ export default function InspectionPage() {
           </div>
         )}
       </section>
-
-      {/* Não conformidades anteriores */}
-      {context && (
-        <section className="space-y-3 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-          <h2 className="text-lg font-semibold text-gray-900">Não conformidades anteriores</h2>
-          {context.openIssues.length === 0 ? (
-            <p className="text-sm text-gray-600">Nenhuma não conformidade aberta para esta TAG.</p>
-          ) : (
-            <div className="flex flex-col gap-3">
-              {context.openIssues.map((issue) => (
-                <label key={issue.id} className="flex cursor-pointer flex-col gap-1 rounded-md border border-gray-200 bg-white p-3 text-sm text-gray-700 transition hover:border-blue-300 hover:bg-blue-50">
-                  <div className="flex items-start gap-2">
-                    <input
-                      type="checkbox" checked={!!resolveIssues[issue.id]}
-                      onChange={(e) => handleResolveIssue(issue.id, e.target.checked)}
-                      className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                    />
-                    <div className="flex-1 space-y-1">
-                      <p className="font-medium text-gray-800">
-                        {(() => {
-                          if (issue.templateItemId) {
-                            const itemData = templateItemsMap.get(issue.templateItemId);
-                            if (itemData) {
-                              return itemData.componente || itemData.criterio || itemData.oQueChecar || `Item ${itemData.id}`;
-                            }
-                          }
-                          return issue.descricao ?? "Item sem identificação";
-                        })()}
-                      </p>
-                      {issue.descricao && (
-                        <p className="text-sm text-gray-600">
-                          <span className="font-medium text-gray-700">Descrição:</span> {issue.descricao}
-                        </p>
-                      )}
-                      {issue.osNumero && <p className="text-xs text-gray-500">Nº da O.S.: {issue.osNumero}</p>}
-                      {issue.createdAt && <p className="text-xs text-gray-400">Aberta em {new Date(issue.createdAt).toLocaleString("pt-BR")}</p>}
-                      {issue.fotos?.length ? (
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          {issue.fotos.map((foto, index) => (
-                            <a
-                              key={`${issue.id}-list-foto-${index}`}
-                              href={foto}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="block overflow-hidden rounded border border-blue-200"
-                            >
-                              <Image
-                                src={foto}
-                                alt={`Foto da NC anterior`}
-                                width={96}
-                                height={72}
-                                className="h-16 w-24 object-cover"
-                                unoptimized
-                              />
-                            </a>
-                          ))}
-                        </div>
-                      ) : null}
-                      <p className="text-xs text-gray-600">Marcar como resolvida nesta inspeção</p>
-                    </div>
-                  </div>
-                </label>
-              ))}
-            </div>
-          )}
-        </section>
-      )}
 
       {/* Footer com ações (mesmo fluxo) */}
       <footer className="mt-8 border-t border-gray-200 bg-white px-4 py-4">
