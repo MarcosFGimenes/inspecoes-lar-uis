@@ -2,9 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
-import { useForm } from "react-hook-form";
+import { useForm, type Resolver } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { machineSchema, MachineInput } from "@/lib/machines-schema";
+import { DEFAULT_MACHINE_TASK_CODE, machineSchema, MachineInput } from "@/lib/machines-schema";
 
 export type MachineFormValues = MachineInput;
 
@@ -40,7 +40,7 @@ export default function MachineForm({ initialValues, templates, onSubmit, onDele
     watch,
     formState: { errors },
   } = useForm<MachineFormValues>({
-    resolver: zodResolver(machineSchema),
+    resolver: zodResolver(machineSchema) as Resolver<MachineFormValues>,
     defaultValues: initialValues,
   });
 
@@ -123,6 +123,18 @@ export default function MachineForm({ initialValues, templates, onSubmit, onDele
             <label className="font-medium">LAC</label>
             <input className="border rounded p-2 w-full" placeholder="012" {...register("lac")} />
             {errors.lac && <p className="text-sm text-red-600">{errors.lac.message}</p>}
+          </div>
+          <div className="space-y-2">
+            <label className="font-medium">Código da tarefa</label>
+            <input
+              className="border rounded p-2 w-full"
+              placeholder={DEFAULT_MACHINE_TASK_CODE}
+              {...register("codTarefa")}
+            />
+            <p className="text-xs text-[var(--muted)]">
+              Utilize o código da OS no SAP que deve ser considerado para programações de rota.
+            </p>
+            {errors.codTarefa && <p className="text-sm text-red-600">{errors.codTarefa.message}</p>}
           </div>
         </div>
 
