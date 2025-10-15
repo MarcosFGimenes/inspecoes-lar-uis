@@ -39,9 +39,15 @@ type RawRow = {
 
 type MachineIndexRecord = {
   id: string;
+  tag: string;
   nome?: string | null;
   templateId?: string | null;
   codTarefa?: string | null;
+};
+
+type MachinesIndex = {
+  byTag: Map<string, MachineIndexRecord>;
+  byId: Map<string, MachineIndexRecord>;
 };
 
 type MaintainerIndexRecord = {
@@ -50,11 +56,13 @@ type MaintainerIndexRecord = {
   matricula?: string | null;
   normalizedName: string | null;
   machineIds: string[];
+  machineTags: string[];
 };
 
 type MaintainersIndex = {
   byName: Map<string, MaintainerIndexRecord>;
   byMachineId: Map<string, MaintainerIndexRecord[]>;
+  byMachineTag: Map<string, MaintainerIndexRecord[]>;
 };
 
 const REQUIRED_COLUMNS = [
@@ -93,9 +101,10 @@ function ensureNumber(value: number | undefined | null) {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
-async function fetchMachinesIndex() {
+async function fetchMachinesIndex(): Promise<MachinesIndex> {
   const collections = ["machines", "maquinas"] as const;
-  const index = new Map<string, MachineIndexRecord>();
+  const byTag = new Map<string, MachineIndexRecord>();
+  const byId = new Map<string, MachineIndexRecord>();
 
   for (const collection of collections) {
     const snapshot = await adminDb.collection(collection).get();
@@ -104,19 +113,22 @@ async function fetchMachinesIndex() {
       const rawTag = data.tag ?? data.TAG ?? doc.get("tag");
       const tag = rawTag != null ? String(rawTag).trim() : "";
       if (!tag) return;
-      if (collection === "maquinas" && index.has(tag)) return;
+      if (collection === "maquinas" && byTag.has(tag)) return;
       const rawCodTarefa = data.codTarefa ?? doc.get("codTarefa");
       const codTarefa = rawCodTarefa != null ? normalizeWhitespace(String(rawCodTarefa)) : "";
-      index.set(tag, {
+      const record: MachineIndexRecord = {
         id: doc.id,
+        tag,
         nome: typeof data.nome === "string" ? data.nome : undefined,
         templateId: typeof data.templateId === "string" ? data.templateId : undefined,
         codTarefa: codTarefa || null,
-      });
+      };
+      byTag.set(tag, record);
+      byId.set(doc.id, record);
     });
   }
 
-  return index;
+  return { byTag, byId };
 }
 
 function sanitizeMaintainerMachines(value: unknown) {
@@ -130,37 +142,87 @@ function sanitizeMaintainerMachines(value: unknown) {
   );
 }
 
-async function fetchMaintainersIndex(): Promise<MaintainersIndex> {
+function addMaintainerToMap(
+  map: Map<string, MaintainerIndexRecord[]>,
+  key: string,
+  record: MaintainerIndexRecord,
+) {
+  const list = map.get(key) ?? [];
+  if (!list.some(existing => existing.id === record.id)) {
+    list.push(record);
+    map.set(key, list);
+  }
+}
+
+async function fetchMaintainersIndex(machinesIndex: MachinesIndex): Promise<MaintainersIndex> {
   const snapshot = await adminDb.collection("mantenedores").get();
   const byName = new Map<string, MaintainerIndexRecord>();
   const byMachineId = new Map<string, MaintainerIndexRecord[]>();
+  const byMachineTag = new Map<string, MaintainerIndexRecord[]>();
+
   snapshot.forEach(doc => {
     const data = doc.data() ?? {};
     const nome = typeof data.nome === "string" ? data.nome : undefined;
     const matricula = typeof data.matricula === "string" ? data.matricula : undefined;
     const normalized = normalizeName(nome ?? undefined) || null;
-    const machineIds = sanitizeMaintainerMachines(data.machines);
+    const rawMachineRefs = sanitizeMaintainerMachines(data.machines);
+
+    const resolvedMachineIds = new Set<string>();
+    const resolvedMachineTags = new Set<string>();
+
+    rawMachineRefs.forEach(ref => {
+      if (!ref) return;
+      const byIdRecord = machinesIndex.byId.get(ref);
+      const byTagRecord = machinesIndex.byTag.get(ref);
+      let matched = false;
+
+      if (byIdRecord) {
+        resolvedMachineIds.add(byIdRecord.id);
+        if (byIdRecord.tag) {
+          resolvedMachineTags.add(byIdRecord.tag);
+        }
+        matched = true;
+      }
+
+      if (byTagRecord) {
+        resolvedMachineIds.add(byTagRecord.id);
+        if (byTagRecord.tag) {
+          resolvedMachineTags.add(byTagRecord.tag);
+        }
+        matched = true;
+      }
+
+      if (!matched) {
+        resolvedMachineIds.add(ref);
+        resolvedMachineTags.add(ref);
+      }
+    });
 
     const record: MaintainerIndexRecord = {
       id: doc.id,
       nome,
       matricula,
       normalizedName: normalized,
-      machineIds,
+      machineIds: Array.from(resolvedMachineIds),
+      machineTags: Array.from(resolvedMachineTags),
     };
 
     if (normalized && !byName.has(normalized)) {
       byName.set(normalized, record);
     }
 
-    for (const machineId of machineIds) {
-      const list = byMachineId.get(machineId) ?? [];
-      list.push(record);
-      byMachineId.set(machineId, list);
-    }
+    record.machineIds.forEach(machineId => {
+      if (!machineId) return;
+      addMaintainerToMap(byMachineId, machineId, record);
+    });
+
+    record.machineTags.forEach(machineTag => {
+      if (!machineTag) return;
+      addMaintainerToMap(byMachineTag, machineTag, record);
+    });
   });
 
-  return { byName, byMachineId };
+  return { byName, byMachineId, byMachineTag };
 }
 
 async function deletePreviousBatch(previousBatchId: string) {
@@ -235,10 +297,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const [machinesIndex, maintainersIndex] = await Promise.all([
-      fetchMachinesIndex(),
-      fetchMaintainersIndex(),
-    ]);
+    const machinesIndex = await fetchMachinesIndex();
+    const maintainersIndex = await fetchMaintainersIndex(machinesIndex);
 
     const batchId = new Date().toISOString();
     const cfgRef = adminDb.collection("config_programacao").doc("activeBatch");
@@ -288,15 +348,27 @@ export async function POST(req: NextRequest) {
       seenDocIds.add(docId);
 
       const tag = rawTag.trim();
-      const machineRecord = machinesIndex.get(tag);
+      const machineRecord = machinesIndex.byTag.get(tag);
 
       const csvResponsavelNomeRaw = normalizeWhitespace(row.SOLICITANTE);
       const csvResponsavelNome = csvResponsavelNomeRaw || undefined;
       const csvResponsavelNormalized = normalizeName(csvResponsavelNome ?? undefined) || null;
 
-      const machineMaintainers = machineRecord?.id
-        ? maintainersIndex.byMachineId.get(machineRecord.id) ?? []
-        : [];
+      const maintainerCandidatesMap = new Map<string, MaintainerIndexRecord>();
+
+      if (machineRecord?.id) {
+        (maintainersIndex.byMachineId.get(machineRecord.id) ?? []).forEach(maint => {
+          maintainerCandidatesMap.set(maint.id, maint);
+        });
+      }
+
+      if (tag) {
+        (maintainersIndex.byMachineTag.get(tag) ?? []).forEach(maint => {
+          maintainerCandidatesMap.set(maint.id, maint);
+        });
+      }
+
+      const machineMaintainers = Array.from(maintainerCandidatesMap.values());
 
       const maintainerCandidates = new Map<string, MaintainerIndexRecord>();
       machineMaintainers.forEach(maint => {
@@ -311,7 +383,24 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      const orderedMaintainers = Array.from(maintainerCandidates.values());
+      const orderedMaintainers = Array.from(maintainerCandidates.values()).sort((a, b) => {
+        const aMatchesMachine =
+          (machineRecord?.id && a.machineIds.includes(machineRecord.id)) ||
+          (tag ? a.machineTags.includes(tag) : false);
+        const bMatchesMachine =
+          (machineRecord?.id && b.machineIds.includes(machineRecord.id)) ||
+          (tag ? b.machineTags.includes(tag) : false);
+
+        if (aMatchesMachine && !bMatchesMachine) return -1;
+        if (!aMatchesMachine && bMatchesMachine) return 1;
+
+        const aName = a.nome?.toLocaleLowerCase("pt-BR") ?? "";
+        const bName = b.nome?.toLocaleLowerCase("pt-BR") ?? "";
+        if (aName && bName) return aName.localeCompare(bName);
+        if (aName) return -1;
+        if (bName) return 1;
+        return a.id.localeCompare(b.id);
+      });
       const primaryMaintainer = orderedMaintainers[0] ?? maintainerMatchedByName ?? machineMaintainers[0];
 
       const resolvedResponsavelNome = primaryMaintainer?.nome && primaryMaintainer.nome.trim().length > 0
@@ -321,14 +410,33 @@ export async function POST(req: NextRequest) {
       const responsavelNormalizedRaw = normalizeName(resolvedResponsavelNome ?? undefined);
       const responsavelNormalized = responsavelNormalizedRaw || null;
 
-      const responsaveis = orderedMaintainers.map(maint => ({
+      let responsaveis = orderedMaintainers.map(maint => ({
         maintId: maint.id,
         nome: maint.nome ?? null,
         matricula: maint.matricula ?? null,
-        origem: maint.machineIds.includes(machineRecord?.id ?? "") ? "machine" : "nome",
+        origem:
+          (machineRecord?.id && maint.machineIds.includes(machineRecord.id)) ||
+          (tag ? maint.machineTags.includes(tag) : false)
+            ? "machine"
+            : "nome",
       }));
 
-      const responsavelIds = orderedMaintainers.map(maint => maint.id);
+      if (responsaveis.length === 0 && primaryMaintainer) {
+        responsaveis = [
+          {
+            maintId: primaryMaintainer.id,
+            nome: primaryMaintainer.nome ?? null,
+            matricula: primaryMaintainer.matricula ?? null,
+            origem:
+              (machineRecord?.id && primaryMaintainer.machineIds.includes(machineRecord.id)) ||
+              (tag ? primaryMaintainer.machineTags.includes(tag) : false)
+                ? "machine"
+                : "nome",
+          },
+        ];
+      }
+
+      const responsavelIds = Array.from(new Set(responsaveis.map(resp => resp.maintId).filter(Boolean))) as string[];
       const responsavelNomesNormalizados = new Set<string>();
       orderedMaintainers.forEach(maint => {
         const normalized = normalizeName(maint.nome ?? undefined);
@@ -336,6 +444,12 @@ export async function POST(req: NextRequest) {
           responsavelNomesNormalizados.add(normalized);
         }
       });
+      if (!orderedMaintainers.length && primaryMaintainer) {
+        const normalizedPrimary = normalizeName(primaryMaintainer.nome ?? undefined);
+        if (normalizedPrimary) {
+          responsavelNomesNormalizados.add(normalizedPrimary);
+        }
+      }
       if (csvResponsavelNormalized) {
         responsavelNomesNormalizados.add(csvResponsavelNormalized);
       }
@@ -403,7 +517,8 @@ export async function POST(req: NextRequest) {
           maintId: primaryMaintainer?.id ?? null,
           matricula: primaryMaintainer?.matricula ?? null,
           origem: primaryMaintainer
-            ? primaryMaintainer.machineIds.includes(machineRecord?.id ?? "")
+            ? (machineRecord?.id && primaryMaintainer.machineIds.includes(machineRecord.id)) ||
+              (tag ? primaryMaintainer.machineTags.includes(tag) : false)
               ? "machine"
               : "nome"
             : csvResponsavelNome
