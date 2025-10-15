@@ -1324,24 +1324,32 @@ export default function InspectionPage() {
                     </label>
 
                     {st?.fotos?.length ? (
-                      <ul className="flex flex-wrap gap-2 text-xs text-gray-700">
+                      <ul className="flex flex-wrap gap-3 text-xs text-gray-700">
                         {st.fotos.map(foto => (
                           <li
                             key={foto.id}
-                            className="flex items-center gap-2 rounded-md border border-gray-200 bg-gray-100 px-2 py-1"
+                            className="flex flex-col gap-2 rounded-md border border-gray-200 bg-gray-100 p-2"
                           >
-                            <span className="max-w-[8rem] truncate" title={foto.name}>
-                              {foto.name || "Imagem anexada"}
-                            </span>
-                            <div className="flex items-center gap-1">
-                              <a
-                                href={foto.dataUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="text-blue-600 hover:underline"
-                              >
-                                Ver
-                              </a>
+                            <a
+                              href={foto.dataUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="relative block h-24 w-32 overflow-hidden rounded"
+                              aria-label={`Abrir imagem ${foto.name || "anexada"} em uma nova aba`}
+                            >
+                              <Image
+                                src={foto.dataUrl}
+                                alt={foto.name || "Pré-visualização da imagem selecionada"}
+                                fill
+                                sizes="128px"
+                                className="object-cover"
+                                unoptimized
+                              />
+                            </a>
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="max-w-[8rem] truncate" title={foto.name}>
+                                {foto.name || "Imagem anexada"}
+                              </span>
                               <button
                                 type="button"
                                 onClick={() => handleRemoveFoto(item.id!, foto.id)}

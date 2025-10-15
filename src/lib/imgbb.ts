@@ -1,5 +1,7 @@
 // src/lib/imgbb.ts
 
+import { Buffer } from "node:buffer";
+
 const DATA_URL_REGEX = /^data:(.+);base64,(.*)$/i;
 
 type ImgbbSuccessResponse = {
@@ -38,6 +40,18 @@ function extractBase64(dataUrl: string) {
   return { mime, base64 };
 }
 
+function guessExtension(mime: string) {
+  const match = mime.match(/\/([a-z0-9.+-]+)$/i);
+  return match ? match[1]!.toLowerCase() : "bin";
+}
+
+function buildFileName(name: string | undefined, mime: string) {
+  const base = (name ?? "inspecao").trim() || "inspecao";
+  const sanitized = base.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/-{2,}/g, "-").replace(/^-+|-+$/g, "") || "inspecao";
+  const extension = guessExtension(mime);
+  return `${sanitized}.${extension}`.slice(0, 120);
+}
+
 export async function uploadToImgbbFromDataUrl(
   dataUrl: string,
   name?: string,
@@ -47,7 +61,14 @@ export async function uploadToImgbbFromDataUrl(
   const { mime, base64 } = extractBase64(dataUrl.trim());
 
   const form = new FormData();
-  form.append("image", base64);
+  if (typeof Blob !== "undefined") {
+    const buffer = Buffer.from(base64, "base64");
+    const blob = new Blob([buffer], { type: mime });
+    const fileName = buildFileName(name, mime);
+    form.append("image", blob, fileName);
+  } else {
+    form.append("image", base64);
+  }
   if (name) {
     form.append("name", name);
   }
