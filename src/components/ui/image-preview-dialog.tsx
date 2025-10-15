@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import Image from "next/image";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 
 export interface ImagePreviewData {
@@ -16,6 +15,10 @@ interface ImagePreviewDialogProps {
 
 export function ImagePreviewDialog({ image, onClose }: ImagePreviewDialogProps) {
   const [zoom, setZoom] = useState(1);
+
+  useEffect(() => {
+    setZoom(1);
+  }, [image.src]);
 
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
@@ -47,6 +50,8 @@ export function ImagePreviewDialog({ image, onClose }: ImagePreviewDialogProps) 
   const handleZoomOut = () => setZoom(current => Math.max(current - 0.25, 1));
   const handleReset = () => setZoom(1);
 
+  const zoomPercentage = useMemo(() => Math.round(zoom * 100), [zoom]);
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
@@ -54,7 +59,7 @@ export function ImagePreviewDialog({ image, onClose }: ImagePreviewDialogProps) 
       role="presentation"
     >
       <div
-        className="relative flex w-full max-w-5xl flex-col gap-4 text-white"
+        className="relative flex w-full max-w-5xl flex-col gap-4 text-white sm:max-h-[90vh]"
         onClick={event => event.stopPropagation()}
         role="dialog"
         aria-modal="true"
@@ -71,7 +76,7 @@ export function ImagePreviewDialog({ image, onClose }: ImagePreviewDialogProps) 
           </Button>
         </div>
 
-        <div className="flex items-center gap-2 text-xs sm:text-sm">
+        <div className="flex flex-wrap items-center gap-2 text-xs sm:text-sm">
           <Button
             type="button"
             variant="secondary"
@@ -81,7 +86,7 @@ export function ImagePreviewDialog({ image, onClose }: ImagePreviewDialogProps) 
           >
             -
           </Button>
-          <span className="w-16 text-center">{Math.round(zoom * 100)}%</span>
+          <span className="w-16 text-center">{zoomPercentage}%</span>
           <Button
             type="button"
             variant="secondary"
@@ -102,16 +107,20 @@ export function ImagePreviewDialog({ image, onClose }: ImagePreviewDialogProps) 
           </Button>
         </div>
 
-        <div className="relative flex max-h-[80vh] min-h-[300px] w-full justify-center overflow-auto rounded-lg bg-black/40 p-2">
-          <div className="relative h-[60vh] w-full max-w-5xl">
-            <Image
+        <div className="relative flex min-h-[200px] flex-1 justify-center">
+          <div className="flex max-h-[80vh] w-full max-w-full items-center justify-center overflow-auto rounded-lg bg-black/40 p-2 sm:p-4">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
               src={image.src}
               alt={image.alt}
-              fill
-              sizes="(max-width: 768px) 100vw, 80vw"
-              className="object-contain"
-              style={{ transform: `scale(${zoom})`, transformOrigin: "center center" }}
-              priority
+              draggable={false}
+              className="max-h-full select-none"
+              style={{
+                width: `${zoom * 100}%`,
+                height: "auto",
+                maxWidth: zoom === 1 ? "100%" : "none",
+                maxHeight: zoom === 1 ? "100%" : "none",
+              }}
             />
           </div>
         </div>
