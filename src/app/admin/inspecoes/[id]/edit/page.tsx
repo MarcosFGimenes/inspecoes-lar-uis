@@ -11,6 +11,10 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  ImagePreviewDialog,
+  type ImagePreviewData,
+} from "@/components/ui/image-preview-dialog";
 
 interface TemplateItemData {
   id?: string;
@@ -147,6 +151,7 @@ export default function EditInspectionPage() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [previewImage, setPreviewImage] = useState<ImagePreviewData | null>(null);
 
   const inspectionId = idParam ? String(idParam) : null;
 
@@ -349,6 +354,14 @@ export default function EditInspectionPage() {
         }),
       };
     });
+  }, []);
+
+  const openImagePreview = useCallback((image: ImagePreviewData) => {
+    setPreviewImage(image);
+  }, []);
+
+  const closeImagePreview = useCallback(() => {
+    setPreviewImage(null);
   }, []);
 
   const handleSubmit = useCallback(
@@ -645,19 +658,26 @@ export default function EditInspectionPage() {
                       <p className="text-sm font-medium text-[var(--text)]">Fotos existentes</p>
                       <div className="flex flex-wrap gap-3">
                         {item.existingPhotos.map((photo, index) => (
-                          <div
+                          <button
                             key={`${item.questionId}-existing-${index}`}
-                            className="overflow-hidden rounded-lg border border-[var(--border)] bg-white"
+                            type="button"
+                            onClick={() =>
+                              openImagePreview({
+                                src: photo,
+                                alt: `Foto existente ${index + 1}`,
+                              })
+                            }
+                            className="group overflow-hidden rounded-lg border border-[var(--border)] bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--primary)]"
                           >
                             <Image
                               src={photo}
                               alt={`Foto existente ${index + 1}`}
                               width={160}
                               height={120}
-                              className="h-24 w-40 object-cover"
+                              className="h-24 w-40 object-cover transition-transform duration-200 group-hover:scale-105"
                               unoptimized
                             />
-                          </div>
+                          </button>
                         ))}
                       </div>
                     </div>
@@ -672,18 +692,32 @@ export default function EditInspectionPage() {
                             key={photo.id}
                             className="relative overflow-hidden rounded-lg border border-[var(--border)] bg-white"
                           >
-                            <Image
-                              src={photo.dataUrl}
-                              alt="Nova foto"
-                              width={160}
-                              height={120}
-                              className="h-24 w-40 object-cover"
-                              unoptimized
-                            />
+                            <button
+                              type="button"
+                              onClick={() =>
+                                openImagePreview({
+                                  src: photo.dataUrl,
+                                  alt: photo.name ? `Nova foto - ${photo.name}` : "Nova foto",
+                                })
+                              }
+                              className="group block focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--primary)]"
+                            >
+                              <Image
+                                src={photo.dataUrl}
+                                alt="Nova foto"
+                                width={160}
+                                height={120}
+                                className="h-24 w-40 object-cover transition-transform duration-200 group-hover:scale-105"
+                                unoptimized
+                              />
+                            </button>
                             <button
                               type="button"
                               className="absolute right-1 top-1 rounded-full bg-black/60 px-2 py-1 text-xs text-white"
-                              onClick={() => handleRemoveNewPhoto(item.questionId, photo.id)}
+                              onClick={event => {
+                                event.stopPropagation();
+                                handleRemoveNewPhoto(item.questionId, photo.id);
+                              }}
                             >
                               remover
                             </button>
@@ -730,6 +764,7 @@ export default function EditInspectionPage() {
           </div>
         </div>
       </form>
+      {previewImage ? <ImagePreviewDialog image={previewImage} onClose={closeImagePreview} /> : null}
     </div>
   );
 }
