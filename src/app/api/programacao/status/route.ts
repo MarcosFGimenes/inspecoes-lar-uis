@@ -47,12 +47,19 @@ export async function GET(req: NextRequest) {
   const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
   let atrasadas = 0;
   let semMaquina = 0;
+  let semMantenedor = 0;
 
   pendentesSnap.forEach(doc => {
     const data = doc.data() ?? {};
     const machine = data.machine ?? {};
     if (machine.machineNotFound) {
       semMaquina += 1;
+    }
+    const responsavelIds = Array.isArray(data.responsavelIds) ? data.responsavelIds : [];
+    const responsavelPrincipal = data.responsavel?.maintId ? [data.responsavel.maintId] : [];
+    const hasMaintainer = responsavelIds.length > 0 || responsavelPrincipal.length > 0;
+    if (!hasMaintainer) {
+      semMantenedor += 1;
     }
     const vencimentoIso = data?.datas?.vencimento;
     if (typeof vencimentoIso === "string") {
@@ -73,6 +80,7 @@ export async function GET(req: NextRequest) {
       pendentes: pendentesSnap.size,
       atrasadas,
       semMaquina,
+      semMantenedor,
       totalBatchAtual: totalAtual,
     },
   });

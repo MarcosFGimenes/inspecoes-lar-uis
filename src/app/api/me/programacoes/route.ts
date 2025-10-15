@@ -40,21 +40,30 @@ export async function GET() {
     const docsMap = new Map<string, DocumentSnapshot<DocumentData>>();
 
     if (maintId) {
-      const snap = await adminDb
-        .collection("programacoes_inspecao")
-        .where("responsavel.maintId", "==", maintId)
-        .get();
-      snap.forEach(doc => {
+      const [principalSnap, idsSnap] = await Promise.all([
+        adminDb.collection("programacoes_inspecao").where("responsavel.maintId", "==", maintId).get(),
+        adminDb.collection("programacoes_inspecao").where("responsavelIds", "array-contains", maintId).get(),
+      ]);
+      principalSnap.forEach(doc => {
+        docsMap.set(doc.id, doc);
+      });
+      idsSnap.forEach(doc => {
         docsMap.set(doc.id, doc);
       });
     }
 
     if (normalizedName) {
-      const snap = await adminDb
-        .collection("programacoes_inspecao")
-        .where("responsavel.nomeNormalizado", "==", normalizedName)
-        .get();
-      snap.forEach(doc => {
+      const [principalNameSnap, namesSnap] = await Promise.all([
+        adminDb.collection("programacoes_inspecao").where("responsavel.nomeNormalizado", "==", normalizedName).get(),
+        adminDb
+          .collection("programacoes_inspecao")
+          .where("responsavelNomesNormalizados", "array-contains", normalizedName)
+          .get(),
+      ]);
+      principalNameSnap.forEach(doc => {
+        docsMap.set(doc.id, doc);
+      });
+      namesSnap.forEach(doc => {
         docsMap.set(doc.id, doc);
       });
     }

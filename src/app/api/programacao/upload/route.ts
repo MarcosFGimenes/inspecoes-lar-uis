@@ -292,22 +292,53 @@ export async function POST(req: NextRequest) {
 
       const csvResponsavelNomeRaw = normalizeWhitespace(row.SOLICITANTE);
       const csvResponsavelNome = csvResponsavelNomeRaw || undefined;
+      const csvResponsavelNormalized = normalizeName(csvResponsavelNome ?? undefined) || null;
 
       const machineMaintainers = machineRecord?.id
         ? maintainersIndex.byMachineId.get(machineRecord.id) ?? []
         : [];
 
-      const assignedMaintainer = machineMaintainers[0];
+      const maintainerCandidates = new Map<string, MaintainerIndexRecord>();
+      machineMaintainers.forEach(maint => {
+        maintainerCandidates.set(maint.id, maint);
+      });
 
-      const resolvedResponsavelNome = assignedMaintainer?.nome && assignedMaintainer.nome.trim().length > 0
-        ? assignedMaintainer.nome
+      let maintainerMatchedByName: MaintainerIndexRecord | undefined;
+      if (csvResponsavelNormalized) {
+        maintainerMatchedByName = maintainersIndex.byName.get(csvResponsavelNormalized) ?? undefined;
+        if (maintainerMatchedByName) {
+          maintainerCandidates.set(maintainerMatchedByName.id, maintainerMatchedByName);
+        }
+      }
+
+      const orderedMaintainers = Array.from(maintainerCandidates.values());
+      const primaryMaintainer = orderedMaintainers[0] ?? maintainerMatchedByName ?? machineMaintainers[0];
+
+      const resolvedResponsavelNome = primaryMaintainer?.nome && primaryMaintainer.nome.trim().length > 0
+        ? primaryMaintainer.nome
         : csvResponsavelNome ?? null;
 
       const responsavelNormalizedRaw = normalizeName(resolvedResponsavelNome ?? undefined);
       const responsavelNormalized = responsavelNormalizedRaw || null;
 
-      const maintMatch = assignedMaintainer
-        ?? (responsavelNormalizedRaw ? maintainersIndex.byName.get(responsavelNormalizedRaw) : undefined);
+      const responsaveis = orderedMaintainers.map(maint => ({
+        maintId: maint.id,
+        nome: maint.nome ?? null,
+        matricula: maint.matricula ?? null,
+        origem: maint.machineIds.includes(machineRecord?.id ?? "") ? "machine" : "nome",
+      }));
+
+      const responsavelIds = orderedMaintainers.map(maint => maint.id);
+      const responsavelNomesNormalizados = new Set<string>();
+      orderedMaintainers.forEach(maint => {
+        const normalized = normalizeName(maint.nome ?? undefined);
+        if (normalized) {
+          responsavelNomesNormalizados.add(normalized);
+        }
+      });
+      if (csvResponsavelNormalized) {
+        responsavelNomesNormalizados.add(csvResponsavelNormalized);
+      }
 
       const periodicidade = parseInteger(row.PERIODICIDADE);
       const tempoPrevisto = parseNumber(row.TEMPO_PREV);
@@ -369,10 +400,19 @@ export async function POST(req: NextRequest) {
         responsavel: {
           nome: resolvedResponsavelNome,
           nomeNormalizado: responsavelNormalized,
-          maintId: maintMatch?.id ?? null,
-          matricula: maintMatch?.matricula ?? null,
-          origem: assignedMaintainer ? "machine" : csvResponsavelNome ? "csv" : null,
+          maintId: primaryMaintainer?.id ?? null,
+          matricula: primaryMaintainer?.matricula ?? null,
+          origem: primaryMaintainer
+            ? primaryMaintainer.machineIds.includes(machineRecord?.id ?? "")
+              ? "machine"
+              : "nome"
+            : csvResponsavelNome
+              ? "csv"
+              : null,
         },
+        responsaveis,
+        responsavelIds,
+        responsavelNomesNormalizados: Array.from(responsavelNomesNormalizados),
         oficinaDestino: normalizeWhitespace(row.OFICINA_DESTINO),
         gut: gut ?? null,
         tempoPrevistoHoras: tempoPrevisto ?? null,

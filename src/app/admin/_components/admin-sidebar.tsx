@@ -61,6 +61,24 @@ const navItems: AdminNavItem[] = [
   },
 ];
 
+const programacaoSubnav: AdminNavItem[] = [
+  {
+    href: "/admin/programacao",
+    label: "Resumo e upload",
+    icon: "fas fa-database",
+  },
+  {
+    href: "/admin/programacao/detalhes",
+    label: "Detalhamento",
+    icon: "fas fa-clipboard-list",
+  },
+  {
+    href: "/admin/programacao/kpis",
+    label: "KPIs",
+    icon: "fas fa-chart-line",
+  },
+];
+
 interface AdminSidebarProps {
   open: boolean;
   onClose?: () => void;
@@ -131,6 +149,37 @@ export function AdminSidebar({ open, onClose, onNavigate }: AdminSidebarProps) {
             );
           })}
         </nav>
+
+        {pathname.startsWith("/admin/programacao") ? (
+          <div className="mt-6 space-y-2">
+            <p className="px-2 text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+              Programação
+            </p>
+            <div className="space-y-1">
+              {programacaoSubnav.map(item => {
+                const active = isActive(item.href);
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    onClick={onNavigate}
+                    className={cn(
+                      "flex items-center gap-3 rounded-2xl px-4 py-2 text-sm transition",
+                      active
+                        ? "bg-[var(--primary)]/10 text-[var(--primary)]"
+                        : "text-[var(--muted)] hover:bg-[color-mix(in_srgb,var(--surface)_88%,rgba(148,163,184,0.16)_12%)] hover:text-[var(--text)]",
+                    )}
+                  >
+                    <span className="flex h-8 w-8 items-center justify-center rounded-2xl bg-[color-mix(in_srgb,var(--surface)_92%,rgba(148,163,184,0.16)_8%)]">
+                      <i className={cn(item.icon, "text-[13px]")} aria-hidden />
+                    </span>
+                    <span>{item.label}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
 
         <div className="mt-auto space-y-2 px-2">
           <Link
