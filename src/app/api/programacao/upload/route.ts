@@ -47,6 +47,14 @@ type MachineIndexRecord = {
 type MaintainerIndexRecord = {
   id: string;
   nome?: string | null;
+  matricula?: string | null;
+  normalizedName: string | null;
+  machineIds: string[];
+};
+
+type MaintainersIndex = {
+  byName: Map<string, MaintainerIndexRecord>;
+  byMachineId: Map<string, MaintainerIndexRecord[]>;
 };
 
 const REQUIRED_COLUMNS = [
@@ -111,19 +119,48 @@ async function fetchMachinesIndex() {
   return index;
 }
 
-async function fetchMaintainersIndex() {
+function sanitizeMaintainerMachines(value: unknown) {
+  if (!Array.isArray(value)) return [] as string[];
+  return Array.from(
+    new Set(
+      value
+        .map(item => (typeof item === "string" ? item.trim() : ""))
+        .filter(Boolean)
+    )
+  );
+}
+
+async function fetchMaintainersIndex(): Promise<MaintainersIndex> {
   const snapshot = await adminDb.collection("mantenedores").get();
-  const index = new Map<string, MaintainerIndexRecord>();
+  const byName = new Map<string, MaintainerIndexRecord>();
+  const byMachineId = new Map<string, MaintainerIndexRecord[]>();
   snapshot.forEach(doc => {
     const data = doc.data() ?? {};
     const nome = typeof data.nome === "string" ? data.nome : undefined;
-    const normalized = normalizeName(nome ?? undefined);
-    if (!normalized) return;
-    if (!index.has(normalized)) {
-      index.set(normalized, { id: doc.id, nome });
+    const matricula = typeof data.matricula === "string" ? data.matricula : undefined;
+    const normalized = normalizeName(nome ?? undefined) || null;
+    const machineIds = sanitizeMaintainerMachines(data.machines);
+
+    const record: MaintainerIndexRecord = {
+      id: doc.id,
+      nome,
+      matricula,
+      normalizedName: normalized,
+      machineIds,
+    };
+
+    if (normalized && !byName.has(normalized)) {
+      byName.set(normalized, record);
+    }
+
+    for (const machineId of machineIds) {
+      const list = byMachineId.get(machineId) ?? [];
+      list.push(record);
+      byMachineId.set(machineId, list);
     }
   });
-  return index;
+
+  return { byName, byMachineId };
 }
 
 async function deletePreviousBatch(previousBatchId: string) {
@@ -229,123 +266,140 @@ export async function POST(req: NextRequest) {
       const descricao = row["DESCRIÇÃO"]?.trim();
       const vencimento = row.DT_VENCIMENTO?.trim();
 
-    if (!rawOs || !rawTag || !descricao || !vencimento) {
-      validationErrors.push(`Linha ${rowNumber}: NR_OS, NR_MAQ, DESCRIÇÃO e DT_VENCIMENTO são obrigatórios.`);
-      return;
-    }
+      if (!rawOs || !rawTag || !descricao || !vencimento) {
+        validationErrors.push(`Linha ${rowNumber}: NR_OS, NR_MAQ, DESCRIÇÃO e DT_VENCIMENTO são obrigatórios.`);
+        return;
+      }
 
-    const vencimentoInfo = parseCsvDate(vencimento);
-    if (!vencimentoInfo.iso) {
-      validationErrors.push(`Linha ${rowNumber}: data de vencimento inválida.`);
-      return;
-    }
+      const vencimentoInfo = parseCsvDate(vencimento);
+      if (!vencimentoInfo.iso) {
+        validationErrors.push(`Linha ${rowNumber}: data de vencimento inválida.`);
+        return;
+      }
 
-    const emissaoInfo = parseCsvDate(row.DT_EMISSÃO);
-    const fechamentoInfo = parseCsvDate(row.DT_FECHAMENTO);
+      const emissaoInfo = parseCsvDate(row.DT_EMISSÃO);
+      const fechamentoInfo = parseCsvDate(row.DT_FECHAMENTO);
 
-    const docId = `${batchId}__${rawOs}`;
-    if (seenDocIds.has(docId)) {
-      validationErrors.push(`Linha ${rowNumber}: duplicada para OS ${rawOs}.`);
-      return;
-    }
-    seenDocIds.add(docId);
+      const docId = `${batchId}__${rawOs}`;
+      if (seenDocIds.has(docId)) {
+        validationErrors.push(`Linha ${rowNumber}: duplicada para OS ${rawOs}.`);
+        return;
+      }
+      seenDocIds.add(docId);
 
-    const tag = rawTag.trim();
-    const machineRecord = machinesIndex.get(tag);
+      const tag = rawTag.trim();
+      const machineRecord = machinesIndex.get(tag);
 
-    const responsavelNome = normalizeWhitespace(row.SOLICITANTE);
-    const responsavelNormalized = normalizeName(responsavelNome);
-    const maintMatch = responsavelNormalized ? maintainersIndex.get(responsavelNormalized) : undefined;
+      const csvResponsavelNomeRaw = normalizeWhitespace(row.SOLICITANTE);
+      const csvResponsavelNome = csvResponsavelNomeRaw || undefined;
 
-    const periodicidade = parseInteger(row.PERIODICIDADE);
-    const tempoPrevisto = parseNumber(row.TEMPO_PREV);
+      const machineMaintainers = machineRecord?.id
+        ? maintainersIndex.byMachineId.get(machineRecord.id) ?? []
+        : [];
 
-    const horasEletrica = parseNumber(row.HO_ELÉTRICA);
-    const horasMecanica = parseNumber(row.HO_MECÂNICA);
-    const horasOutras = parseNumber(row.HO_OUTRAS);
+      const assignedMaintainer = machineMaintainers[0];
 
-    const gut = ensureNumber(parseNumber(row.GUT));
+      const resolvedResponsavelNome = assignedMaintainer?.nome && assignedMaintainer.nome.trim().length > 0
+        ? assignedMaintainer.nome
+        : csvResponsavelNome ?? null;
 
-    const isLate = startOfToday.getTime() > new Date(vencimentoInfo.iso).getTime();
+      const responsavelNormalizedRaw = normalizeName(resolvedResponsavelNome ?? undefined);
+      const responsavelNormalized = responsavelNormalizedRaw || null;
 
-    const csvCodTarefa = normalizeWhitespace(row.COD_TAREFA);
-    const configuredCodTarefa = machineRecord?.codTarefa || "";
-    const expectedCodTarefa = configuredCodTarefa || DEFAULT_MACHINE_TASK_CODE;
+      const maintMatch = assignedMaintainer
+        ?? (responsavelNormalizedRaw ? maintainersIndex.byName.get(responsavelNormalizedRaw) : undefined);
 
-    if (!csvCodTarefa) {
-      validationErrors.push(
-        `Linha ${rowNumber}: COD_TAREFA vazio. Informe ${expectedCodTarefa} para importar a programação de rota.`,
-      );
-      return;
-    }
+      const periodicidade = parseInteger(row.PERIODICIDADE);
+      const tempoPrevisto = parseNumber(row.TEMPO_PREV);
 
-    if (csvCodTarefa !== expectedCodTarefa) {
-      validationErrors.push(
-        machineRecord
-          ? `Linha ${rowNumber}: COD_TAREFA ${csvCodTarefa} difere do código configurado (${expectedCodTarefa}) para a máquina ${tag}.`
-          : `Linha ${rowNumber}: COD_TAREFA ${csvCodTarefa} diferente do código padrão (${expectedCodTarefa}) utilizado para inspeções de rota.`,
-      );
-      return;
-    }
+      const horasEletrica = parseNumber(row.HO_ELÉTRICA);
+      const horasMecanica = parseNumber(row.HO_MECÂNICA);
+      const horasOutras = parseNumber(row.HO_OUTRAS);
 
-    const data = {
-      batchId,
-      osNumero: rawOs,
-      machine: {
-        tag,
-        nome: descricao,
-        machineId: machineRecord?.id,
-        templateId: machineRecord?.templateId,
-        codTarefaConfigurado: configuredCodTarefa || null,
-        machineNotFound: !machineRecord,
-      },
-      manutencao: {
-        tipo: normalizeWhitespace(row["TP_MANUT__PR__PD__CO__OU"] ?? ""),
-        criticidade: normalizeWhitespace(row.CRITICIDADE ?? ""),
-        descricaoTarefa: normalizeWhitespace(row.DESC_TAREFA ?? ""),
-        codTarefa: csvCodTarefa,
-        periodicidade: periodicidade ?? null,
-      },
-      datas: {
-        emissao: emissaoInfo.iso ?? null,
-        emissaoDate: emissaoInfo.timestamp ?? null,
-        vencimento: vencimentoInfo.iso,
-        vencimentoDate: vencimentoInfo.timestamp,
-        fechamento: fechamentoInfo.iso ?? null,
-        fechamentoDate: fechamentoInfo.timestamp ?? null,
-      },
-      responsavel: {
-        nome: responsavelNome,
-        nomeNormalizado: responsavelNormalized || null,
-        maintId: maintMatch?.id ?? null,
-      },
-      oficinaDestino: normalizeWhitespace(row.OFICINA_DESTINO),
-      gut: gut ?? null,
-      tempoPrevistoHoras: tempoPrevisto ?? null,
-      tipoOS: normalizeWhitespace(row.TIPO_O_S),
-      situacaoOS: normalizeWhitespace(row.SITUACAO_DA_O_S ?? row["SITUAÇÃO_DA_O_S"]),
-      horasEstimadas: {
-        eletrica: horasEletrica ?? null,
-        mecanica: horasMecanica ?? null,
-        outras: horasOutras ?? null,
-      },
-      status: "PENDENTE",
-      atrasada: isLate,
-      createdAt: FieldValue.serverTimestamp(),
-      updatedAt: FieldValue.serverTimestamp(),
-    };
+      const gut = ensureNumber(parseNumber(row.GUT));
 
-    const ref = adminDb.collection("programacoes_inspecao").doc(docId);
-    writeBatch.set(ref, data);
-    imported += 1;
-    batchCount += 1;
+      const isLate = startOfToday.getTime() > new Date(vencimentoInfo.iso).getTime();
 
-    if (batchCount >= 400) {
-      batchCommits.push(writeBatch.commit());
-      writeBatch = adminDb.batch();
-      batchCount = 0;
-    }
-  });
+      const csvCodTarefa = normalizeWhitespace(row.COD_TAREFA);
+      const configuredCodTarefa = machineRecord?.codTarefa || "";
+      const expectedCodTarefa = configuredCodTarefa || DEFAULT_MACHINE_TASK_CODE;
+
+      if (!csvCodTarefa) {
+        validationErrors.push(
+          `Linha ${rowNumber}: COD_TAREFA vazio. Informe ${expectedCodTarefa} para importar a programação de rota.`,
+        );
+        return;
+      }
+
+      if (csvCodTarefa !== expectedCodTarefa) {
+        validationErrors.push(
+          machineRecord
+            ? `Linha ${rowNumber}: COD_TAREFA ${csvCodTarefa} difere do código configurado (${expectedCodTarefa}) para a máquina ${tag}.`
+            : `Linha ${rowNumber}: COD_TAREFA ${csvCodTarefa} diferente do código padrão (${expectedCodTarefa}) utilizado para inspeções de rota.`,
+        );
+        return;
+      }
+
+      const data = {
+        batchId,
+        osNumero: rawOs,
+        machine: {
+          tag,
+          nome: descricao,
+          machineId: machineRecord?.id,
+          templateId: machineRecord?.templateId,
+          codTarefaConfigurado: configuredCodTarefa || null,
+          machineNotFound: !machineRecord,
+        },
+        manutencao: {
+          tipo: normalizeWhitespace(row["TP_MANUT__PR__PD__CO__OU"] ?? ""),
+          criticidade: normalizeWhitespace(row.CRITICIDADE ?? ""),
+          descricaoTarefa: normalizeWhitespace(row.DESC_TAREFA ?? ""),
+          codTarefa: csvCodTarefa,
+          periodicidade: periodicidade ?? null,
+        },
+        datas: {
+          emissao: emissaoInfo.iso ?? null,
+          emissaoDate: emissaoInfo.timestamp ?? null,
+          vencimento: vencimentoInfo.iso,
+          vencimentoDate: vencimentoInfo.timestamp,
+          fechamento: fechamentoInfo.iso ?? null,
+          fechamentoDate: fechamentoInfo.timestamp ?? null,
+        },
+        responsavel: {
+          nome: resolvedResponsavelNome,
+          nomeNormalizado: responsavelNormalized,
+          maintId: maintMatch?.id ?? null,
+          matricula: maintMatch?.matricula ?? null,
+          origem: assignedMaintainer ? "machine" : csvResponsavelNome ? "csv" : null,
+        },
+        oficinaDestino: normalizeWhitespace(row.OFICINA_DESTINO),
+        gut: gut ?? null,
+        tempoPrevistoHoras: tempoPrevisto ?? null,
+        tipoOS: normalizeWhitespace(row.TIPO_O_S),
+        situacaoOS: normalizeWhitespace(row.SITUACAO_DA_O_S ?? row["SITUAÇÃO_DA_O_S"]),
+        horasEstimadas: {
+          eletrica: horasEletrica ?? null,
+          mecanica: horasMecanica ?? null,
+          outras: horasOutras ?? null,
+        },
+        status: "PENDENTE",
+        atrasada: isLate,
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      };
+
+      const ref = adminDb.collection("programacoes_inspecao").doc(docId);
+      writeBatch.set(ref, data);
+      imported += 1;
+      batchCount += 1;
+
+      if (batchCount >= 400) {
+        batchCommits.push(writeBatch.commit());
+        writeBatch = adminDb.batch();
+        batchCount = 0;
+      }
+    });
 
     if (batchCount > 0) {
       batchCommits.push(writeBatch.commit());

@@ -37,6 +37,8 @@ type ProgramacaoRecord = {
   responsavel: {
     nome: string | null;
     maintId: string | null;
+    matricula: string | null;
+    origem: string | null;
   };
   datas: {
     emissao: string | null;

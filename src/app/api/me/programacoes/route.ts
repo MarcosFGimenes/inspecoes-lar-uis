@@ -102,6 +102,8 @@ export async function GET() {
         responsavel: {
           nome: typeof data.responsavel?.nome === "string" ? data.responsavel.nome : null,
           maintId: typeof data.responsavel?.maintId === "string" ? data.responsavel.maintId : null,
+          matricula: typeof data.responsavel?.matricula === "string" ? data.responsavel.matricula : null,
+          origem: typeof data.responsavel?.origem === "string" ? data.responsavel.origem : null,
         },
         datas: {
           emissao: toIso(data?.datas?.emissao),
