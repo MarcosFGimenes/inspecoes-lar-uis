@@ -6,6 +6,7 @@ import { ptBR } from "date-fns/locale";
 import { adminAuth, adminDb } from "@/lib/firebase-admin";
 import { parseCsv } from "@/lib/csv";
 import { normalizeName, normalizeWhitespace } from "@/lib/string-utils";
+import { DEFAULT_MACHINE_TASK_CODE } from "@/lib/machines-schema";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,6 +41,7 @@ type MachineIndexRecord = {
   id: string;
   nome?: string | null;
   templateId?: string | null;
+  codTarefa?: string | null;
 };
 
 type MaintainerIndexRecord = {
@@ -95,10 +97,13 @@ async function fetchMachinesIndex() {
       const tag = rawTag != null ? String(rawTag).trim() : "";
       if (!tag) return;
       if (collection === "maquinas" && index.has(tag)) return;
+      const rawCodTarefa = data.codTarefa ?? doc.get("codTarefa");
+      const codTarefa = rawCodTarefa != null ? normalizeWhitespace(String(rawCodTarefa)) : "";
       index.set(tag, {
         id: doc.id,
         nome: typeof data.nome === "string" ? data.nome : undefined,
         templateId: typeof data.templateId === "string" ? data.templateId : undefined,
+        codTarefa: codTarefa || null,
       });
     });
   }
@@ -176,52 +181,53 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "FILE_REQUIRED" }, { status: 400 });
   }
 
-  const buffer = Buffer.from(await file.arrayBuffer());
-  const rows = parseCsv(buffer, { delimiter: ",", skipEmptyLines: true }) as RawRow[];
+  try {
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const rows = parseCsv(buffer, { delimiter: ",", skipEmptyLines: true }) as RawRow[];
 
-  if (!rows.length) {
-    return NextResponse.json({ error: "EMPTY_CSV" }, { status: 400 });
-  }
+    if (!rows.length) {
+      return NextResponse.json({ error: "EMPTY_CSV" }, { status: 400 });
+    }
 
-  const columns = Object.keys(rows[0] ?? {});
-  const missingColumns = REQUIRED_COLUMNS.filter(column => !columns.includes(column));
-  if (missingColumns.length) {
-    return NextResponse.json(
-      { error: "MISSING_COLUMNS", missingColumns },
-      { status: 400 },
-    );
-  }
+    const columns = Object.keys(rows[0] ?? {});
+    const missingColumns = REQUIRED_COLUMNS.filter(column => !columns.includes(column));
+    if (missingColumns.length) {
+      return NextResponse.json(
+        { error: "MISSING_COLUMNS", missingColumns },
+        { status: 400 },
+      );
+    }
 
-  const [machinesIndex, maintainersIndex] = await Promise.all([
-    fetchMachinesIndex(),
-    fetchMaintainersIndex(),
-  ]);
+    const [machinesIndex, maintainersIndex] = await Promise.all([
+      fetchMachinesIndex(),
+      fetchMaintainersIndex(),
+    ]);
 
-  const batchId = new Date().toISOString();
-  const cfgRef = adminDb.collection("config_programacao").doc("activeBatch");
-  const previousConfig = await cfgRef.get();
-  const previousBatchId = previousConfig.exists ? (previousConfig.data()?.batchIdAtual as string | undefined) : undefined;
+    const batchId = new Date().toISOString();
+    const cfgRef = adminDb.collection("config_programacao").doc("activeBatch");
+    const previousConfig = await cfgRef.get();
+    const previousBatchId = previousConfig.exists ? (previousConfig.data()?.batchIdAtual as string | undefined) : undefined;
 
-  if (previousBatchId) {
-    await deletePreviousBatch(previousBatchId);
-  }
+    if (previousBatchId) {
+      await deletePreviousBatch(previousBatchId);
+    }
 
-  const seenDocIds = new Set<string>();
-  const validationErrors: string[] = [];
-  let imported = 0;
+    const seenDocIds = new Set<string>();
+    const validationErrors: string[] = [];
+    let imported = 0;
 
-  let writeBatch = adminDb.batch();
-  let batchCount = 0;
-  const batchCommits: Array<Promise<unknown>> = [];
-  const now = new Date();
-  const startOfToday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    let writeBatch = adminDb.batch();
+    let batchCount = 0;
+    const batchCommits: Array<Promise<unknown>> = [];
+    const now = new Date();
+    const startOfToday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 
-  rows.forEach((row, index) => {
-    const rowNumber = index + 2;
-    const rawOs = row.NR_OS?.trim();
-    const rawTag = row.NR_MAQ?.trim();
-    const descricao = row["DESCRIÇÃO"]?.trim();
-    const vencimento = row.DT_VENCIMENTO?.trim();
+    rows.forEach((row, index) => {
+      const rowNumber = index + 2;
+      const rawOs = row.NR_OS?.trim();
+      const rawTag = row.NR_MAQ?.trim();
+      const descricao = row["DESCRIÇÃO"]?.trim();
+      const vencimento = row.DT_VENCIMENTO?.trim();
 
     if (!rawOs || !rawTag || !descricao || !vencimento) {
       validationErrors.push(`Linha ${rowNumber}: NR_OS, NR_MAQ, DESCRIÇÃO e DT_VENCIMENTO são obrigatórios.`);
@@ -247,7 +253,7 @@ export async function POST(req: NextRequest) {
     const tag = rawTag.trim();
     const machineRecord = machinesIndex.get(tag);
 
-    const responsavelNome = normalizeWhitespace(row.SOLICITANTE ?? "");
+    const responsavelNome = normalizeWhitespace(row.SOLICITANTE);
     const responsavelNormalized = normalizeName(responsavelNome);
     const maintMatch = responsavelNormalized ? maintainersIndex.get(responsavelNormalized) : undefined;
 
@@ -262,6 +268,26 @@ export async function POST(req: NextRequest) {
 
     const isLate = startOfToday.getTime() > new Date(vencimentoInfo.iso).getTime();
 
+    const csvCodTarefa = normalizeWhitespace(row.COD_TAREFA);
+    const configuredCodTarefa = machineRecord?.codTarefa || "";
+    const expectedCodTarefa = configuredCodTarefa || DEFAULT_MACHINE_TASK_CODE;
+
+    if (!csvCodTarefa) {
+      validationErrors.push(
+        `Linha ${rowNumber}: COD_TAREFA vazio. Informe ${expectedCodTarefa} para importar a programação de rota.`,
+      );
+      return;
+    }
+
+    if (csvCodTarefa !== expectedCodTarefa) {
+      validationErrors.push(
+        machineRecord
+          ? `Linha ${rowNumber}: COD_TAREFA ${csvCodTarefa} difere do código configurado (${expectedCodTarefa}) para a máquina ${tag}.`
+          : `Linha ${rowNumber}: COD_TAREFA ${csvCodTarefa} diferente do código padrão (${expectedCodTarefa}) utilizado para inspeções de rota.`,
+      );
+      return;
+    }
+
     const data = {
       batchId,
       osNumero: rawOs,
@@ -270,13 +296,14 @@ export async function POST(req: NextRequest) {
         nome: descricao,
         machineId: machineRecord?.id,
         templateId: machineRecord?.templateId,
+        codTarefaConfigurado: configuredCodTarefa || null,
         machineNotFound: !machineRecord,
       },
       manutencao: {
         tipo: normalizeWhitespace(row["TP_MANUT__PR__PD__CO__OU"] ?? ""),
         criticidade: normalizeWhitespace(row.CRITICIDADE ?? ""),
         descricaoTarefa: normalizeWhitespace(row.DESC_TAREFA ?? ""),
-        codTarefa: normalizeWhitespace(row.COD_TAREFA ?? ""),
+        codTarefa: csvCodTarefa,
         periodicidade: periodicidade ?? null,
       },
       datas: {
@@ -292,11 +319,11 @@ export async function POST(req: NextRequest) {
         nomeNormalizado: responsavelNormalized || null,
         maintId: maintMatch?.id ?? null,
       },
-      oficinaDestino: normalizeWhitespace(row.OFICINA_DESTINO ?? ""),
+      oficinaDestino: normalizeWhitespace(row.OFICINA_DESTINO),
       gut: gut ?? null,
       tempoPrevistoHoras: tempoPrevisto ?? null,
-      tipoOS: normalizeWhitespace(row.TIPO_O_S ?? ""),
-      situacaoOS: normalizeWhitespace(row.SITUACAO_DA_O_S ?? row["SITUAÇÃO_DA_O_S"] ?? ""),
+      tipoOS: normalizeWhitespace(row.TIPO_O_S),
+      situacaoOS: normalizeWhitespace(row.SITUACAO_DA_O_S ?? row["SITUAÇÃO_DA_O_S"]),
       horasEstimadas: {
         eletrica: horasEletrica ?? null,
         mecanica: horasMecanica ?? null,
@@ -320,32 +347,37 @@ export async function POST(req: NextRequest) {
     }
   });
 
-  if (batchCount > 0) {
-    batchCommits.push(writeBatch.commit());
+    if (batchCount > 0) {
+      batchCommits.push(writeBatch.commit());
+    }
+
+    if (batchCommits.length) {
+      await Promise.all(batchCommits);
+    }
+
+    await cfgRef.set(
+      {
+        batchIdAtual: batchId,
+        uploadedAt: FieldValue.serverTimestamp(),
+        uploadedBy: uploaderUid
+          ? {
+              uid: uploaderUid,
+              name: uploaderName ?? null,
+            }
+          : null,
+      },
+      { merge: true },
+    );
+
+    return NextResponse.json({
+      batchId,
+      totalLidas: rows.length,
+      totalImportadas: imported,
+      errosValidacao: validationErrors,
+    });
+  } catch (error: unknown) {
+    console.error("[programacao-upload] failed to import CSV", error);
+    const message = error instanceof Error && error.message ? error.message : "INTERNAL_ERROR";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
-
-  if (batchCommits.length) {
-    await Promise.all(batchCommits);
-  }
-
-  await cfgRef.set(
-    {
-      batchIdAtual: batchId,
-      uploadedAt: FieldValue.serverTimestamp(),
-      uploadedBy: uploaderUid
-        ? {
-            uid: uploaderUid,
-            name: uploaderName ?? null,
-          }
-        : null,
-    },
-    { merge: true },
-  );
-
-  return NextResponse.json({
-    batchId,
-    totalLidas: rows.length,
-    totalImportadas: imported,
-    errosValidacao: validationErrors,
-  });
 }

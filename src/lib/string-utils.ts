@@ -1,6 +1,10 @@
 // src/lib/string-utils.ts
 
-export function normalizeWhitespace(value: string) {
+export function normalizeWhitespace(value: string | null | undefined) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
   return value
     .replace(/\s+/g, " ")
     .trim();
