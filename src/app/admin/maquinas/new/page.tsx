@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { DEFAULT_MACHINE_TASK_CODE } from "@/lib/machines-schema";
 import MachineForm, { MachineFormValues, TemplateOption } from "../_components/machine-form";
 
 const defaultValues: MachineFormValues = {
@@ -14,6 +15,7 @@ const defaultValues: MachineFormValues = {
   fotoUrl: undefined,
   templateId: "",
   ativo: true,
+  codTarefa: DEFAULT_MACHINE_TASK_CODE,
 };
 
 export default function NewMachinePage() {
