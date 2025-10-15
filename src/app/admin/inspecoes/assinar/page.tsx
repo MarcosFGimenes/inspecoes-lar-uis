@@ -2,9 +2,9 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { RefObject } from "react";
-import Image from "next/image";
 import { useSearchParams } from "next/navigation";
 import { createPortal } from "react-dom";
+import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -14,6 +14,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import SignatureCanvas, { SignatureCanvasInstance } from "@/components/signature-canvas-client";
 import { cn } from "@/lib/cn";
 import type { ChecklistAnswer, ChecklistResponse } from "@/types";
+import {
+  ImagePreviewDialog,
+  type ImagePreviewData,
+} from "@/components/ui/image-preview-dialog";
 
 interface PendingSignInspection {
   id: string;
@@ -49,6 +53,7 @@ interface SignatureModalProps {
   detail: InspectionDetailData | null;
   detailLoading: boolean;
   detailError: string | null;
+  onPreviewImage(image: ImagePreviewData): void;
 }
 
 type PcmSignResponse = {
@@ -106,6 +111,7 @@ function SignatureModal({
   detail,
   detailLoading,
   detailError,
+  onPreviewImage,
 }: SignatureModalProps) {
   const [mounted, setMounted] = useState(false);
 
@@ -260,16 +266,26 @@ function SignatureModal({
                           {Array.isArray(answer.photoUrls) && answer.photoUrls.length > 0 ? (
                             <div className="mt-3 flex flex-wrap gap-2">
                               {answer.photoUrls.map((url, index) => (
-                                <div key={`${answer.questionId}-photo-${index}`} className="overflow-hidden rounded-md border">
+                                <button
+                                  key={`${answer.questionId}-photo-${index}`}
+                                  type="button"
+                                  onClick={() =>
+                                    onPreviewImage({
+                                      src: url,
+                                      alt: `Foto da inspeção - item ${answer.questionId}`,
+                                    })
+                                  }
+                                  className="group overflow-hidden rounded-md border focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--primary)]"
+                                >
                                   <Image
                                     src={url}
                                     alt={`Foto da inspeção - item ${answer.questionId}`}
                                     width={160}
                                     height={120}
-                                    className="h-24 w-40 object-cover"
+                                    className="h-24 w-40 object-cover transition-transform duration-200 group-hover:scale-105"
                                     unoptimized
                                   />
-                                </div>
+                                </button>
                               ))}
                             </div>
                           ) : null}
@@ -354,6 +370,7 @@ export default function PendingSignaturesPage() {
   const [detail, setDetail] = useState<InspectionDetailData | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
+  const [previewImage, setPreviewImage] = useState<ImagePreviewData | null>(null);
   const signatureRef = useRef<SignatureCanvasInstance | null>(null);
   const detailAbortRef = useRef<AbortController | null>(null);
   const broadcastRef = useRef<BroadcastChannel | null>(null);
@@ -417,6 +434,14 @@ export default function PendingSignaturesPage() {
 
   const withNc = filteredItems.filter(item => item.hasNC);
   const withoutNc = filteredItems.filter(item => !item.hasNC);
+
+  const openImagePreview = useCallback((image: ImagePreviewData) => {
+    setPreviewImage(image);
+  }, []);
+
+  const closeImagePreview = useCallback(() => {
+    setPreviewImage(null);
+  }, []);
 
   const fetchDetail = useCallback(
     async (inspectionId: string) => {
@@ -750,7 +775,9 @@ export default function PendingSignaturesPage() {
         detail={detail}
         detailLoading={detailLoading}
         detailError={detailError}
+        onPreviewImage={openImagePreview}
       />
+      {previewImage ? <ImagePreviewDialog image={previewImage} onClose={closeImagePreview} /> : null}
     </div>
   );
 }
