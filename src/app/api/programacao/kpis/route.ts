@@ -205,7 +205,7 @@ export async function GET(req: NextRequest) {
     periodo: {
       inicio: startIso,
       fim: endIso,
-      dias,
+      dias: days,
     },
     indicadores: {
       cumprimentoPrazo: totalProgramadas > 0 ? (noPrazo / totalProgramadas) * 100 : 0,

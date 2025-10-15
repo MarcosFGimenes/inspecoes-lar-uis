@@ -11,7 +11,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 type RawRow = {
-  [key: string]: string;
+  [key: string]: string | undefined;
   NR_OS?: string;
   NR_MAQ?: string;
   "DESCRIÇÃO"?: string;
