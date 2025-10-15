@@ -16,6 +16,7 @@ export type MachineDoc = {
   templateId?: string | null;
   fotoUrl?: string | null;
   ativo?: boolean | null;
+  codTarefa?: string | null;
   [key: string]: unknown;
 };
 

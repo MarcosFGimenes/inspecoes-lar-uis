@@ -30,6 +30,11 @@ const navItems: AdminNavItem[] = [
     icon: "fas fa-file-signature",
   },
   {
+    href: "/admin/programacao",
+    label: "Programação",
+    icon: "fas fa-calendar-check",
+  },
+  {
     href: "/admin/nc",
     label: "Tratativas",
     icon: "fas fa-exclamation-triangle",
