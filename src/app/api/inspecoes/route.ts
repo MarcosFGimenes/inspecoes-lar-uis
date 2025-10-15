@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { FieldPath } from "firebase-admin/firestore";
-import type { QueryDocumentSnapshot, DocumentData } from "firebase-admin/firestore";
+import { FieldPath, FieldValue, Timestamp } from "firebase-admin/firestore";
+import type { QueryDocumentSnapshot, DocumentData, DocumentSnapshot } from "firebase-admin/firestore";
 import { adminDb } from "@/lib/firebase-admin";
 import { findMachineByTag } from "@/lib/db/machines";
 import { requireMaint } from "@/lib/guards";
@@ -17,6 +17,9 @@ const payloadSchema = z.object({
   osNumero: z.string().trim().min(1).optional(),
   observacoes: z.string().trim().optional(),
   assinaturaDataUrl: z.string().trim().optional(),
+  programacaoId: z.string().trim().min(1).optional(),
+  programacaoBatchId: z.string().trim().min(1).optional(),
+  prazoProgramado: z.string().trim().min(1).optional(),
   itens: z
     .array(
       z.object({
@@ -81,6 +84,15 @@ function buildUploadName(prefixes: Array<string | null | undefined>) {
     .filter(Boolean);
   const base = parts.join("-") || "inspecao";
   return `${base}-${randomUUID()}`.slice(0, 100);
+}
+
+function normalizeIsoDate(value: string | null | undefined) {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString();
 }
 
 export async function POST(req: NextRequest) {
@@ -153,9 +165,48 @@ export async function POST(req: NextRequest) {
       uniqueItemIds.add(item.templateItemId);
     }
 
+    let programacaoDoc: DocumentSnapshot<DocumentData> | null = null;
+    let programacaoBatchId = payload.programacaoBatchId?.trim() || null;
+    let programacaoPrazoIso = normalizeIsoDate(payload.prazoProgramado);
+    let osNumeroFromProgramacao: string | null = null;
+
+    if (payload.programacaoId) {
+      programacaoDoc = await adminDb.collection("programacoes_inspecao").doc(payload.programacaoId).get();
+      if (!programacaoDoc.exists) {
+        return NextResponse.json({ error: "PROGRAMACAO_NOT_FOUND" }, { status: 404 });
+      }
+      const programacaoData = programacaoDoc.data() ?? {};
+      if (!programacaoBatchId && typeof programacaoData.batchId === "string") {
+        programacaoBatchId = programacaoData.batchId;
+      }
+      const programacaoTag =
+        typeof programacaoData?.machine?.tag === "string" ? String(programacaoData.machine.tag).trim() : null;
+      if (programacaoTag && programacaoTag !== payload.tag) {
+        return NextResponse.json({ error: "PROGRAMACAO_MACHINE_MISMATCH" }, { status: 409 });
+      }
+      osNumeroFromProgramacao =
+        typeof programacaoData?.osNumero === "string" ? programacaoData.osNumero.trim().toUpperCase() : null;
+      if (!programacaoPrazoIso) {
+        programacaoPrazoIso = normalizeIsoDate(programacaoData?.datas?.vencimento ?? null);
+      }
+    }
+
+    const osNumeroPayload = payload.osNumero ? payload.osNumero.trim().toUpperCase() : null;
+    if (osNumeroFromProgramacao && osNumeroPayload && osNumeroPayload !== osNumeroFromProgramacao) {
+      return NextResponse.json({ error: "PROGRAMACAO_OS_MISMATCH" }, { status: 409 });
+    }
+
+    const osNumeroFinal = osNumeroFromProgramacao ?? osNumeroPayload ?? null;
+
+    if (payload.programacaoId && !osNumeroFinal) {
+      return NextResponse.json({ error: "PROGRAMACAO_OS_REQUIRED" }, { status: 422 });
+    }
+
     const inspectionRef = adminDb.collection("inspecoes").doc();
     const inspectionId = inspectionRef.id;
-    const nowIso = new Date().toISOString();
+    const nowDate = new Date();
+    const nowIso = nowDate.toISOString();
+    const nowTimestamp = Timestamp.fromDate(nowDate);
 
     let assinaturaUrl: string | null = null;
     if (payload.assinaturaDataUrl) {
@@ -175,8 +226,12 @@ export async function POST(req: NextRequest) {
     const answersPayload: ChecklistAnswer[] = [];
     const treatmentsPayload: ChecklistNonConformityTreatment[] = [];
 
+    const fallbackOsNumero = osNumeroFinal;
+
     for (const item of payload.itens) {
-      const osNumeroItem = item.osNumeroItem?.trim() ? item.osNumeroItem.trim().toUpperCase() : null;
+      const osNumeroItem = item.osNumeroItem?.trim()
+        ? item.osNumeroItem.trim().toUpperCase()
+        : fallbackOsNumero;
       if (item.resultado === "NC" && !osNumeroItem) {
         return NextResponse.json({ error: "ITEM_OS_REQUIRED" }, { status: 422 });
       }
@@ -239,7 +294,7 @@ export async function POST(req: NextRequest) {
     const issuesCriadas: string[] = [];
     const issuesResolvidas: string[] = [];
 
-    const osNumero = payload.osNumero?.trim() ? payload.osNumero.trim() : null;
+    const osNumero = osNumeroFinal;
     const observacoes = payload.observacoes?.trim() ? payload.observacoes.trim() : null;
 
     for (const item of itensPayload) {
@@ -332,6 +387,10 @@ export async function POST(req: NextRequest) {
         matricula: auth.store.matricula ?? null,
       },
       osNumero,
+      programacaoId: payload.programacaoId ?? null,
+      programacaoBatchId: programacaoBatchId ?? null,
+      prazoProgramado: programacaoPrazoIso ?? null,
+      prazoProgramadoTimestamp: programacaoPrazoIso ? Timestamp.fromDate(new Date(programacaoPrazoIso)) : null,
       observacoes,
       assinaturaUrl,
       itens: itensPayload,
@@ -339,11 +398,38 @@ export async function POST(req: NextRequest) {
       nonConformityTreatments: treatmentsPayload,
       qtdNC,
       createdAt: nowIso,
+      createdAtTimestamp: nowTimestamp,
       iniciadaEm: nowIso,
+      iniciadaEmTimestamp: nowTimestamp,
       finalizadaEm: nowIso,
+      finalizadaEmTimestamp: nowTimestamp,
       issuesCriadas,
       issuesResolvidas,
     });
+
+    if (programacaoDoc) {
+      const prazoDate = programacaoPrazoIso ? new Date(programacaoPrazoIso) : null;
+      const updates: Record<string, unknown> = {
+        status: "CONCLUIDA",
+        concluidaEm: nowIso,
+        concluidaEmTimestamp: nowTimestamp,
+        inspecaoId: inspectionId,
+        atrasada: false,
+        updatedAt: FieldValue.serverTimestamp(),
+      };
+      if (prazoDate && !Number.isNaN(prazoDate.getTime())) {
+        updates.prazoProgramado = programacaoPrazoIso;
+        updates.prazoProgramadoTimestamp = Timestamp.fromDate(prazoDate);
+        updates.finalizadaNoPrazo = nowDate.getTime() <= prazoDate.getTime();
+      }
+      if (programacaoBatchId) {
+        updates.batchId = programacaoBatchId;
+      }
+      if (osNumeroFinal) {
+        updates.osNumero = osNumeroFinal;
+      }
+      await programacaoDoc.ref.set(updates, { merge: true });
+    }
 
     return NextResponse.json({ id: inspectionId });
   } catch (err: unknown) {

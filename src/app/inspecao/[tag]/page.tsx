@@ -120,6 +120,10 @@ export default function InspectionPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [itemsState, setItemsState] = useState<Record<string, ItemFormState>>({});
+  const [programacaoId, setProgramacaoId] = useState<string | null>(null);
+  const [programacaoBatchId, setProgramacaoBatchId] = useState<string | null>(null);
+  const [programacaoPrazo, setProgramacaoPrazo] = useState<string | null>(null);
+  const [osBloqueado, setOsBloqueado] = useState<string | null>(null);
   const [osNumero, setOsNumero] = useState("");
   const [observacoes, setObservacoes] = useState("");
   const [resolveIssues, setResolveIssues] = useState<Record<string, boolean>>({});
@@ -146,10 +150,37 @@ export default function InspectionPage() {
   const [signatureTouched, setSignatureTouched] = useState(false);
   const [signatureDataUrl, setSignatureDataUrl] = useState<string | null>(null);
 
+  const createEmptyItemState = useCallback(
+    (): ItemFormState => ({
+      resultado: "",
+      observacao: "",
+      osNumero: osBloqueado ?? "",
+      fotos: [],
+      fileKey: Date.now(),
+    }),
+    [osBloqueado],
+  );
+
   useEffect(() => {
     if (searchParams?.get("ok") === "1") setFeedback({ type: "success", message: "Inspeção salva" });
     const idParam = searchParams?.get("id");
     if (idParam) setLastInspectionId(idParam);
+
+    const progIdParam = searchParams?.get("programacaoId");
+    setProgramacaoId(progIdParam ?? null);
+
+    const batchParam = searchParams?.get("batchId");
+    setProgramacaoBatchId(batchParam ?? null);
+
+    const prazoParam = searchParams?.get("prazo");
+    setProgramacaoPrazo(prazoParam ?? null);
+
+    const osParam = searchParams?.get("os");
+    const lockedOs = osParam ? osParam.trim().toUpperCase() : null;
+    setOsBloqueado(lockedOs);
+    if (lockedOs) {
+      setOsNumero(lockedOs);
+    }
   }, [searchParams]);
 
   useEffect(() => {
@@ -159,6 +190,17 @@ export default function InspectionPage() {
     }, 150);
     return () => clearTimeout(timer);
   }, [showCancelModal]);
+
+  useEffect(() => {
+    if (!osBloqueado) return;
+    setItemsState(prev => {
+      const updated: Record<string, ItemFormState> = {};
+      Object.entries(prev).forEach(([key, value]) => {
+        updated[key] = { ...value, osNumero: osBloqueado };
+      });
+      return updated;
+    });
+  }, [osBloqueado]);
 
   /* ===== Organização visual ===== */
   const sortedItems = useMemo(() => {
@@ -223,10 +265,12 @@ export default function InspectionPage() {
     context.template.itens
       .filter(i => i.id)
       .forEach((i, idx) => {
-        initial[i.id!] = { resultado: "", observacao: "", osNumero: "", fotos: [], fileKey: Date.now() + idx };
+        const base = createEmptyItemState();
+        base.fileKey = Date.now() + idx;
+        initial[i.id!] = base;
       });
     setItemsState(initial);
-    setOsNumero("");
+    setOsNumero(osBloqueado ?? "");
     setObservacoes("");
     setResolveIssues({});
     setDraftFeedback(null);
@@ -235,7 +279,7 @@ export default function InspectionPage() {
     setSignatureTouched(false);
     setSignatureDataUrl(null);
     signatureRef.current?.clear?.();
-  }, [context?.template?.itens]);
+  }, [context?.template?.itens, createEmptyItemState, osBloqueado]);
 
   useEffect(() => { if (context) resetForm(); }, [context, resetForm]);
 
@@ -244,6 +288,7 @@ export default function InspectionPage() {
       const itemsMap = new Map(draft.itens.map(item => [item.templateItemId, item] as const));
       const base: Record<string, ItemFormState> = {};
       const now = Date.now();
+      const lockedOsValue = osBloqueado ?? null;
       sortedItems.forEach((item, idx) => {
         if (!item.id) return;
         const saved = itemsMap.get(item.id);
@@ -264,13 +309,14 @@ export default function InspectionPage() {
         base[item.id] = {
           resultado,
           observacao: saved?.observacao ?? "",
-          osNumero: saved?.osNumero ?? "",
+          osNumero: lockedOsValue ?? saved?.osNumero?.trim().toUpperCase() ?? "",
           fotos,
           fileKey: now + idx,
         };
       });
       setItemsState(base);
-      setOsNumero(draft.osNumero ?? "");
+      const draftOsNormalized = draft.osNumero?.trim().toUpperCase() ?? "";
+      setOsNumero(lockedOsValue ?? draftOsNormalized);
       setObservacoes(draft.observacoes ?? "");
       const validResolveIds = draft.resolveIssues
         .filter(id => typeof id === "string" && id.trim().length > 0)
@@ -304,24 +350,24 @@ export default function InspectionPage() {
           const saved = itemsMap.get(item.id as string);
           const resultado = saved?.resultado === "C" || saved?.resultado === "NC" || saved?.resultado === "NA" ? saved.resultado : "";
           const observacao = saved?.observacao?.trim() ?? "";
-            const rawFotos = Array.isArray(saved?.fotos)
-              ? (saved?.fotos as DraftItemPhotoState[]).filter(
-                  foto => typeof foto?.dataUrl === "string" && foto.dataUrl.trim()
-                )
-              : [];
-            return {
-              templateItemId: item.id as string,
-              resultado,
-              observacao,
-              osNumero: saved?.osNumero ?? "",
-              fotos: rawFotos.slice(0, 3).map(foto => ({
-                dataUrl: String(foto.dataUrl),
-                name: foto?.name?.trim() ? foto.name.trim() : null,
-              })),
-            };
-          });
+          const rawFotos = Array.isArray(saved?.fotos)
+            ? (saved?.fotos as DraftItemPhotoState[]).filter(
+                foto => typeof foto?.dataUrl === "string" && foto.dataUrl.trim()
+              )
+            : [];
+          return {
+            templateItemId: item.id as string,
+            resultado,
+            observacao,
+            osNumero: lockedOsValue ?? saved?.osNumero ?? "",
+            fotos: rawFotos.slice(0, 3).map(foto => ({
+              dataUrl: String(foto.dataUrl),
+              name: foto?.name?.trim() ? foto.name.trim() : null,
+            })),
+          };
+        });
       const normalizedPayload: DraftDataState = {
-        osNumero: (draft.osNumero ?? "").trim().toUpperCase(),
+        osNumero: lockedOsValue ?? draftOsNormalized,
         observacoes: (draft.observacoes ?? "").trim(),
         assinaturaDataUrl: signatureValue,
         itens: normalizedItems,
@@ -334,7 +380,7 @@ export default function InspectionPage() {
         draftTimerRef.current = null;
       }
     },
-    [sortedItems]
+    [sortedItems, osBloqueado]
   );
 
   useEffect(() => {
@@ -631,35 +677,54 @@ export default function InspectionPage() {
   }, [autoSavingDraft, draftSaving, isDraftLoading, lastDraftUpdatedAt]);
 
   /* ===== Handlers (mesmos nomes/contratos) ===== */
-  const handleResultadoChange = useCallback((itemId: string, value: "C" | "NC" | "NA") => {
-    setItemsState(prev => ({
-      ...prev,
-      [itemId]: {
-        ...(prev[itemId] ?? { resultado: "", observacao: "", osNumero: "", fotos: [], fileKey: Date.now() }),
-        resultado: value,
-      },
-    }));
-  }, []);
+  const handleResultadoChange = useCallback(
+    (itemId: string, value: "C" | "NC" | "NA") => {
+      setItemsState(prev => {
+        const previous = prev[itemId] ?? createEmptyItemState();
+        return {
+          ...prev,
+          [itemId]: {
+            ...previous,
+            resultado: value,
+          },
+        };
+      });
+    },
+    [createEmptyItemState]
+  );
 
-  const handleObservacaoChange = useCallback((itemId: string, value: string) => {
-    setItemsState(prev => ({
-      ...prev,
-      [itemId]: {
-        ...(prev[itemId] ?? { resultado: "", observacao: "", osNumero: "", fotos: [], fileKey: Date.now() }),
-        observacao: value,
-      },
-    }));
-  }, []);
+  const handleObservacaoChange = useCallback(
+    (itemId: string, value: string) => {
+      setItemsState(prev => {
+        const previous = prev[itemId] ?? createEmptyItemState();
+        return {
+          ...prev,
+          [itemId]: {
+            ...previous,
+            observacao: value,
+          },
+        };
+      });
+    },
+    [createEmptyItemState]
+  );
 
-  const handleItemOsNumeroChange = useCallback((itemId: string, value: string) => {
-    setItemsState(prev => ({
-      ...prev,
-      [itemId]: {
-        ...(prev[itemId] ?? { resultado: "", observacao: "", osNumero: "", fotos: [], fileKey: Date.now() }),
-        osNumero: value.toUpperCase(),
-      },
-    }));
-  }, []);
+  const handleItemOsNumeroChange = useCallback(
+    (itemId: string, value: string) => {
+      if (osBloqueado) return;
+      setItemsState(prev => {
+        const previous = prev[itemId] ?? createEmptyItemState();
+        return {
+          ...prev,
+          [itemId]: {
+            ...previous,
+            osNumero: value.toUpperCase(),
+          },
+        };
+      });
+    },
+    [createEmptyItemState, osBloqueado]
+  );
 
   const handleFotosChange = useCallback(
     (itemId: string, event: ChangeEvent<HTMLInputElement>) => {
@@ -682,7 +747,7 @@ export default function InspectionPage() {
       )
         .then((newPhotos) => {
           setItemsState(prev => {
-            const prevItem = prev[itemId] ?? { resultado: "", observacao: "", osNumero: "", fotos: [], fileKey: Date.now() };
+            const prevItem = prev[itemId] ?? createEmptyItemState();
             const existingFotos = Array.isArray(prevItem.fotos) ? prevItem.fotos : [];
             const combined = [...existingFotos, ...newPhotos].slice(0, 3);
             return {
@@ -699,7 +764,7 @@ export default function InspectionPage() {
           setFeedback({ type: "error", message: "Não foi possível processar as imagens selecionadas." });
         });
     },
-    [setFeedback]
+    [createEmptyItemState, setFeedback]
   );
 
   const handleRemoveFoto = useCallback((itemId: string, fotoId: string) => {
@@ -751,21 +816,19 @@ export default function InspectionPage() {
           fotos?: string[];
           osNumeroItem?: string;
         }> = [];
+        const lockedOsNumero = osBloqueado ?? null;
         for (const item of sortedItems) {
           if (!item.id) continue;
           const st = itemsState[item.id];
           if (!st || !st.resultado) { setFeedback({ type: "error", message: "Selecione C / NC / N/A para todos os itens." }); setSaving(false); setSavingAction(null); return; }
-          let osNumeroItem: string | undefined;
-          if (st.resultado === "NC") {
-            const osValue = st.osNumero.trim().toUpperCase();
-            if (!osValue) {
-              setFeedback({ type: "error", message: "Informe o Nº da O.S. para todos os itens marcados como NC." });
-              setSaving(false);
-              setSavingAction(null);
-              return;
-            }
-            osNumeroItem = osValue;
+          const osValue = (lockedOsNumero ?? st.osNumero).trim().toUpperCase();
+          if (st.resultado === "NC" && !osValue) {
+            setFeedback({ type: "error", message: "Informe o Nº da O.S. para todos os itens marcados como NC." });
+            setSaving(false);
+            setSavingAction(null);
+            return;
           }
+          const osNumeroItem = osValue || undefined;
           let fotosBase64: string[] | undefined;
           if (st.fotos.length) {
             const fotosValues = await Promise.all(
@@ -804,11 +867,20 @@ export default function InspectionPage() {
         }
         const resolveIds = Object.entries(resolveIssues).filter(([, c]) => c).map(([id]) => id);
 
+        const normalizedOsNumero = lockedOsNumero ?? osNumero.trim().toUpperCase();
+
         const response = await fetch("/api/inspecoes", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            tag: context.machine.tag, osNumero: osNumero.trim() || undefined, observacoes: observacoes.trim() || undefined,
-            assinaturaDataUrl, itens: payloadItems, resolveIssues: resolveIds.length ? resolveIds : undefined,
+            tag: context.machine.tag,
+            osNumero: normalizedOsNumero || undefined,
+            observacoes: observacoes.trim() || undefined,
+            assinaturaDataUrl,
+            itens: payloadItems,
+            resolveIssues: resolveIds.length ? resolveIds : undefined,
+            programacaoId: programacaoId ?? undefined,
+            programacaoBatchId: programacaoBatchId ?? undefined,
+            prazoProgramado: programacaoPrazo ?? undefined,
           }),
         });
         if (response.status === 401) { window.location.href = "/login"; return; }
@@ -850,6 +922,10 @@ export default function InspectionPage() {
       saving,
       signatureDataUrl,
       sortedItems,
+      osBloqueado,
+      programacaoId,
+      programacaoBatchId,
+      programacaoPrazo,
     ]
   );
 
@@ -1023,6 +1099,12 @@ export default function InspectionPage() {
               <div>Local: {context.machine.localUnidade ?? "-"}</div>
               <div>Setor: {context.machine.setor ?? "-"}</div>
               <div>LAC: {context.machine.lac ?? "-"}</div>
+              {programacaoId && (
+                <div className="mt-2 inline-flex items-center gap-2 rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700">
+                  <i className="fas fa-calendar-check" aria-hidden />
+                  Programação vinculada — OS {osNumero || osBloqueado || "-"}
+                </div>
+              )}
             </div>
             {context.machine.fotoUrl && (
               <div className="relative h-40 w-full overflow-hidden rounded-md border bg-gray-50 md:h-44 md:w-44">
@@ -1039,10 +1121,20 @@ export default function InspectionPage() {
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-gray-700 font-medium">Nº da O.S.</span>
             <input
-              value={osNumero} onChange={(e) => setOsNumero(e.target.value.toUpperCase())}
+              value={osNumero}
+              onChange={e => {
+                if (osBloqueado) return;
+                setOsNumero(e.target.value.toUpperCase());
+              }}
+              readOnly={Boolean(osBloqueado)}
               placeholder="Opcional"
-              className="rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+              className={`rounded-md border border-gray-300 px-3 py-2 text-gray-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 ${osBloqueado ? "cursor-not-allowed bg-gray-100 text-gray-500" : "bg-white"}`}
             />
+            {osBloqueado && (
+              <span className="text-xs text-gray-500">
+                Número vinculado à programação. Não é possível editar.
+              </span>
+            )}
           </label>
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-gray-700 font-medium">Observações gerais</span>
@@ -1298,11 +1390,16 @@ export default function InspectionPage() {
                       <input
                         id={`os-item-${item.id}`}
                         value={st?.osNumero ?? ""}
-                        onChange={(event) => handleItemOsNumeroChange(item.id!, event.target.value)}
+                        onChange={event => handleItemOsNumeroChange(item.id!, event.target.value)}
+                        readOnly={Boolean(osBloqueado)}
                         placeholder="Informe o número da O.S."
-                        className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm uppercase text-gray-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+                        className={`w-full rounded-md border border-gray-300 px-3 py-2 text-sm uppercase text-gray-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 ${osBloqueado ? "cursor-not-allowed bg-gray-100 text-gray-500" : "bg-white"}`}
                       />
-                      <p className="text-xs text-gray-500">Obrigatório para itens marcados como não conformes.</p>
+                      <p className="text-xs text-gray-500">
+                        {osBloqueado
+                          ? "Número preenchido automaticamente a partir da programação."
+                          : "Obrigatório para itens marcados como não conformes."}
+                      </p>
                     </div>
                   )}
 
