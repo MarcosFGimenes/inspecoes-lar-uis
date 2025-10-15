@@ -30,6 +30,11 @@ const navItems: AdminNavItem[] = [
     icon: "fas fa-file-signature",
   },
   {
+    href: "/admin/programacao",
+    label: "Programação",
+    icon: "fas fa-calendar-check",
+  },
+  {
     href: "/admin/nc",
     label: "Tratativas",
     icon: "fas fa-exclamation-triangle",
@@ -56,7 +61,13 @@ const navItems: AdminNavItem[] = [
   },
 ];
 
-export function AdminSidebar() {
+interface AdminSidebarProps {
+  open: boolean;
+  onClose?: () => void;
+  onNavigate?: () => void;
+}
+
+export function AdminSidebar({ open, onClose, onNavigate }: AdminSidebarProps) {
   const pathname = usePathname();
   const [loggingOut, setLoggingOut] = useState(false);
   const showSessionActions = pathname !== "/admin/login";
@@ -80,58 +91,13 @@ export function AdminSidebar() {
   );
 
   return (
-    <>
-      <nav className="sticky top-0 z-30 border-b border-[var(--border)] bg-[color-mix(in_srgb,var(--surface)_92%,rgba(255,255,255,0.85)_8%)] px-4 py-3 backdrop-blur md:hidden">
-        <div className="flex items-center justify-between">
-          <Link href="/admin/dashboard" className="flex items-center gap-3 text-sm font-semibold text-[var(--text)]">
-            <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl bg-[var(--primary)] text-white shadow-[0_18px_36px_-22px_rgba(37,99,235,0.45)]">
-              <i className="fas fa-shield-halved" aria-hidden />
-            </span>
-            <span>
-              <span className="block text-xs uppercase tracking-wide text-[var(--muted)]">PCM</span>
-              <span>Painel administrativo</span>
-            </span>
-          </Link>
-          {showSessionActions ? (
-            <Button type="button" variant="outline" size="sm" onClick={handleLogout} loading={loggingOut}>
-              <i className="fas fa-arrow-right-from-bracket" aria-hidden />
-              Sair
-            </Button>
-          ) : (
-            <Link
-              href="/admin/login"
-              className={buttonStyles({ variant: "outline", size: "sm", className: "gap-2" })}
-            >
-              <i className="fas fa-arrow-right-to-bracket" aria-hidden />
-              Entrar
-            </Link>
-          )}
-        </div>
-        <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
-          {navItems.map(item => {
-            const active = isActive(item.href);
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={buttonStyles({
-                  variant: active ? "default" : "outline",
-                  size: "sm",
-                  className: cn(
-                    "min-w-fit rounded-2xl border border-[color-mix(in_srgb,var(--border)_80%,transparent_20%)] px-4",
-                    active ? "shadow-elevated" : "text-[var(--muted)]"
-                  ),
-                })}
-              >
-                <i className={cn(item.icon, "text-sm")} aria-hidden />
-                {item.label}
-              </Link>
-            );
-          })}
-        </div>
-      </nav>
-
-      <aside className="sticky top-0 hidden max-h-screen w-full flex-shrink-0 overflow-y-auto border-r border-[var(--border)] bg-[color-mix(in_srgb,var(--surface)_94%,rgba(255,255,255,0.9)_6%)] px-4 py-6 backdrop-blur-lg md:flex md:w-60 md:flex-col lg:w-72">
+    <aside
+      className={cn(
+        "fixed inset-y-0 left-0 z-40 flex h-full w-64 flex-shrink-0 transform flex-col overflow-y-auto border-r border-[var(--border)] bg-[color-mix(in_srgb,var(--surface)_94%,rgba(255,255,255,0.9)_6%)] px-4 py-6 backdrop-blur-lg transition-transform duration-300 md:w-60 lg:w-72",
+        open ? "translate-x-0 pointer-events-auto" : "-translate-x-full pointer-events-none"
+      )}
+      aria-hidden={!open}
+    >
         <div className="flex items-center gap-3 px-2">
           <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-[var(--primary)] text-white shadow-[0_18px_36px_-22px_rgba(37,99,235,0.45)]">
             <i className="fas fa-shield-halved" aria-hidden />
@@ -149,6 +115,7 @@ export function AdminSidebar() {
               <Link
                 key={item.href}
                 href={item.href}
+                onClick={onNavigate}
                 className={cn(
                   "flex items-center gap-3 rounded-2xl px-4 py-2 text-sm font-medium transition",
                   active
@@ -168,6 +135,7 @@ export function AdminSidebar() {
         <div className="mt-auto space-y-2 px-2">
           <Link
             href="/admin/inspecoes"
+            onClick={onNavigate}
             className={buttonStyles({
               variant: "secondary",
               className: "w-full justify-center gap-2",
@@ -190,6 +158,7 @@ export function AdminSidebar() {
           ) : (
             <Link
               href="/admin/login"
+              onClick={onNavigate}
               className={buttonStyles({
                 className: "w-full justify-center gap-2",
               })}
@@ -199,8 +168,15 @@ export function AdminSidebar() {
             </Link>
           )}
         </div>
-      </aside>
-    </>
+      <button
+        type="button"
+        className="absolute right-4 top-4 inline-flex h-9 w-9 items-center justify-center rounded-full border border-[color-mix(in_srgb,var(--border)_75%,transparent_25%)] bg-[color-mix(in_srgb,var(--surface)_96%,rgba(148,163,184,0.12)_4%)] text-[var(--muted)] transition hover:text-[var(--text)] lg:hidden"
+        onClick={() => onClose?.()}
+        aria-label="Fechar menu"
+      >
+        <i className="fas fa-xmark" aria-hidden />
+      </button>
+    </aside>
   );
 }
 
