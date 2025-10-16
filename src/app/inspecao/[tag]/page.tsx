@@ -70,13 +70,105 @@ const RESULT_OPTIONS: Array<{ value: "C" | "NC" | "NA"; label: string; tone: "ok
 ];
 
 /* ===== Helpers já existentes ===== */
-async function fileToDataUrl(file: File) {
+const MAX_IMAGE_BYTES = 1.5 * 1024 * 1024; // ~1.5MB
+const MAX_IMAGE_DIMENSION = 1600; // pixels
+
+async function readBlobAsDataUrl(blob: Blob) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => (typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("Falha ao ler arquivo")));
     reader.onerror = () => reject(reader.error ?? new Error("Falha ao ler arquivo"));
-    reader.readAsDataURL(file);
+    reader.readAsDataURL(blob);
   });
+}
+
+async function loadImageFromFile(file: File) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new window.Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(img);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Falha ao carregar imagem"));
+    };
+    img.src = url;
+  });
+}
+
+async function canvasToDataUrl(canvas: HTMLCanvasElement, type: string, quality?: number) {
+  return new Promise<string>((resolve, reject) => {
+    canvas.toBlob(
+      async (blob) => {
+        if (!blob) {
+          reject(new Error("Não foi possível converter a imagem."));
+          return;
+        }
+        try {
+          const dataUrl = await readBlobAsDataUrl(blob);
+          resolve(dataUrl);
+        } catch (err) {
+          reject(err instanceof Error ? err : new Error("Falha ao gerar imagem."));
+        }
+      },
+      type,
+      quality,
+    );
+  });
+}
+
+async function fileToDataUrl(file: File) {
+  const fallback = () => readBlobAsDataUrl(file);
+  if (typeof window === "undefined" || !file.type.startsWith("image/")) {
+    return fallback();
+  }
+
+  try {
+    const image = await loadImageFromFile(file);
+    const largestSide = Math.max(image.width, image.height);
+    const shouldResize = largestSide > MAX_IMAGE_DIMENSION || file.size > MAX_IMAGE_BYTES;
+
+    if (!shouldResize || !largestSide) {
+      return fallback();
+    }
+
+    const scale = Math.min(1, MAX_IMAGE_DIMENSION / largestSide);
+    const targetWidth = Math.max(1, Math.round(image.width * scale));
+    const targetHeight = Math.max(1, Math.round(image.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      return fallback();
+    }
+    context.clearRect(0, 0, targetWidth, targetHeight);
+    context.drawImage(image, 0, 0, targetWidth, targetHeight);
+
+    const outputType = file.type === "image/png" ? "image/png" : "image/jpeg";
+    const qualitySteps = outputType === "image/jpeg" ? [0.82, 0.72, 0.62] : [0.92];
+
+    for (let idx = 0; idx < qualitySteps.length; idx += 1) {
+      const quality = qualitySteps[idx];
+      try {
+        const dataUrl = await canvasToDataUrl(canvas, outputType, quality);
+        const estimatedSize = Math.ceil((dataUrl.length * 3) / 4); // rough base64 -> bytes
+        if (estimatedSize <= MAX_IMAGE_BYTES || idx === qualitySteps.length - 1) {
+          return dataUrl;
+        }
+      } catch (err) {
+        if (idx === qualitySteps.length - 1) {
+          throw err;
+        }
+      }
+    }
+
+    return fallback();
+  } catch {
+    return fallback();
+  }
 }
 
 function createPhotoId() {
@@ -733,19 +825,21 @@ export default function InspectionPage() {
       input.value = "";
       if (!files.length) return;
 
-      Promise.all(
-        files.slice(0, 3).map(async (file) => {
-          const dataUrl = await fileToDataUrl(file);
-          return {
-            id: createPhotoId(),
-            name: file.name || "Imagem",
-            dataUrl,
-            file,
-            origin: "local" as const,
-          } satisfies ItemPhotoState;
-        })
-      )
-        .then((newPhotos) => {
+      (async () => {
+        try {
+          const limitedFiles = files.slice(0, 3);
+          const newPhotos: ItemPhotoState[] = [];
+          for (const file of limitedFiles) {
+            const dataUrl = await fileToDataUrl(file);
+            newPhotos.push({
+              id: createPhotoId(),
+              name: file.name || "Imagem",
+              dataUrl,
+              file,
+              origin: "local" as const,
+            });
+          }
+
           setItemsState(prev => {
             const prevItem = prev[itemId] ?? createEmptyItemState();
             const existingFotos = Array.isArray(prevItem.fotos) ? prevItem.fotos : [];
@@ -759,10 +853,10 @@ export default function InspectionPage() {
               },
             };
           });
-        })
-        .catch(() => {
+        } catch {
           setFeedback({ type: "error", message: "Não foi possível processar as imagens selecionadas." });
-        });
+        }
+      })();
     },
     [createEmptyItemState, setFeedback]
   );
