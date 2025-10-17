@@ -36,11 +36,17 @@ export async function GET(req: NextRequest) {
     const snapshot = await adminDb
       .collection("assinaturas")
       .where("type", "==", "pcm")
-      .orderBy("nomeNormalized")
       .limit(200)
       .get();
 
-    const profiles = snapshot.docs.map(doc => serializeProfile(doc.id, doc.data() ?? {}));
+    const profiles = snapshot.docs
+      .map(doc => serializeProfile(doc.id, doc.data() ?? {}))
+      .sort((a, b) => {
+        if (!a.nome && !b.nome) return 0;
+        if (!a.nome) return 1;
+        if (!b.nome) return -1;
+        return a.nome.localeCompare(b.nome, "pt-BR", { sensitivity: "base" });
+      });
     return NextResponse.json(profiles);
   } catch (error: unknown) {
     const message = error instanceof Error && error.message ? error.message : "INTERNAL_ERROR";
