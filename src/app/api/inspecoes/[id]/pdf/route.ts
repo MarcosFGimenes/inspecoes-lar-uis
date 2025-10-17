@@ -216,6 +216,7 @@ export async function GET(_req: NextRequest, context: RouteContext) {
     const pcmSignatureUrl = typeof pcmSign.assinaturaUrl === "string" ? pcmSign.assinaturaUrl : null;
     const pcmSignature = await fetchImageData(pcmSignatureUrl);
     const pcmName = typeof pcmSign.nome === "string" ? pcmSign.nome : null;
+    const pcmMatricula = typeof pcmSign.matricula === "string" ? pcmSign.matricula : null;
 
     if (cursorY > pageHeight - 40) {
       doc.addPage();
@@ -393,7 +394,7 @@ export async function GET(_req: NextRequest, context: RouteContext) {
     doc.setFontSize(9);
     const maintNameText = `${maintainer?.nome ?? "-"}${maintainer?.matricula ? ` (${maintainer.matricula})` : ""}`;
     doc.text(maintNameText, leftSignatureX + 4, nameLineY + 6);
-    const pcmNameText = pcmName ?? "-";
+    const pcmNameText = `${pcmName ?? "-"}${pcmMatricula ? ` (mat. ${pcmMatricula})` : ""}`;
     doc.text(pcmNameText, rightSignatureX + 4, nameLineY + 6);
 
     const arrayBuffer = doc.output("arraybuffer");

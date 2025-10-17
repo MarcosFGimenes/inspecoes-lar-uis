@@ -8,6 +8,7 @@ import { requireMaint } from "@/lib/guards";
 import { uploadToImgbbFromDataUrl } from "@/lib/imgbb";
 import { randomUUID } from "crypto";
 import type { ChecklistAnswer, ChecklistNonConformityTreatment } from "@/types";
+import { isMaintainerProfileId } from "@/lib/signature-profiles";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,6 +18,7 @@ const payloadSchema = z.object({
   osNumero: z.string().trim().min(1).optional(),
   observacoes: z.string().trim().optional(),
   assinaturaDataUrl: z.string().trim().optional(),
+  assinaturaProfileId: z.string().trim().min(1).optional(),
   programacaoId: z.string().trim().min(1).optional(),
   programacaoBatchId: z.string().trim().min(1).optional(),
   prazoProgramado: z.string().trim().min(1).optional(),
@@ -112,6 +114,10 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    if (!payload.assinaturaDataUrl && !payload.assinaturaProfileId) {
+      return NextResponse.json({ error: "ASSINATURA_REQUIRED" }, { status: 422 });
+    }
+
     const machineRecord = await findMachineByTag(payload.tag);
 
     if (!machineRecord) {
@@ -209,7 +215,26 @@ export async function POST(req: NextRequest) {
     const nowTimestamp = Timestamp.fromDate(nowDate);
 
     let assinaturaUrl: string | null = null;
-    if (payload.assinaturaDataUrl) {
+    if (payload.assinaturaProfileId) {
+      const profileId = payload.assinaturaProfileId.trim();
+      if (!isMaintainerProfileId(profileId)) {
+        return NextResponse.json({ error: "SIGNATURE_PROFILE_INVALID" }, { status: 400 });
+      }
+      const profileSnap = await adminDb.collection("assinaturas").doc(profileId).get();
+      if (!profileSnap.exists) {
+        return NextResponse.json({ error: "SIGNATURE_PROFILE_NOT_FOUND" }, { status: 404 });
+      }
+      const profileData = profileSnap.data() ?? {};
+      const ownerId = typeof profileData.maintainerId === "string" ? profileData.maintainerId : null;
+      if (ownerId && ownerId !== auth.store.id) {
+        return NextResponse.json({ error: "SIGNATURE_PROFILE_FORBIDDEN" }, { status: 403 });
+      }
+      const storedUrl = typeof profileData.assinaturaUrl === "string" ? profileData.assinaturaUrl : null;
+      if (!storedUrl) {
+        return NextResponse.json({ error: "SIGNATURE_PROFILE_EMPTY" }, { status: 400 });
+      }
+      assinaturaUrl = storedUrl;
+    } else if (payload.assinaturaDataUrl) {
       const assinaturaDataUrl = ensureDataUrl(payload.assinaturaDataUrl, "ASSINATURA");
       const assinaturaName = buildUploadName(["sign", inspectionId]);
       const upload = await uploadToImgbbFromDataUrl(assinaturaDataUrl, assinaturaName);
@@ -431,7 +456,7 @@ export async function POST(req: NextRequest) {
       await programacaoDoc.ref.set(updates, { merge: true });
     }
 
-    return NextResponse.json({ id: inspectionId });
+    return NextResponse.json({ id: inspectionId, assinaturaUrl });
   } catch (err: unknown) {
     return NextResponse.json(
       { error: extractMessage(err, "INTERNAL_ERROR") },
