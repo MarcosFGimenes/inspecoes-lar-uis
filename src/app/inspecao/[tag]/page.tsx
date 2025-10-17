@@ -1290,7 +1290,7 @@ export default function InspectionPage() {
         </section>
       )}
 
-      {/* OS / Observações / Assinatura no estilo novo */}
+      {/* OS / Observações */}
       <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
         <div className="grid gap-4 md:grid-cols-2">
           <label className="flex flex-col gap-1 text-sm">
@@ -1326,102 +1326,6 @@ export default function InspectionPage() {
             Existem itens marcados como NC. Considere informar o Nº da O.S.
           </div>
         )}
-
-        <div className="mt-4 space-y-3">
-          <p className="text-sm font-medium text-gray-700">Assinatura do mantenedor</p>
-          {savedSignatureProfile?.assinaturaUrl ? (
-            <div className="flex flex-wrap items-center gap-4 text-xs text-gray-600">
-              <label className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  className="h-4 w-4"
-                  value="saved"
-                  checked={signatureMode === "saved"}
-                  onChange={() => {
-                    setSignatureMode("saved");
-                    setSaveMaintSignatureChoice(false);
-                    setSignatureTouched(true);
-                  }}
-                />
-                Usar assinatura salva
-              </label>
-              <label className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  className="h-4 w-4"
-                  value="new"
-                  checked={signatureMode === "new"}
-                  onChange={() => {
-                    setSignatureMode("new");
-                    const hasDraw = signatureRef.current?.isEmpty && !signatureRef.current.isEmpty();
-                    setSignatureTouched(Boolean(hasDraw || signatureDataUrl));
-                  }}
-                />
-                Desenhar nova assinatura
-              </label>
-            </div>
-          ) : null}
-          {signatureMode === "saved" && savedSignatureProfile?.assinaturaUrl ? (
-            <div className="flex h-40 w-full items-center justify-center overflow-hidden rounded-md border border-gray-300 bg-white p-4">
-              <Image
-                src={savedSignatureProfile.assinaturaUrl}
-                alt="Assinatura salva"
-                width={320}
-                height={160}
-                className="max-h-36 w-full object-contain"
-                unoptimized
-              />
-            </div>
-          ) : (
-            <div className="h-40 w-full overflow-hidden rounded-md border border-dashed border-gray-300 bg-gray-50">
-              {typeof window !== "undefined" && (
-                <SignatureCanvas
-                  ref={signatureRef}
-                  penColor="#111827"
-                  backgroundColor="transparent"
-                  onEnd={handleSignatureEnd}
-                  canvasProps={{ className: "h-full w-full" }}
-                />
-              )}
-            </div>
-          )}
-          <div className="flex items-center gap-3 text-sm">
-            <button
-              type="button"
-              onClick={() => {
-                signatureRef.current?.clear?.();
-                setSignatureTouched(false);
-                setSignatureDataUrl(null);
-              }}
-              disabled={signatureMode === "saved"}
-              className={`inline-flex items-center justify-center rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium transition ${
-                signatureMode === "saved"
-                  ? "cursor-not-allowed bg-gray-100 text-gray-400"
-                  : "text-gray-600 hover:bg-gray-100"
-              }`}
-            >
-              Limpar assinatura
-            </button>
-            {signatureMode === "new" && !signatureTouched && (
-              <span className="text-xs text-gray-500">Assine utilizando o campo acima.</span>
-            )}
-          </div>
-          {signatureMode === "new" && (
-            <label className="flex items-center gap-2 text-xs text-gray-600">
-              <input
-                type="checkbox"
-                className="h-4 w-4"
-                checked={saveMaintSignatureChoice}
-                onChange={event => setSaveMaintSignatureChoice(event.target.checked)}
-              />
-              <span>
-                {savedSignatureProfile?.assinaturaUrl
-                  ? "Substituir a assinatura salva por esta nova"
-                  : "Salvar assinatura para as próximas inspeções"}
-              </span>
-            </label>
-          )}
-        </div>
       </section>
 
       {/* Não conformidades anteriores */}
@@ -1707,6 +1611,105 @@ export default function InspectionPage() {
             })}
           </div>
         )}
+      </section>
+
+      {/* Assinatura do mantenedor */}
+      <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+        <div className="space-y-3">
+          <p className="text-sm font-medium text-gray-700">Assinatura do mantenedor</p>
+          {savedSignatureProfile?.assinaturaUrl ? (
+            <div className="flex flex-wrap items-center gap-4 text-xs text-gray-600">
+              <label className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  className="h-4 w-4"
+                  value="saved"
+                  checked={signatureMode === "saved"}
+                  onChange={() => {
+                    setSignatureMode("saved");
+                    setSaveMaintSignatureChoice(false);
+                    setSignatureTouched(true);
+                  }}
+                />
+                Usar assinatura salva
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  className="h-4 w-4"
+                  value="new"
+                  checked={signatureMode === "new"}
+                  onChange={() => {
+                    setSignatureMode("new");
+                    const hasDraw = signatureRef.current?.isEmpty && !signatureRef.current.isEmpty();
+                    setSignatureTouched(Boolean(hasDraw || signatureDataUrl));
+                  }}
+                />
+                Desenhar nova assinatura
+              </label>
+            </div>
+          ) : null}
+          {signatureMode === "saved" && savedSignatureProfile?.assinaturaUrl ? (
+            <div className="flex h-40 w-full items-center justify-center overflow-hidden rounded-md border border-gray-300 bg-white p-4">
+              <Image
+                src={savedSignatureProfile.assinaturaUrl}
+                alt="Assinatura salva"
+                width={320}
+                height={160}
+                className="max-h-36 w-full object-contain"
+                unoptimized
+              />
+            </div>
+          ) : (
+            <div className="h-40 w-full overflow-hidden rounded-md border border-dashed border-gray-300 bg-gray-50">
+              {typeof window !== "undefined" && (
+                <SignatureCanvas
+                  ref={signatureRef}
+                  penColor="#111827"
+                  backgroundColor="transparent"
+                  onEnd={handleSignatureEnd}
+                  canvasProps={{ className: "h-full w-full" }}
+                />
+              )}
+            </div>
+          )}
+          <div className="flex items-center gap-3 text-sm">
+            <button
+              type="button"
+              onClick={() => {
+                signatureRef.current?.clear?.();
+                setSignatureTouched(false);
+                setSignatureDataUrl(null);
+              }}
+              disabled={signatureMode === "saved"}
+              className={`inline-flex items-center justify-center rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium transition ${
+                signatureMode === "saved"
+                  ? "cursor-not-allowed bg-gray-100 text-gray-400"
+                  : "text-gray-600 hover:bg-gray-100"
+              }`}
+            >
+              Limpar assinatura
+            </button>
+            {signatureMode === "new" && !signatureTouched && (
+              <span className="text-xs text-gray-500">Assine utilizando o campo acima.</span>
+            )}
+          </div>
+          {signatureMode === "new" && (
+            <label className="flex items-center gap-2 text-xs text-gray-600">
+              <input
+                type="checkbox"
+                className="h-4 w-4"
+                checked={saveMaintSignatureChoice}
+                onChange={event => setSaveMaintSignatureChoice(event.target.checked)}
+              />
+              <span>
+                {savedSignatureProfile?.assinaturaUrl
+                  ? "Substituir a assinatura salva por esta nova"
+                  : "Salvar assinatura para as próximas inspeções"}
+              </span>
+            </label>
+          )}
+        </div>
       </section>
 
       {/* Footer com ações (mesmo fluxo) */}

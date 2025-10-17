@@ -38,14 +38,14 @@ const navigationItems: NavigationItem[] = [
   },
   {
     href: "/admin/checklists",
-    title: "Checklists enviados",
-    description: "Filtre registros enviados e exporte PDFs em lote",
+    title: "Inspeções enviadas",
+    description: "Filtre inspeções enviadas e exporte PDFs em lote",
     icon: "fas fa-list-check",
     accentClass: "bg-emerald-100 text-emerald-600",
   },
   {
     href: "/admin/templates",
-    title: "Templates de checklist",
+    title: "Modelo de inspeção",
     description: "Mantenha os modelos de inspeção atualizados",
     icon: "fas fa-clipboard-list",
     accentClass: "bg-purple-100 text-purple-600",
