@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase-admin";
 import { requireAdminFromRequest } from "@/lib/guards";
 import { uploadToImgbbFromDataUrl } from "@/lib/imgbb";
+import { isPcmProfileId } from "@/lib/signature-profiles";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,7 +12,9 @@ type RouteContext = { params: Promise<{ id: string }> };
 type RequestBody = {
   nome?: string;
   cargo?: string;
+  matricula?: string;
   assinaturaDataUrl?: string;
+  assinaturaProfileId?: string;
 };
 
 export async function PATCH(req: NextRequest, ctx: RouteContext) {
@@ -29,11 +32,14 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     const body = (await req.json().catch(() => null)) as RequestBody | null;
     const nome = typeof body?.nome === "string" ? body.nome.trim() : "";
     const cargo = typeof body?.cargo === "string" ? body.cargo.trim() : "";
+    const matricula = typeof body?.matricula === "string" ? body.matricula.trim() : "";
     const assinaturaDataUrl =
       typeof body?.assinaturaDataUrl === "string" ? body.assinaturaDataUrl.trim() : "";
+    const assinaturaProfileId =
+      typeof body?.assinaturaProfileId === "string" ? body.assinaturaProfileId.trim() : "";
 
-    if (!nome || !assinaturaDataUrl) {
-      return NextResponse.json({ error: "Missing nome or assinaturaDataUrl" }, { status: 400 });
+    if (!nome || !matricula || (!assinaturaDataUrl && !assinaturaProfileId)) {
+      return NextResponse.json({ error: "Missing nome, matricula or assinatura" }, { status: 400 });
     }
 
     const docRef = adminDb.collection("inspecoes").doc(id);
@@ -42,12 +48,32 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
       return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
     }
 
-    const upload = await uploadToImgbbFromDataUrl(assinaturaDataUrl, `pcm-sign-${id}`);
+    let assinaturaUrl: string | null = null;
+    if (assinaturaProfileId) {
+      if (!isPcmProfileId(assinaturaProfileId)) {
+        return NextResponse.json({ error: "INVALID_PROFILE" }, { status: 400 });
+      }
+      const profileSnap = await adminDb.collection("assinaturas").doc(assinaturaProfileId).get();
+      if (!profileSnap.exists) {
+        return NextResponse.json({ error: "PROFILE_NOT_FOUND" }, { status: 404 });
+      }
+      const profileData = profileSnap.data() ?? {};
+      const profileUrl = typeof profileData.assinaturaUrl === "string" ? profileData.assinaturaUrl : null;
+      if (!profileUrl) {
+        return NextResponse.json({ error: "PROFILE_SIGNATURE_MISSING" }, { status: 400 });
+      }
+      assinaturaUrl = profileUrl;
+    } else {
+      const upload = await uploadToImgbbFromDataUrl(assinaturaDataUrl, `pcm-sign-${id}`);
+      assinaturaUrl = upload.url;
+    }
+
     const signedAt = new Date().toISOString();
     const pcmSign = {
       nome,
       cargo: cargo || null,
-      assinaturaUrl: upload.url,
+      matricula,
+      assinaturaUrl,
       signedAt,
     };
 

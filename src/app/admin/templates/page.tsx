@@ -79,7 +79,7 @@ export default function TemplatesPage() {
     <div className="max-w-7xl mx-auto px-4 py-10 space-y-6">
       <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-3xl font-semibold text-[var(--text)]">Templates de checklist</h1>
+          <h1 className="text-3xl font-semibold text-[var(--text)]">Modelo de Inspeção</h1>
           <p className="text-sm text-[var(--muted)]">Organize os modelos que serão usados nas inspeções.</p>
         </div>
         <Link

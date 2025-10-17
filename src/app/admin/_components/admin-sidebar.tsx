@@ -41,12 +41,12 @@ const navItems: AdminNavItem[] = [
   },
   {
     href: "/admin/checklists",
-    label: "Checklists",
+    label: "Relatórios",
     icon: "fas fa-list-check",
   },
   {
     href: "/admin/templates",
-    label: "Templates",
+    label: "Cadastrar Inspeção",
     icon: "fas fa-clipboard-list",
   },
   {

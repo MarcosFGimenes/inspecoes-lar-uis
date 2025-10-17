@@ -13,6 +13,7 @@ type ResponseItem = {
   createdAt: string | null;
   operatorNome: string | null;
   operatorMatricula: string | null;
+  maintainerId: string | null;
   hasNC: boolean;
   qtdNC: number;
   machineTag: string | null;
@@ -78,6 +79,12 @@ export async function GET(req: NextRequest) {
         createdAt: data.createdAt ? String(data.createdAt) : null,
         operatorNome: maintainer.nome ? String(maintainer.nome) : null,
         operatorMatricula: maintainer.matricula ? String(maintainer.matricula) : null,
+        maintainerId:
+          maintainer.maintId
+            ? String(maintainer.maintId)
+            : maintainer.id
+            ? String(maintainer.id)
+            : null,
         hasNC: ncAnswers.length > 0,
         qtdNC: ncAnswers.length,
         machineTag: machine.tag ? String(machine.tag) : null,

@@ -241,6 +241,44 @@ export default function InspectionPage() {
   const cancelInputRef = useRef<HTMLInputElement | null>(null);
   const [signatureTouched, setSignatureTouched] = useState(false);
   const [signatureDataUrl, setSignatureDataUrl] = useState<string | null>(null);
+  const [savedSignatureProfile, setSavedSignatureProfile] = useState<{ id: string; assinaturaUrl: string | null } | null>(null);
+  const [signatureMode, setSignatureMode] = useState<"saved" | "new">("new");
+  const [saveMaintSignatureChoice, setSaveMaintSignatureChoice] = useState(false);
+
+  const refreshSavedSignature = useCallback(async () => {
+    try {
+      const response = await fetch("/api/assinaturas/maint", { cache: "no-store" });
+      if (!response.ok) {
+        setSavedSignatureProfile(null);
+        setSignatureMode("new");
+        setSignatureTouched(false);
+        return;
+      }
+      const data = (await response.json()) as { id: string; assinaturaUrl: string | null };
+      setSavedSignatureProfile(data);
+      setSaveMaintSignatureChoice(false);
+      if (data.assinaturaUrl) {
+        setSignatureMode("saved");
+        setSignatureTouched(true);
+      } else {
+        setSignatureMode("new");
+        setSignatureTouched(false);
+      }
+    } catch (err) {
+      console.error("[maint-signature] failed to load", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshSavedSignature();
+  }, [refreshSavedSignature]);
+
+  useEffect(() => {
+    if (signatureMode === "saved") {
+      signatureRef.current?.clear?.();
+      setSignatureDataUrl(null);
+    }
+  }, [signatureMode]);
 
   const createEmptyItemState = useCallback(
     (): ItemFormState => ({
@@ -368,10 +406,23 @@ export default function InspectionPage() {
     setDraftFeedback(null);
     setLastDraftUpdatedAt(null);
     lastDraftPayloadRef.current = null;
-    setSignatureTouched(false);
+    setSaveMaintSignatureChoice(false);
     setSignatureDataUrl(null);
-    signatureRef.current?.clear?.();
-  }, [context?.template?.itens, createEmptyItemState, osBloqueado]);
+    if (savedSignatureProfile?.assinaturaUrl) {
+      setSignatureMode("saved");
+      setSignatureTouched(true);
+      signatureRef.current?.clear?.();
+    } else {
+      setSignatureMode("new");
+      setSignatureTouched(false);
+      signatureRef.current?.clear?.();
+    }
+  }, [
+    context?.template?.itens,
+    createEmptyItemState,
+    osBloqueado,
+    savedSignatureProfile?.assinaturaUrl,
+  ]);
 
   useEffect(() => { if (context) resetForm(); }, [context, resetForm]);
 
@@ -882,6 +933,7 @@ export default function InspectionPage() {
   }, []);
 
   const handleSignatureEnd = useCallback(() => {
+    setSignatureMode("new");
     setSignatureTouched(true);
     if (signatureRef.current?.isEmpty && signatureRef.current.isEmpty()) {
       setSignatureDataUrl(null);
@@ -954,10 +1006,20 @@ export default function InspectionPage() {
         if (!payloadItems.length) { setFeedback({ type: "error", message: "Template sem itens configurados." }); setSaving(false); setSavingAction(null); return; }
 
         let assinaturaDataUrl: string | undefined;
-        if (signatureRef.current?.isEmpty && !signatureRef.current.isEmpty()) {
+        let assinaturaProfileId: string | undefined;
+        if (signatureMode === "saved" && savedSignatureProfile?.assinaturaUrl && savedSignatureProfile?.id) {
+          assinaturaProfileId = savedSignatureProfile.id;
+        } else if (signatureRef.current?.isEmpty && !signatureRef.current.isEmpty()) {
           assinaturaDataUrl = signatureRef.current.toDataURL("image/png");
         } else if (signatureDataUrl) {
           assinaturaDataUrl = signatureDataUrl;
+        }
+
+        if (!assinaturaDataUrl && !assinaturaProfileId) {
+          setFeedback({ type: "error", message: "Informe a assinatura antes de salvar." });
+          setSaving(false);
+          setSavingAction(null);
+          return;
         }
         const resolveIds = Object.entries(resolveIssues).filter(([, c]) => c).map(([id]) => id);
 
@@ -970,6 +1032,7 @@ export default function InspectionPage() {
             osNumero: normalizedOsNumero || undefined,
             observacoes: observacoes.trim() || undefined,
             assinaturaDataUrl,
+            assinaturaProfileId,
             itens: payloadItems,
             resolveIssues: resolveIds.length ? resolveIds : undefined,
             programacaoId: programacaoId ?? undefined,
@@ -984,7 +1047,21 @@ export default function InspectionPage() {
         }
         const data = await response.json();
         const inspectionId = data?.id ? String(data.id) : null;
+        const assinaturaUrlResposta = data?.assinaturaUrl ? String(data.assinaturaUrl) : null;
         if (inspectionId) setLastInspectionId(inspectionId);
+
+        if (signatureMode === "new" && saveMaintSignatureChoice && assinaturaUrlResposta) {
+          try {
+            await fetch("/api/assinaturas/maint", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ assinaturaUrl: assinaturaUrlResposta }),
+            });
+            refreshSavedSignature();
+          } catch (err) {
+            console.error("[maint-signature] failed to save", err);
+          }
+        }
 
         await fetch(`/api/inspecoes/drafts/${encodeURIComponent(context.machine.tag)}`, { method: "DELETE" }).catch(() => undefined);
         lastDraftPayloadRef.current = null;
@@ -1014,12 +1091,16 @@ export default function InspectionPage() {
       resolveIssues,
       router,
       saving,
+      savedSignatureProfile,
       signatureDataUrl,
+      signatureMode,
       sortedItems,
       osBloqueado,
       programacaoId,
       programacaoBatchId,
       programacaoPrazo,
+      saveMaintSignatureChoice,
+      refreshSavedSignature,
     ]
   );
 
@@ -1209,7 +1290,7 @@ export default function InspectionPage() {
         </section>
       )}
 
-      {/* OS / Observações / Assinatura no estilo novo */}
+      {/* OS / Observações */}
       <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
         <div className="grid gap-4 md:grid-cols-2">
           <label className="flex flex-col gap-1 text-sm">
@@ -1245,35 +1326,6 @@ export default function InspectionPage() {
             Existem itens marcados como NC. Considere informar o Nº da O.S.
           </div>
         )}
-
-        <div className="mt-4 space-y-2">
-          <p className="text-sm font-medium text-gray-700">Assinatura do mantenedor</p>
-          <div className="h-40 w-full overflow-hidden rounded-md border border-dashed border-gray-300 bg-gray-50">
-            {typeof window !== "undefined" && (
-              <SignatureCanvas
-                ref={signatureRef}
-                penColor="#111827"
-                backgroundColor="transparent"
-                onEnd={handleSignatureEnd}
-                canvasProps={{ className: "h-full w-full" }}
-              />
-            )}
-          </div>
-          <div className="flex items-center gap-3 text-sm">
-            <button
-              type="button"
-              onClick={() => {
-                signatureRef.current?.clear?.();
-                setSignatureTouched(false);
-                setSignatureDataUrl(null);
-              }}
-              className="inline-flex items-center justify-center rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-600 transition hover:bg-gray-100"
-            >
-              Limpar assinatura
-            </button>
-            {!signatureTouched && <span className="text-xs text-gray-500">Assine utilizando o campo acima.</span>}
-          </div>
-        </div>
       </section>
 
       {/* Não conformidades anteriores */}
@@ -1559,6 +1611,105 @@ export default function InspectionPage() {
             })}
           </div>
         )}
+      </section>
+
+      {/* Assinatura do mantenedor */}
+      <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+        <div className="space-y-3">
+          <p className="text-sm font-medium text-gray-700">Assinatura do mantenedor</p>
+          {savedSignatureProfile?.assinaturaUrl ? (
+            <div className="flex flex-wrap items-center gap-4 text-xs text-gray-600">
+              <label className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  className="h-4 w-4"
+                  value="saved"
+                  checked={signatureMode === "saved"}
+                  onChange={() => {
+                    setSignatureMode("saved");
+                    setSaveMaintSignatureChoice(false);
+                    setSignatureTouched(true);
+                  }}
+                />
+                Usar assinatura salva
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  className="h-4 w-4"
+                  value="new"
+                  checked={signatureMode === "new"}
+                  onChange={() => {
+                    setSignatureMode("new");
+                    const hasDraw = signatureRef.current?.isEmpty && !signatureRef.current.isEmpty();
+                    setSignatureTouched(Boolean(hasDraw || signatureDataUrl));
+                  }}
+                />
+                Desenhar nova assinatura
+              </label>
+            </div>
+          ) : null}
+          {signatureMode === "saved" && savedSignatureProfile?.assinaturaUrl ? (
+            <div className="flex h-40 w-full items-center justify-center overflow-hidden rounded-md border border-gray-300 bg-white p-4">
+              <Image
+                src={savedSignatureProfile.assinaturaUrl}
+                alt="Assinatura salva"
+                width={320}
+                height={160}
+                className="max-h-36 w-full object-contain"
+                unoptimized
+              />
+            </div>
+          ) : (
+            <div className="h-40 w-full overflow-hidden rounded-md border border-dashed border-gray-300 bg-gray-50">
+              {typeof window !== "undefined" && (
+                <SignatureCanvas
+                  ref={signatureRef}
+                  penColor="#111827"
+                  backgroundColor="transparent"
+                  onEnd={handleSignatureEnd}
+                  canvasProps={{ className: "h-full w-full" }}
+                />
+              )}
+            </div>
+          )}
+          <div className="flex items-center gap-3 text-sm">
+            <button
+              type="button"
+              onClick={() => {
+                signatureRef.current?.clear?.();
+                setSignatureTouched(false);
+                setSignatureDataUrl(null);
+              }}
+              disabled={signatureMode === "saved"}
+              className={`inline-flex items-center justify-center rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium transition ${
+                signatureMode === "saved"
+                  ? "cursor-not-allowed bg-gray-100 text-gray-400"
+                  : "text-gray-600 hover:bg-gray-100"
+              }`}
+            >
+              Limpar assinatura
+            </button>
+            {signatureMode === "new" && !signatureTouched && (
+              <span className="text-xs text-gray-500">Assine utilizando o campo acima.</span>
+            )}
+          </div>
+          {signatureMode === "new" && (
+            <label className="flex items-center gap-2 text-xs text-gray-600">
+              <input
+                type="checkbox"
+                className="h-4 w-4"
+                checked={saveMaintSignatureChoice}
+                onChange={event => setSaveMaintSignatureChoice(event.target.checked)}
+              />
+              <span>
+                {savedSignatureProfile?.assinaturaUrl
+                  ? "Substituir a assinatura salva por esta nova"
+                  : "Salvar assinatura para as próximas inspeções"}
+              </span>
+            </label>
+          )}
+        </div>
       </section>
 
       {/* Footer com ações (mesmo fluxo) */}

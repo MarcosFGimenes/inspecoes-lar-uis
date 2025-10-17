@@ -424,7 +424,7 @@ export default function AdminChecklistsPage() {
       <header className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div className="space-y-1">
           <p className="text-sm text-[var(--muted)]">Monitoramento das inspeções concluídas</p>
-          <h1 className="text-3xl font-semibold text-[var(--text)]">Checklists enviados</h1>
+          <h1 className="text-3xl font-semibold text-[var(--text)]">Inspeções enviadas</h1>
         </div>
         <div className="flex flex-wrap gap-2">
           <Link href="/admin/dashboard" className={buttonStyles({ variant: "secondary", size: "sm" })}>
