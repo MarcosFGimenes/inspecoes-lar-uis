@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Select } from "@/components/ui/select";
 import SignatureCanvas, { SignatureCanvasInstance } from "@/components/signature-canvas-client";
 import { cn } from "@/lib/cn";
 import type { ChecklistAnswer, ChecklistResponse } from "@/types";
@@ -26,10 +27,24 @@ interface PendingSignInspection {
   createdAt: string | null;
   operatorNome: string | null;
   operatorMatricula: string | null;
+  maintainerId: string | null;
   hasNC: boolean;
   qtdNC: number;
   machineTag: string | null;
   machineNome: string | null;
+}
+
+interface MaintainerOption {
+  id: string;
+  nome: string | null;
+  matricula: string | null;
+}
+
+interface PcmProfileOption {
+  id: string;
+  nome: string | null;
+  matricula: string | null;
+  assinaturaUrl: string | null;
 }
 
 interface InspectionDetailData {
@@ -46,6 +61,15 @@ interface SignatureModalProps {
   cargo: string;
   onNomeChange(value: string): void;
   onCargoChange(value: string): void;
+  profiles: PcmProfileOption[];
+  selectedProfileId: string;
+  onProfileSelect(value: string): void;
+  matricula: string;
+  onMatriculaChange(value: string): void;
+  signatureMode: "saved" | "new";
+  onSignatureModeChange(mode: "saved" | "new"): void;
+  saveSignatureChoice: boolean;
+  onSaveSignatureChoiceChange(value: boolean): void;
   loading: boolean;
   error: string | null;
   canvasRef: RefObject<SignatureCanvasInstance | null>;
@@ -63,6 +87,8 @@ type PcmSignResponse = {
     signedAt?: string;
     nome?: string;
     cargo?: string | null;
+    matricula?: string | null;
+    assinaturaUrl?: string | null;
   };
 };
 
@@ -104,6 +130,15 @@ function SignatureModal({
   cargo,
   onNomeChange,
   onCargoChange,
+  profiles,
+  selectedProfileId,
+  onProfileSelect,
+  matricula,
+  onMatriculaChange,
+  signatureMode,
+  onSignatureModeChange,
+  saveSignatureChoice,
+  onSaveSignatureChoiceChange,
   loading,
   error,
   canvasRef,
@@ -121,10 +156,10 @@ function SignatureModal({
   }, []);
 
   useEffect(() => {
-    if (open && canvasRef.current) {
-      canvasRef.current.clear();
+    if (open && signatureMode === "new") {
+      canvasRef.current?.clear();
     }
-  }, [open, canvasRef]);
+  }, [open, signatureMode, canvasRef]);
 
   if (!mounted || !open) return null;
 
@@ -135,6 +170,10 @@ function SignatureModal({
   const inspectionInfo = detail?.inspection ?? null;
   const machineInfo = inspectionInfo?.machine ?? null;
   const maintainer = inspectionInfo?.maintainer ?? null;
+  const selectedProfile = profiles.find(profile => profile.id === selectedProfileId) ?? null;
+  const isNewProfile = selectedProfileId === "new";
+  const hasSavedSignature = Boolean(selectedProfile?.assinaturaUrl);
+  const usingSavedSignature = signatureMode === "saved" && hasSavedSignature;
 
   return createPortal(
     <div
@@ -308,28 +347,125 @@ function SignatureModal({
             <h3 className="text-base font-semibold text-[var(--text)]">Assinatura do PCM</h3>
             <div className="grid gap-4 md:grid-cols-2">
               <label className="space-y-1 text-sm">
+                <span className="text-[var(--muted)]">Nome salvo</span>
+                <Select
+                  value={selectedProfileId}
+                  onChange={event => onProfileSelect(event.target.value)}
+                  disabled={loading}
+                >
+                  <option value="new">Outro (digitar novo nome)</option>
+                  {profiles.map(profile => (
+                    <option key={profile.id} value={profile.id}>
+                      {profile.nome ?? profile.id}
+                      {profile.matricula ? ` — Matrícula ${profile.matricula}` : ""}
+                    </option>
+                  ))}
+                </Select>
+              </label>
+              <label className="space-y-1 text-sm">
                 <span className="text-[var(--muted)]">Nome *</span>
-                <Input value={nome} onChange={event => onNomeChange(event.target.value)} placeholder="Digite o nome" />
+                <Input
+                  value={nome}
+                  onChange={event => onNomeChange(event.target.value)}
+                  placeholder="Digite o nome"
+                  disabled={!isNewProfile || loading}
+                />
+              </label>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <label className="space-y-1 text-sm">
+                <span className="text-[var(--muted)]">Matrícula *</span>
+                <Input
+                  value={matricula}
+                  onChange={event => onMatriculaChange(event.target.value.toUpperCase())}
+                  placeholder="Digite a matrícula"
+                  disabled={loading}
+                />
               </label>
               <label className="space-y-1 text-sm">
                 <span className="text-[var(--muted)]">Cargo</span>
-                <Input value={cargo} onChange={event => onCargoChange(event.target.value)} placeholder="Cargo (opcional)" />
+                <Input
+                  value={cargo}
+                  onChange={event => onCargoChange(event.target.value)}
+                  placeholder="Cargo (opcional)"
+                  disabled={loading}
+                />
               </label>
             </div>
-            <div className="space-y-2">
+            <div className="space-y-3">
+              {hasSavedSignature ? (
+                <div className="flex flex-wrap items-center gap-4 text-sm text-[var(--muted)]">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      className="h-4 w-4"
+                      value="saved"
+                      checked={signatureMode === "saved"}
+                      onChange={() => onSignatureModeChange("saved")}
+                      disabled={loading}
+                    />
+                    Usar assinatura salva
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      className="h-4 w-4"
+                      value="new"
+                      checked={signatureMode === "new"}
+                      onChange={() => onSignatureModeChange("new")}
+                      disabled={loading}
+                    />
+                    Desenhar nova assinatura
+                  </label>
+                </div>
+              ) : null}
               <div className="flex items-center justify-between text-sm text-[var(--muted)]">
                 <span>Assinatura</span>
-                <Button type="button" variant="ghost" onClick={onClear} disabled={loading || detailLoading}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={onClear}
+                  disabled={loading || detailLoading || signatureMode === "saved"}
+                >
                   Limpar
                 </Button>
               </div>
-              <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-white">
-                <SignatureCanvas
-                  ref={canvasRef}
-                  penColor="#111827"
-                  canvasProps={{ className: "h-48 w-full" }}
-                />
-              </div>
+              {usingSavedSignature ? (
+                <div className="flex items-center justify-center overflow-hidden rounded-lg border border-[var(--border)] bg-white p-4">
+                  <Image
+                    src={selectedProfile?.assinaturaUrl ?? ""}
+                    alt={selectedProfile?.nome ? `Assinatura salva de ${selectedProfile.nome}` : "Assinatura salva"}
+                    width={320}
+                    height={160}
+                    className="max-h-40 w-full object-contain"
+                    unoptimized
+                  />
+                </div>
+              ) : (
+                <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-white">
+                  <SignatureCanvas
+                    ref={canvasRef}
+                    penColor="#111827"
+                    canvasProps={{ className: "h-48 w-full" }}
+                  />
+                </div>
+              )}
+              {signatureMode === "new" ? (
+                <label className="flex items-center gap-2 text-xs text-[var(--muted)]">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4"
+                    checked={saveSignatureChoice}
+                    onChange={event => onSaveSignatureChoiceChange(event.target.checked)}
+                    disabled={loading}
+                  />
+                  <span>
+                    {hasSavedSignature
+                      ? "Atualizar a assinatura salva com este novo desenho"
+                      : "Salvar esta assinatura para as próximas inspeções"}
+                  </span>
+                </label>
+              ) : null}
             </div>
             {error && <p className="text-sm text-[var(--danger)]">{error}</p>}
           </section>
@@ -362,6 +498,13 @@ export default function PendingSignaturesPage() {
   const [selected, setSelected] = useState<PendingSignInspection | null>(null);
   const [nome, setNome] = useState("");
   const [cargo, setCargo] = useState("");
+  const [matricula, setMatricula] = useState("");
+  const [selectedProfileId, setSelectedProfileId] = useState<string>("new");
+  const [signatureMode, setSignatureMode] = useState<"saved" | "new">("new");
+  const [saveSignatureChoice, setSaveSignatureChoice] = useState(false);
+  const [maintainers, setMaintainers] = useState<MaintainerOption[]>([]);
+  const [maintainerFilter, setMaintainerFilter] = useState<string>("all");
+  const [pcmProfiles, setPcmProfiles] = useState<PcmProfileOption[]>([]);
   const [modalError, setModalError] = useState<string | null>(null);
   const [modalLoading, setModalLoading] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -374,6 +517,46 @@ export default function PendingSignaturesPage() {
   const signatureRef = useRef<SignatureCanvasInstance | null>(null);
   const detailAbortRef = useRef<AbortController | null>(null);
   const broadcastRef = useRef<BroadcastChannel | null>(null);
+
+  const refreshPcmProfiles = useCallback(async () => {
+    try {
+      const response = await fetch("/api/assinaturas/pcm", { cache: "no-store" });
+      if (!response.ok) {
+        return;
+      }
+      const data = (await response.json()) as PcmProfileOption[];
+      if (Array.isArray(data)) {
+        setPcmProfiles(data);
+      }
+    } catch (err) {
+      console.error("[pcm-profiles] failed to load", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    async function loadMaintainers() {
+      try {
+        const response = await fetch("/api/mantenedores", { cache: "no-store" });
+        if (!response.ok) {
+          return;
+        }
+        const data = (await response.json()) as Array<Record<string, unknown>>;
+        if (Array.isArray(data)) {
+          const options: MaintainerOption[] = data.map(item => ({
+            id: String(item.id ?? ""),
+            nome: typeof item.nome === "string" ? item.nome : null,
+            matricula: typeof item.matricula === "string" ? item.matricula : null,
+          }));
+          setMaintainers(options.filter(option => option.id));
+        }
+      } catch (err) {
+        console.error("[maintainers] failed to load", err);
+      }
+    }
+
+    loadMaintainers();
+    refreshPcmProfiles();
+  }, [refreshPcmProfiles]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -423,14 +606,17 @@ export default function PendingSignaturesPage() {
   }, []);
 
   const filteredItems = useMemo(() => {
-    if (!search.trim()) return items;
+    const baseItems = maintainerFilter === "all"
+      ? items
+      : items.filter(item => item.maintainerId === maintainerFilter);
+    if (!search.trim()) return baseItems;
     const term = search.trim().toLowerCase();
-    return items.filter(item => {
+    return baseItems.filter(item => {
       const machine = `${item.machineNome ?? ""} ${item.machineTag ?? ""}`.toLowerCase();
       const operator = `${item.operatorNome ?? ""} ${item.operatorMatricula ?? ""}`.toLowerCase();
       return machine.includes(term) || operator.includes(term);
     });
-  }, [items, search]);
+  }, [items, maintainerFilter, search]);
 
   const withNc = filteredItems.filter(item => item.hasNC);
   const withoutNc = filteredItems.filter(item => !item.hasNC);
@@ -483,6 +669,10 @@ export default function PendingSignaturesPage() {
       setSelected(inspection);
       setNome("");
       setCargo("");
+      setMatricula("");
+      setSelectedProfileId("new");
+      setSignatureMode("new");
+      setSaveSignatureChoice(false);
       setModalError(null);
       setDetail(null);
       setDetailError(null);
@@ -497,6 +687,10 @@ export default function PendingSignaturesPage() {
     setSelected(null);
     setNome("");
     setCargo("");
+    setMatricula("");
+    setSelectedProfileId("new");
+    setSignatureMode("new");
+    setSaveSignatureChoice(false);
     setModalError(null);
     setDetail(null);
     setDetailError(null);
@@ -522,45 +716,96 @@ export default function PendingSignaturesPage() {
     signatureRef.current?.clear();
   }, []);
 
+  const handleProfileSelect = useCallback(
+    (value: string) => {
+      setSelectedProfileId(value);
+      setModalError(null);
+      if (value === "new") {
+        setNome("");
+        setMatricula("");
+        setSignatureMode("new");
+        setSaveSignatureChoice(false);
+        setTimeout(() => signatureRef.current?.clear(), 0);
+        return;
+      }
+      const profile = pcmProfiles.find(item => item.id === value) ?? null;
+      setNome(profile?.nome ?? "");
+      setMatricula(profile?.matricula ? profile.matricula.toUpperCase() : "");
+      setSignatureMode(profile?.assinaturaUrl ? "saved" : "new");
+      setSaveSignatureChoice(false);
+      setTimeout(() => signatureRef.current?.clear(), 0);
+    },
+    [pcmProfiles]
+  );
+
   const handleConfirmSignature = useCallback(async () => {
     if (!selected) return;
 
-    const trimmedName = nome.trim();
+    const profile = selectedProfileId === "new" ? null : pcmProfiles.find(item => item.id === selectedProfileId) ?? null;
+    const baseName = profile?.nome ?? nome;
+    const trimmedName = baseName.trim();
     if (!trimmedName) {
       setModalError("Informe o nome do PCM");
       return;
     }
 
-    const canvas = signatureRef.current;
-    if (!canvas || canvas.isEmpty()) {
-      setModalError("Desenhe a assinatura antes de confirmar");
+    const trimmedMatricula = matricula.trim();
+    if (!trimmedMatricula) {
+      setModalError("Informe a matrícula do PCM");
+      return;
+    }
+
+    const normalizedMatricula = trimmedMatricula.toUpperCase();
+    const expectedMatricula = profile?.matricula ? profile.matricula.toUpperCase() : null;
+    if (expectedMatricula && expectedMatricula !== normalizedMatricula) {
+      setModalError("A matrícula informada não confere com o nome selecionado.");
       return;
     }
 
     const trimmedCargo = cargo.trim();
 
     let assinaturaDataUrl: string | null = null;
-    try {
-      const rawCanvas = canvas.getCanvas();
-      assinaturaDataUrl = rawCanvas.toDataURL("image/png");
-    } catch (err) {
-      console.error("[pcm-sign] failed to export canvas:", err);
-      assinaturaDataUrl = null;
-    }
+    let assinaturaProfileId: string | null = null;
 
-    if (!assinaturaDataUrl) {
-      setModalError("Não foi possível processar a assinatura. Tente novamente.");
-      return;
+    if (signatureMode === "saved") {
+      if (!profile || !profile.assinaturaUrl) {
+        setModalError("A assinatura salva não está disponível.");
+        return;
+      }
+      assinaturaProfileId = profile.id;
+    } else {
+      const canvas = signatureRef.current;
+      if (!canvas || canvas.isEmpty()) {
+        setModalError("Desenhe a assinatura antes de confirmar");
+        return;
+      }
+      try {
+        const rawCanvas = canvas.getCanvas();
+        assinaturaDataUrl = rawCanvas.toDataURL("image/png");
+      } catch (err) {
+        console.error("[pcm-sign] failed to export canvas:", err);
+        assinaturaDataUrl = null;
+      }
+      if (!assinaturaDataUrl) {
+        setModalError("Não foi possível processar a assinatura. Tente novamente.");
+        return;
+      }
     }
 
     try {
       setModalLoading(true);
       setModalError(null);
-      const payload = {
+      const payload: Record<string, unknown> = {
         nome: trimmedName,
         cargo: trimmedCargo ? trimmedCargo : undefined,
-        assinaturaDataUrl,
+        matricula: normalizedMatricula,
       };
+
+      if (assinaturaProfileId) {
+        payload.assinaturaProfileId = assinaturaProfileId;
+      } else if (assinaturaDataUrl) {
+        payload.assinaturaDataUrl = assinaturaDataUrl;
+      }
 
       const response = await fetch(`/api/inspecoes/${selected.id}/pcm-sign`, {
         method: "PATCH",
@@ -582,6 +827,44 @@ export default function PendingSignaturesPage() {
         throw new Error(serverMessage);
       }
 
+      const assinaturaUrlFromResponse = parsed?.pcmSign?.assinaturaUrl ?? null;
+      const shouldSaveSignature = signatureMode === "saved" || saveSignatureChoice;
+
+      try {
+        const profilePayload: Record<string, unknown> = {
+          nome: trimmedName,
+          matricula: normalizedMatricula,
+          saveSignature: shouldSaveSignature,
+        };
+        const resolvedSignatureUrl =
+          signatureMode === "saved"
+            ? profile?.assinaturaUrl ?? assinaturaUrlFromResponse ?? null
+            : saveSignatureChoice
+            ? assinaturaUrlFromResponse
+            : null;
+        if (shouldSaveSignature && resolvedSignatureUrl) {
+          profilePayload.assinaturaUrl = resolvedSignatureUrl;
+        }
+        const upsertResponse = await fetch("/api/assinaturas/pcm", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(profilePayload),
+        });
+        if (upsertResponse.ok) {
+          const updatedProfile = (await upsertResponse.json()) as PcmProfileOption;
+          setPcmProfiles(prev => {
+            const list = prev.filter(item => item.id !== updatedProfile.id);
+            return [...list, updatedProfile];
+          });
+        } else {
+          const upsertText = await upsertResponse.text();
+          console.error("[pcm-profiles] upsert failed", upsertResponse.status, upsertText);
+        }
+      } catch (profileErr) {
+        console.error("[pcm-profiles] error while saving profile", profileErr);
+      }
+
+      refreshPcmProfiles();
       setItems(prev => prev.filter(item => item.id !== selected.id));
       setSuccessMessage("Assinatura registrada com sucesso.");
       if (broadcastRef.current) {
@@ -605,7 +888,19 @@ export default function PendingSignaturesPage() {
     } finally {
       setModalLoading(false);
     }
-  }, [broadcastRef, cargo, closeModal, nome, selected]);
+  }, [
+    broadcastRef,
+    cargo,
+    closeModal,
+    matricula,
+    nome,
+    pcmProfiles,
+    refreshPcmProfiles,
+    saveSignatureChoice,
+    selected,
+    selectedProfileId,
+    signatureMode,
+  ]);
 
   if (loading) {
     return (
@@ -672,12 +967,27 @@ export default function PendingSignaturesPage() {
             Priorize as inspeções com não conformidades antes de concluir as demais.
           </p>
         </div>
-        <Input
-          className="w-full sm:w-80"
-          placeholder="Buscar por TAG ou operador"
-          value={search}
-          onChange={event => setSearch(event.target.value)}
-        />
+        <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-center sm:justify-end">
+          <Select
+            value={maintainerFilter}
+            onChange={event => setMaintainerFilter(event.target.value)}
+            className="w-full sm:w-64"
+          >
+            <option value="all">Todos os mantenedores</option>
+            {maintainers.map(option => (
+              <option key={option.id} value={option.id}>
+                {option.matricula ? `${option.matricula} — ` : ""}
+                {option.nome ?? option.id}
+              </option>
+            ))}
+          </Select>
+          <Input
+            className="w-full sm:w-80"
+            placeholder="Buscar por TAG ou operador"
+            value={search}
+            onChange={event => setSearch(event.target.value)}
+          />
+        </div>
       </header>
 
       {successMessage && (
@@ -768,6 +1078,15 @@ export default function PendingSignaturesPage() {
         cargo={cargo}
         onNomeChange={setNome}
         onCargoChange={setCargo}
+        profiles={pcmProfiles}
+        selectedProfileId={selectedProfileId}
+        onProfileSelect={handleProfileSelect}
+        matricula={matricula}
+        onMatriculaChange={setMatricula}
+        signatureMode={signatureMode}
+        onSignatureModeChange={setSignatureMode}
+        saveSignatureChoice={saveSignatureChoice}
+        onSaveSignatureChoiceChange={setSaveSignatureChoice}
         loading={modalLoading}
         error={modalError}
         canvasRef={signatureRef}

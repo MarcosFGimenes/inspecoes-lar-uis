@@ -59,6 +59,7 @@ export interface ChecklistResponse {
   pcmSign?: {
     nome?: string | null;
     cargo?: string | null;
+    matricula?: string | null;
     assinaturaUrl?: string | null;
     signedAt?: string | null;
   } | null;
