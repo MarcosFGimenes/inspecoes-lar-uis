@@ -471,3 +471,30 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
+
+export async function DELETE(req: NextRequest, context: RouteContext) {
+  const authorized = await requireAdminFromRequest(req);
+  if (!authorized) {
+    return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 });
+  }
+
+  const params = (await context.params) ?? {};
+  const id = resolveId(params);
+  if (!id) {
+    return NextResponse.json({ error: "INVALID_ID" }, { status: 400 });
+  }
+
+  try {
+    const docRef = adminDb.collection("inspecoes").doc(id);
+    const docSnap = await docRef.get();
+    if (!docSnap.exists) {
+      return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
+    }
+
+    await docRef.delete();
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "INTERNAL_ERROR";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}

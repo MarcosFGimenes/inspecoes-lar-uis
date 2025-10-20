@@ -24,6 +24,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { ChecklistAnswer } from "@/types";
+import { cn } from "@/lib/cn";
 
 interface InspectionListItem {
   id: string;
@@ -32,6 +33,8 @@ interface InspectionListItem {
   createdAt: string | null;
   maintainerNome: string | null;
   maintainerMatricula: string | null;
+  maintainerId: string | null;
+  maintainerKey: string;
   qtdNc: number;
   hasNc: boolean;
   osNumero: string | null;
@@ -52,10 +55,15 @@ export default function AdminInspectionsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<InspectionListItem[]>([]);
+  const [selectedMaintainers, setSelectedMaintainers] = useState<string[]>([]);
+  const [visibleCount, setVisibleCount] = useState<number>(0);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [actionFeedback, setActionFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setActionFeedback(null);
     try {
       const session = await fetch("/api/admin-session", { cache: "no-store" });
       if (session.status === 401) {
@@ -102,14 +110,32 @@ export default function AdminInspectionsPage() {
                 }));
         const qtdNc = typeof data.qtdNC === "number" ? data.qtdNC : ncItems.length;
         const pcmSign = (data.pcmSign ?? {}) as Record<string, unknown>;
+        const maintainerId =
+          typeof maintainer.id === "string" && maintainer.id.trim()
+            ? maintainer.id.trim()
+            : typeof maintainer.maintId === "string" && maintainer.maintId.trim()
+            ? maintainer.maintId.trim()
+            : null;
+        const maintainerMatricula =
+          typeof maintainer.matricula === "string" && maintainer.matricula.trim()
+            ? maintainer.matricula.trim().toUpperCase()
+            : null;
+        const maintainerNome = maintainer.nome ? String(maintainer.nome) : null;
+        const maintainerKey =
+          maintainerId ??
+          maintainerMatricula ??
+          (maintainerNome ? maintainerNome.trim().toLowerCase() : null) ??
+          "unknown";
 
         return {
           id: doc.id,
           machineNome: machine.nome ? String(machine.nome) : null,
           machineTag: machine.tag ? String(machine.tag) : null,
           createdAt: data.createdAt ? String(data.createdAt) : null,
-          maintainerNome: maintainer.nome ? String(maintainer.nome) : null,
-          maintainerMatricula: maintainer.matricula ? String(maintainer.matricula) : null,
+          maintainerNome,
+          maintainerMatricula,
+          maintainerId,
+          maintainerKey,
           qtdNc,
           hasNc: qtdNc > 0,
           osNumero: data.osNumero ? String(data.osNumero) : null,
@@ -128,6 +154,15 @@ export default function AdminInspectionsPage() {
       setLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    setVisibleCount(prev => {
+      if (selectedMaintainers.length === 0) {
+        return 0;
+      }
+      return prev === 0 ? 10 : prev;
+    });
+  }, [selectedMaintainers]);
 
   useEffect(() => {
     loadData();
@@ -161,6 +196,107 @@ export default function AdminInspectionsPage() {
       channel.close();
     };
   }, []);
+
+  useEffect(() => {
+    setSelectedMaintainers(prev => {
+      if (prev.length === 0) return prev;
+      const validMaintainers = new Set(items.map(item => item.maintainerKey));
+      const filtered = prev.filter(id => validMaintainers.has(id));
+      return filtered.length === prev.length ? prev : filtered;
+    });
+  }, [items]);
+
+  const maintainerOptions = useMemo(() => {
+    const map = new Map<
+      string,
+      { id: string; nome: string | null; matricula: string | null; total: number }
+    >();
+
+    for (const item of items) {
+      const key = item.maintainerKey || "unknown";
+      const current = map.get(key) ?? {
+        id: key,
+        nome: item.maintainerNome,
+        matricula: item.maintainerMatricula,
+        total: 0,
+      };
+      current.nome = current.nome ?? item.maintainerNome;
+      current.matricula = current.matricula ?? item.maintainerMatricula;
+      current.total += 1;
+      map.set(key, current);
+    }
+
+    return Array.from(map.values()).sort((a, b) => {
+      const nameA = (a.nome ?? a.matricula ?? a.id).toLowerCase();
+      const nameB = (b.nome ?? b.matricula ?? b.id).toLowerCase();
+      return nameA.localeCompare(nameB, "pt-BR");
+    });
+  }, [items]);
+
+  const filteredItems = useMemo(() => {
+    if (selectedMaintainers.length === 0) {
+      return [];
+    }
+    const selectedSet = new Set(selectedMaintainers);
+    return items.filter(item => selectedSet.has(item.maintainerKey));
+  }, [items, selectedMaintainers]);
+
+  const visibleItems = useMemo(
+    () => (visibleCount === 0 ? [] : filteredItems.slice(0, visibleCount)),
+    [filteredItems, visibleCount]
+  );
+
+  const hasMore = visibleCount > 0 && filteredItems.length > visibleItems.length;
+
+  const handleLoadMore = useCallback(() => {
+    setVisibleCount(prev => (prev === 0 ? 10 : prev + 10));
+  }, []);
+
+  const toggleMaintainer = useCallback((maintainerId: string) => {
+    setSelectedMaintainers(prev => {
+      if (prev.includes(maintainerId)) {
+        return prev.filter(id => id !== maintainerId);
+      }
+      return [...prev, maintainerId];
+    });
+  }, []);
+
+  const clearMaintainers = useCallback(() => {
+    setSelectedMaintainers([]);
+  }, []);
+
+  const handleDeleteInspection = useCallback(
+    async (inspectionId: string) => {
+      if (!inspectionId) return;
+      const confirmed = window.confirm("Confirma a exclusão desta inspeção?");
+      if (!confirmed) return;
+
+      setDeletingId(inspectionId);
+      setActionFeedback(null);
+      try {
+        const response = await fetch(`/api/inspecoes/${inspectionId}`, { method: "DELETE" });
+        if (!response.ok) {
+          const text = await response.text();
+          let payload: { error?: string } | null = null;
+          try {
+            payload = text ? (JSON.parse(text) as { error?: string }) : null;
+          } catch {
+            payload = null;
+          }
+          throw new Error(payload?.error || "Falha ao excluir inspeção");
+        }
+
+        setItems(prev => prev.filter(item => item.id !== inspectionId));
+        setActionFeedback({ type: "success", message: "Inspeção excluída com sucesso." });
+      } catch (err) {
+        const message = err instanceof Error && err.message ? err.message : "Erro ao excluir inspeção";
+        setActionFeedback({ type: "error", message });
+      } finally {
+        setDeletingId(null);
+      }
+    },
+    []
+  );
 
   const signedCount = useMemo(() => items.filter(item => item.signed).length, [items]);
   const pendingCount = useMemo(() => items.filter(item => !item.signed).length, [items]);
@@ -250,7 +386,99 @@ export default function AdminInspectionsPage() {
           </div>
         </CardHeader>
         <CardContent>
-          {loading ? (
+          <div className="mb-6 space-y-4">
+            <div className="flex flex-col gap-2">
+              <span className="text-sm font-medium text-[var(--text)]">Filtrar por mantenedor</span>
+              <p className="text-xs text-[var(--muted)]">
+                Selecione um ou mais mantenedores para visualizar apenas suas inspeções recentes.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={clearMaintainers}
+                disabled={selectedMaintainers.length === 0}
+              >
+                Limpar seleção
+              </Button>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {maintainerOptions.map(option => {
+                const isActive = selectedMaintainers.includes(option.id);
+                return (
+                  <button
+                    key={option.id}
+                    type="button"
+                    onClick={() => toggleMaintainer(option.id)}
+                    className={cn(
+                      buttonStyles({ variant: "ghost", size: "lg" }),
+                      "group flex h-full min-h-[120px] w-full flex-col items-stretch justify-between gap-4 rounded-3xl border px-4 py-5 text-left",
+                      "shadow-[0_18px_38px_-28px_rgba(37,99,235,0.65)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_20px_40px_-30px_rgba(37,99,235,0.55)]",
+                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)]",
+                      isActive
+                        ? "border-transparent bg-gradient-to-r from-[#2563eb] via-[#2563eb] to-[#1d4ed8] text-white focus-visible:ring-[#1d4ed8]"
+                        : "border-[color-mix(in_oklab,var(--border),#fff_35%)] bg-[color-mix(in_oklab,var(--surface),#fff_65%)] text-[var(--text)] focus-visible:ring-[#2563eb]/40"
+                    )}
+                    aria-pressed={isActive}
+                    data-active={isActive ? "true" : undefined}
+                  >
+                    <span className="flex flex-col gap-1 text-left">
+                      <span className="text-sm font-semibold leading-tight">
+                        {option.nome ?? option.matricula ?? "Sem identificação"}
+                      </span>
+                      {option.matricula ? (
+                        <span
+                          className={cn(
+                            "inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-medium uppercase tracking-wide",
+                            isActive
+                              ? "border-white/40 bg-white/20 text-white"
+                              : "border-[rgba(37,99,235,0.18)] bg-[rgba(37,99,235,0.08)] text-[color-mix(in_oklab,#1d4ed8,#111827_25%)]"
+                          )}
+                        >
+                          {option.matricula}
+                        </span>
+                      ) : null}
+                    </span>
+                    <span
+                      className={cn(
+                        "inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold tracking-tight",
+                        isActive
+                          ? "bg-white/15 text-white"
+                          : "bg-[rgba(37,99,235,0.08)] text-[color-mix(in_oklab,#1d4ed8,#0f172a_35%)]"
+                      )}
+                    >
+                      {option.total} inspeções
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            {selectedMaintainers.length === 0 ? (
+              <p className="text-xs text-[var(--muted)]">Selecione um mantenedor para carregar suas inspeções.</p>
+            ) : null}
+          </div>
+
+          {actionFeedback ? (
+            <div
+              className={
+                actionFeedback.type === "success"
+                  ? "mb-6 rounded-lg border border-[var(--success)] bg-[color-mix(in_oklab,var(--success),#fff_85%)] px-4 py-3 text-[var(--success)]"
+                  : "mb-6 rounded-lg border border-[var(--danger)] bg-[color-mix(in_oklab,var(--danger),#fff_85%)] px-4 py-3 text-[var(--danger)]"
+              }
+            >
+              {actionFeedback.message}
+            </div>
+          ) : null}
+
+          {selectedMaintainers.length === 0 ? (
+            <EmptyState
+              title="Selecione mantenedores"
+              description="Escolha pelo menos um mantenedor para visualizar as inspeções correspondentes."
+              className="py-12"
+            />
+          ) : loading ? (
             <div className="space-y-3">
               {[0, 1, 2, 3, 4].map(key => (
                 <div key={key} className="rounded-lg border border-[var(--border)] p-4">
@@ -259,10 +487,10 @@ export default function AdminInspectionsPage() {
                 </div>
               ))}
             </div>
-          ) : items.length === 0 ? (
+          ) : filteredItems.length === 0 ? (
             <EmptyState
               title="Nenhuma inspeção encontrada"
-              description="As inspeções serão exibidas aqui assim que forem registradas."
+              description="Não há inspeções registradas para os mantenedores selecionados."
               className="py-12"
             />
           ) : (
@@ -278,7 +506,7 @@ export default function AdminInspectionsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {items.map(item => (
+                {visibleItems.map(item => (
                   <TableRow key={item.id} className={item.hasNc ? "border-l-4 border-l-[var(--danger)]" : undefined}>
                     <TableCell>
                       <div className="flex flex-col">
@@ -352,6 +580,15 @@ export default function AdminInspectionsPage() {
                         >
                           Ver PDF
                         </a>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="destructive"
+                          onClick={() => handleDeleteInspection(item.id)}
+                          loading={deletingId === item.id}
+                        >
+                          Excluir
+                        </Button>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -359,6 +596,18 @@ export default function AdminInspectionsPage() {
               </TableBody>
             </Table>
           )}
+          {!loading && filteredItems.length > 0 ? (
+            <div className="mt-6 flex items-center justify-between text-sm text-[var(--muted)]">
+              <span>
+                Mostrando {visibleItems.length} de {filteredItems.length} inspeções selecionadas.
+              </span>
+              {hasMore ? (
+                <Button type="button" variant="outline" size="sm" onClick={handleLoadMore}>
+                  Carregar mais
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
         </CardContent>
       </Card>
     </div>
