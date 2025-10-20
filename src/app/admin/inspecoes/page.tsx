@@ -32,6 +32,8 @@ interface InspectionListItem {
   createdAt: string | null;
   maintainerNome: string | null;
   maintainerMatricula: string | null;
+  maintainerId: string | null;
+  maintainerKey: string;
   qtdNc: number;
   hasNc: boolean;
   osNumero: string | null;
@@ -52,10 +54,15 @@ export default function AdminInspectionsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<InspectionListItem[]>([]);
+  const [selectedMaintainer, setSelectedMaintainer] = useState<string>("all");
+  const [visibleCount, setVisibleCount] = useState<number>(25);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [actionFeedback, setActionFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setActionFeedback(null);
     try {
       const session = await fetch("/api/admin-session", { cache: "no-store" });
       if (session.status === 401) {
@@ -102,14 +109,32 @@ export default function AdminInspectionsPage() {
                 }));
         const qtdNc = typeof data.qtdNC === "number" ? data.qtdNC : ncItems.length;
         const pcmSign = (data.pcmSign ?? {}) as Record<string, unknown>;
+        const maintainerId =
+          typeof maintainer.id === "string" && maintainer.id.trim()
+            ? maintainer.id.trim()
+            : typeof maintainer.maintId === "string" && maintainer.maintId.trim()
+            ? maintainer.maintId.trim()
+            : null;
+        const maintainerMatricula =
+          typeof maintainer.matricula === "string" && maintainer.matricula.trim()
+            ? maintainer.matricula.trim().toUpperCase()
+            : null;
+        const maintainerNome = maintainer.nome ? String(maintainer.nome) : null;
+        const maintainerKey =
+          maintainerId ??
+          maintainerMatricula ??
+          (maintainerNome ? maintainerNome.trim().toLowerCase() : null) ??
+          "unknown";
 
         return {
           id: doc.id,
           machineNome: machine.nome ? String(machine.nome) : null,
           machineTag: machine.tag ? String(machine.tag) : null,
           createdAt: data.createdAt ? String(data.createdAt) : null,
-          maintainerNome: maintainer.nome ? String(maintainer.nome) : null,
-          maintainerMatricula: maintainer.matricula ? String(maintainer.matricula) : null,
+          maintainerNome,
+          maintainerMatricula,
+          maintainerId,
+          maintainerKey,
           qtdNc,
           hasNc: qtdNc > 0,
           osNumero: data.osNumero ? String(data.osNumero) : null,
@@ -128,6 +153,10 @@ export default function AdminInspectionsPage() {
       setLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    setVisibleCount(selectedMaintainer === "all" ? 25 : 10);
+  }, [selectedMaintainer]);
 
   useEffect(() => {
     loadData();
@@ -161,6 +190,97 @@ export default function AdminInspectionsPage() {
       channel.close();
     };
   }, []);
+
+  useEffect(() => {
+    if (selectedMaintainer === "all") return;
+    const stillExists = items.some(item => item.maintainerKey === selectedMaintainer);
+    if (!stillExists) {
+      setSelectedMaintainer("all");
+    }
+  }, [items, selectedMaintainer]);
+
+  const maintainerOptions = useMemo(() => {
+    const map = new Map<
+      string,
+      { id: string; nome: string | null; matricula: string | null; total: number }
+    >();
+
+    for (const item of items) {
+      const key = item.maintainerKey || "unknown";
+      const current = map.get(key) ?? {
+        id: key,
+        nome: item.maintainerNome,
+        matricula: item.maintainerMatricula,
+        total: 0,
+      };
+      current.nome = current.nome ?? item.maintainerNome;
+      current.matricula = current.matricula ?? item.maintainerMatricula;
+      current.total += 1;
+      map.set(key, current);
+    }
+
+    return Array.from(map.values()).sort((a, b) => {
+      const nameA = (a.nome ?? a.matricula ?? a.id).toLowerCase();
+      const nameB = (b.nome ?? b.matricula ?? b.id).toLowerCase();
+      return nameA.localeCompare(nameB, "pt-BR");
+    });
+  }, [items]);
+
+  const filteredItems = useMemo(() => {
+    const base = selectedMaintainer === "all"
+      ? items
+      : items.filter(item => item.maintainerKey === selectedMaintainer);
+    return base;
+  }, [items, selectedMaintainer]);
+
+  const visibleItems = useMemo(
+    () => filteredItems.slice(0, visibleCount),
+    [filteredItems, visibleCount]
+  );
+
+  const hasMore = filteredItems.length > visibleItems.length;
+
+  const selectedMaintainerInfo = useMemo(() => {
+    if (selectedMaintainer === "all") return null;
+    return maintainerOptions.find(option => option.id === selectedMaintainer) ?? null;
+  }, [maintainerOptions, selectedMaintainer]);
+
+  const handleLoadMore = useCallback(() => {
+    setVisibleCount(prev => prev + (selectedMaintainer === "all" ? 25 : 10));
+  }, [selectedMaintainer]);
+
+  const handleDeleteInspection = useCallback(
+    async (inspectionId: string) => {
+      if (!inspectionId) return;
+      const confirmed = window.confirm("Confirma a exclusão desta inspeção?");
+      if (!confirmed) return;
+
+      setDeletingId(inspectionId);
+      setActionFeedback(null);
+      try {
+        const response = await fetch(`/api/inspecoes/${inspectionId}`, { method: "DELETE" });
+        if (!response.ok) {
+          const text = await response.text();
+          let payload: { error?: string } | null = null;
+          try {
+            payload = text ? (JSON.parse(text) as { error?: string }) : null;
+          } catch {
+            payload = null;
+          }
+          throw new Error(payload?.error || "Falha ao excluir inspeção");
+        }
+
+        setItems(prev => prev.filter(item => item.id !== inspectionId));
+        setActionFeedback({ type: "success", message: "Inspeção excluída com sucesso." });
+      } catch (err) {
+        const message = err instanceof Error && err.message ? err.message : "Erro ao excluir inspeção";
+        setActionFeedback({ type: "error", message });
+      } finally {
+        setDeletingId(null);
+      }
+    },
+    []
+  );
 
   const signedCount = useMemo(() => items.filter(item => item.signed).length, [items]);
   const pendingCount = useMemo(() => items.filter(item => !item.signed).length, [items]);
@@ -250,6 +370,66 @@ export default function AdminInspectionsPage() {
           </div>
         </CardHeader>
         <CardContent>
+          <div className="mb-6 space-y-4">
+            <div className="flex flex-col gap-2">
+              <span className="text-sm font-medium text-[var(--text)]">Filtrar por mantenedor</span>
+              <p className="text-xs text-[var(--muted)]">
+                Selecione um mantenedor para visualizar apenas suas inspeções recentes.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant={selectedMaintainer === "all" ? "default" : "ghost"}
+                onClick={() => setSelectedMaintainer("all")}
+              >
+                Todos
+                <span className="ml-2 rounded-full bg-white/20 px-2 py-0.5 text-xs font-normal">
+                  {items.length}
+                </span>
+              </Button>
+              {maintainerOptions.map(option => (
+                <Button
+                  key={option.id}
+                  type="button"
+                  size="sm"
+                  variant={selectedMaintainer === option.id ? "secondary" : "ghost"}
+                  onClick={() => setSelectedMaintainer(option.id)}
+                >
+                  <span className="flex flex-col items-start text-left">
+                    <span className="text-sm font-medium text-[var(--text)]">
+                      {option.nome ?? option.matricula ?? "Sem identificação"}
+                    </span>
+                    {option.matricula ? (
+                      <span className="text-xs text-[var(--muted)]">{option.matricula}</span>
+                    ) : null}
+                  </span>
+                  <span className="ml-2 rounded-full bg-white/20 px-2 py-0.5 text-xs font-normal">
+                    {option.total}
+                  </span>
+                </Button>
+              ))}
+            </div>
+            {selectedMaintainerInfo ? (
+              <p className="text-xs text-[var(--muted)]">
+                Mostrando inspeções de {selectedMaintainerInfo.nome ?? selectedMaintainerInfo.matricula ?? "Sem identificação"}.
+              </p>
+            ) : null}
+          </div>
+
+          {actionFeedback ? (
+            <div
+              className={
+                actionFeedback.type === "success"
+                  ? "mb-6 rounded-lg border border-[var(--success)] bg-[color-mix(in_oklab,var(--success),#fff_85%)] px-4 py-3 text-[var(--success)]"
+                  : "mb-6 rounded-lg border border-[var(--danger)] bg-[color-mix(in_oklab,var(--danger),#fff_85%)] px-4 py-3 text-[var(--danger)]"
+              }
+            >
+              {actionFeedback.message}
+            </div>
+          ) : null}
+
           {loading ? (
             <div className="space-y-3">
               {[0, 1, 2, 3, 4].map(key => (
@@ -278,7 +458,7 @@ export default function AdminInspectionsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {items.map(item => (
+                {visibleItems.map(item => (
                   <TableRow key={item.id} className={item.hasNc ? "border-l-4 border-l-[var(--danger)]" : undefined}>
                     <TableCell>
                       <div className="flex flex-col">
@@ -352,6 +532,15 @@ export default function AdminInspectionsPage() {
                         >
                           Ver PDF
                         </a>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="destructive"
+                          onClick={() => handleDeleteInspection(item.id)}
+                          loading={deletingId === item.id}
+                        >
+                          Excluir
+                        </Button>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -359,6 +548,19 @@ export default function AdminInspectionsPage() {
               </TableBody>
             </Table>
           )}
+          {!loading && filteredItems.length > 0 ? (
+            <div className="mt-6 flex items-center justify-between text-sm text-[var(--muted)]">
+              <span>
+                Mostrando {visibleItems.length} de {filteredItems.length} inspeções
+                {selectedMaintainer === "all" ? "" : " deste mantenedor"}.
+              </span>
+              {hasMore ? (
+                <Button type="button" variant="outline" size="sm" onClick={handleLoadMore}>
+                  Carregar mais
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
         </CardContent>
       </Card>
     </div>

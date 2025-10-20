@@ -495,6 +495,8 @@ export default function PendingSignaturesPage() {
   const [items, setItems] = useState<PendingSignInspection[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [withNcIndex, setWithNcIndex] = useState(0);
+  const [withoutNcIndex, setWithoutNcIndex] = useState(0);
   const [selected, setSelected] = useState<PendingSignInspection | null>(null);
   const [nome, setNome] = useState("");
   const [cargo, setCargo] = useState("");
@@ -575,7 +577,14 @@ export default function PendingSignaturesPage() {
         throw new Error(payload?.error || "Falha ao carregar inspeções");
       }
       const data = (await response.json()) as PendingSignInspection[];
-      setItems(Array.isArray(data) ? data : []);
+      const normalized = Array.isArray(data)
+        ? [...data].sort((a, b) => {
+            const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+            const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+            return timeB - timeA;
+          })
+        : [];
+      setItems(normalized);
     } catch (err: unknown) {
       const message = err instanceof Error && err.message ? err.message : "Erro ao carregar inspeções";
       setError(message);
@@ -620,6 +629,47 @@ export default function PendingSignaturesPage() {
 
   const withNc = filteredItems.filter(item => item.hasNC);
   const withoutNc = filteredItems.filter(item => !item.hasNC);
+
+  useEffect(() => {
+    setWithNcIndex(0);
+    setWithoutNcIndex(0);
+  }, [items]);
+
+  useEffect(() => {
+    setWithNcIndex(0);
+    setWithoutNcIndex(0);
+  }, [maintainerFilter, search]);
+
+  useEffect(() => {
+    if (withNcIndex >= withNc.length) {
+      setWithNcIndex(withNc.length > 0 ? withNc.length - 1 : 0);
+    }
+  }, [withNcIndex, withNc.length]);
+
+  useEffect(() => {
+    if (withoutNcIndex >= withoutNc.length) {
+      setWithoutNcIndex(withoutNc.length > 0 ? withoutNc.length - 1 : 0);
+    }
+  }, [withoutNcIndex, withoutNc.length]);
+
+  const currentWithNc = withNc[withNcIndex] ?? null;
+  const currentWithoutNc = withoutNc[withoutNcIndex] ?? null;
+
+  const handleNextWithNc = useCallback(() => {
+    setWithNcIndex(prev => {
+      if (withNc.length === 0) return 0;
+      const next = Math.min(prev + 1, withNc.length - 1);
+      return next;
+    });
+  }, [withNc.length]);
+
+  const handleNextWithoutNc = useCallback(() => {
+    setWithoutNcIndex(prev => {
+      if (withoutNc.length === 0) return 0;
+      const next = Math.min(prev + 1, withoutNc.length - 1);
+      return next;
+    });
+  }, [withoutNc.length]);
 
   const openImagePreview = useCallback((image: ImagePreviewData) => {
     setPreviewImage(image);
@@ -1002,33 +1052,49 @@ export default function PendingSignaturesPage() {
             <h2 className="text-lg font-semibold text-[var(--text)]">Com não conformidade</h2>
             <p className="text-sm text-[var(--muted)]">Inspeções que registraram NCs exigem sua atenção prioritária.</p>
           </div>
-          {withNc.length === 0 ? (
+          {withNc.length === 0 || !currentWithNc ? (
             <EmptyState title="Nenhuma inspeção com NC" description="Tudo em dia por aqui." className="py-10" />
           ) : (
             <div className="space-y-4">
-              {withNc.map(item => (
-                <Card key={item.id} className="border-2 border-[var(--danger)] bg-[color-mix(in_oklab,var(--danger),#fff_92%)]">
-                  <CardHeader className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <Badge variant="danger">{item.qtdNC} NC</Badge>
+              <Card className="border-2 border-[var(--danger)] bg-[color-mix(in_oklab,var(--danger),#fff_92%)]">
+                <CardHeader className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Badge variant="danger">{currentWithNc.qtdNC} NC</Badge>
+                  </div>
+                  <CardTitle className="text-lg text-[var(--text)]">
+                    {currentWithNc.machineNome ?? "Máquina"} {currentWithNc.machineTag ? `(${currentWithNc.machineTag})` : ""}
+                  </CardTitle>
+                  <p className="text-sm text-[var(--muted)]">
+                    Operador: {currentWithNc.operatorNome || "-"}
+                    {currentWithNc.operatorMatricula ? ` (${currentWithNc.operatorMatricula})` : ""}
+                  </p>
+                  <p className="text-sm text-[var(--muted)]">Realizada em {formatDateTime(currentWithNc.createdAt)}</p>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="text-sm text-[var(--muted)]">Assinatura do PCM pendente.</div>
+                    <Button type="button" onClick={() => openModal(currentWithNc)}>
+                      Assinar
+                    </Button>
+                  </div>
+                  {withNc.length > 1 ? (
+                    <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-[var(--muted)]">
+                      <span>
+                        Mostrando {withNcIndex + 1} de {withNc.length} inspeções com NC.
+                      </span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={handleNextWithNc}
+                        disabled={withNcIndex >= withNc.length - 1}
+                      >
+                        Carregar próxima
+                      </Button>
                     </div>
-                    <CardTitle className="text-lg text-[var(--text)]">
-                      {item.machineNome ?? "Máquina"} {item.machineTag ? `(${item.machineTag})` : ""}
-                    </CardTitle>
-                    <p className="text-sm text-[var(--muted)]">
-                      Operador: {item.operatorNome || "-"}
-                      {item.operatorMatricula ? ` (${item.operatorMatricula})` : ""}
-                    </p>
-                    <p className="text-sm text-[var(--muted)]">Realizada em {formatDateTime(item.createdAt)}</p>
-                  </CardHeader>
-                  <CardContent className="flex items-center justify-between">
-                    <div className="text-sm text-[var(--muted)]">
-                      Assinatura do PCM pendente.
-                    </div>
-                    <Button onClick={() => openModal(item)}>Assinar</Button>
-                  </CardContent>
-                </Card>
-              ))}
+                  ) : null}
+                </CardContent>
+              </Card>
             </div>
           )}
         </section>
@@ -1038,33 +1104,49 @@ export default function PendingSignaturesPage() {
             <h2 className="text-lg font-semibold text-[var(--text)]">Sem não conformidade</h2>
             <p className="text-sm text-[var(--muted)]">Inspeções aprovadas que aguardam apenas sua assinatura.</p>
           </div>
-          {withoutNc.length === 0 ? (
+          {withoutNc.length === 0 || !currentWithoutNc ? (
             <EmptyState title="Nenhuma inspeção pendente" description="Nenhuma assinatura aguardando nesta lista." className="py-10" />
           ) : (
             <div className="space-y-4">
-              {withoutNc.map(item => (
-                <Card key={item.id} className="border border-[var(--border)] bg-[var(--surface)]">
-                  <CardHeader className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <Badge variant="success">Sem NC</Badge>
-                    </div>
-                    <CardTitle className="text-lg text-[var(--text)]">
-                      {item.machineNome ?? "Máquina"} {item.machineTag ? `(${item.machineTag})` : ""}
-                    </CardTitle>
-                    <p className="text-sm text-[var(--muted)]">
-                      Operador: {item.operatorNome || "-"}
-                      {item.operatorMatricula ? ` (${item.operatorMatricula})` : ""}
-                    </p>
-                    <p className="text-sm text-[var(--muted)]">Realizada em {formatDateTime(item.createdAt)}</p>
-                  </CardHeader>
-                  <CardContent className="flex items-center justify-between">
+              <Card className="border border-[var(--border)] bg-[var(--surface)]">
+                <CardHeader className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Badge variant="success">Sem NC</Badge>
+                  </div>
+                  <CardTitle className="text-lg text-[var(--text)]">
+                    {currentWithoutNc.machineNome ?? "Máquina"} {currentWithoutNc.machineTag ? `(${currentWithoutNc.machineTag})` : ""}
+                  </CardTitle>
+                  <p className="text-sm text-[var(--muted)]">
+                    Operador: {currentWithoutNc.operatorNome || "-"}
+                    {currentWithoutNc.operatorMatricula ? ` (${currentWithoutNc.operatorMatricula})` : ""}
+                  </p>
+                  <p className="text-sm text-[var(--muted)]">Realizada em {formatDateTime(currentWithoutNc.createdAt)}</p>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="text-sm text-[var(--muted)]">Pronta para ser assinada.</div>
-                    <Button variant="secondary" onClick={() => openModal(item)}>
+                    <Button type="button" variant="secondary" onClick={() => openModal(currentWithoutNc)}>
                       Assinar
                     </Button>
-                  </CardContent>
-                </Card>
-              ))}
+                  </div>
+                  {withoutNc.length > 1 ? (
+                    <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-[var(--muted)]">
+                      <span>
+                        Mostrando {withoutNcIndex + 1} de {withoutNc.length} inspeções sem NC.
+                      </span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={handleNextWithoutNc}
+                        disabled={withoutNcIndex >= withoutNc.length - 1}
+                      >
+                        Carregar próxima
+                      </Button>
+                    </div>
+                  ) : null}
+                </CardContent>
+              </Card>
             </div>
           )}
         </section>
