@@ -7,6 +7,7 @@ import {
   deleteDoc,
   doc,
   getDocs,
+  limit,
   orderBy,
   query,
 } from "firebase/firestore";
@@ -19,6 +20,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { firebaseDb } from "@/lib/firebase-client";
+import { ensureFirestorePersistence } from "@/lib/firebase-persistence";
 import { downloadInspectionPdf, downloadInspectionsBatch } from "@/lib/pdf";
 import type { ChecklistAnswer } from "@/types";
 
@@ -135,7 +137,7 @@ export default function AdminChecklistsPage() {
   const [machines, setMachines] = useState<MachineOption[]>([]);
   const [maintainers, setMaintainers] = useState<MaintainerOption[]>([]);
   const [templates, setTemplates] = useState<TemplateOption[]>([]);
-  const [rows, setRows] = useState<ChecklistRow[]>([]);
+  const [rawRows, setRawRows] = useState<ChecklistRow[]>([]);
   const [filter, setFilter] = useState<FilterState>({
     machineTag: "",
     maintainerId: "all",
@@ -152,6 +154,10 @@ export default function AdminChecklistsPage() {
   const maintainersCol = useMemo(() => collection(firebaseDb, "mantenedores"), []);
   const templatesCol = useMemo(() => collection(firebaseDb, "templates"), []);
   const inspectionsCol = useMemo(() => collection(firebaseDb, "inspecoes"), []);
+
+  useEffect(() => {
+    ensureFirestorePersistence();
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -249,8 +255,8 @@ export default function AdminChecklistsPage() {
     setLoadingRows(true);
     setError(null);
     try {
-      const snap = await getDocs(query(inspectionsCol, orderBy("createdAt", "desc")));
-      const allRows: ChecklistRow[] = snap.docs.slice(0, MAX_RESULTS).map(docSnap => {
+      const snap = await getDocs(query(inspectionsCol, orderBy("createdAt", "desc"), limit(MAX_RESULTS)));
+      const allRows: ChecklistRow[] = snap.docs.map(docSnap => {
         const data = docSnap.data() ?? {};
         const machine = (data.machine ?? {}) as Record<string, unknown>;
         const maintainer = (data.maintainer ?? {}) as Record<string, unknown>;
@@ -287,67 +293,69 @@ export default function AdminChecklistsPage() {
         } satisfies ChecklistRow;
       });
 
-      const machineQuery = filter.machineTag?.trim().toLowerCase();
-
-      const filtered = allRows.filter(row => {
-        if (machineQuery) {
-          const tag = row.machineTag?.toLowerCase() ?? "";
-          const name = row.machineNome?.toLowerCase() ?? "";
-          const setor = row.machineSetor?.toLowerCase() ?? "";
-          if (!tag.includes(machineQuery) && !name.includes(machineQuery) && !setor.includes(machineQuery)) {
-            return false;
-          }
-        }
-        if (filter.maintainerId !== "all" && row.maintainerId !== filter.maintainerId) {
-          return false;
-        }
-        if (filter.templateId !== "all" && row.templateId !== filter.templateId) {
-          return false;
-        }
-        if (filter.hasNc === "yes" && !row.hasNc) {
-          return false;
-        }
-        if (filter.hasNc === "no" && row.hasNc) {
-          return false;
-        }
-        if (filter.matricula?.trim()) {
-          const wanted = filter.matricula.trim().toLowerCase();
-          const matricula = row.maintainerMatricula?.toLowerCase() ?? "";
-          if (!matricula.includes(wanted)) {
-            return false;
-          }
-        }
-        if (filter.from) {
-          const fromDate = new Date(`${filter.from}T00:00:00`);
-          const createdAt = normalizeDate(row.createdAt);
-          if (!createdAt || createdAt < fromDate) {
-            return false;
-          }
-        }
-        if (filter.to) {
-          const toDate = new Date(`${filter.to}T23:59:59`);
-          const createdAt = normalizeDate(row.createdAt);
-          if (!createdAt || createdAt > toDate) {
-            return false;
-          }
-        }
-        return true;
-      });
-
-      setRows(filtered);
+      setRawRows(allRows);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Erro ao carregar checklists";
       setError(message);
     } finally {
       setLoadingRows(false);
     }
-  }, [filter, inspectionsCol, machineById, maintainerById, templateById]);
+  }, [inspectionsCol, machineById, maintainerById, templateById]);
 
   useEffect(() => {
     if (!loadingLookups) {
       fetchRows();
     }
   }, [loadingLookups, fetchRows]);
+
+  const rows = useMemo(() => {
+    const machineQuery = filter.machineTag?.trim().toLowerCase();
+
+    return rawRows.filter(row => {
+      if (machineQuery) {
+        const tag = row.machineTag?.toLowerCase() ?? "";
+        const name = row.machineNome?.toLowerCase() ?? "";
+        const setor = row.machineSetor?.toLowerCase() ?? "";
+        if (!tag.includes(machineQuery) && !name.includes(machineQuery) && !setor.includes(machineQuery)) {
+          return false;
+        }
+      }
+      if (filter.maintainerId !== "all" && row.maintainerId !== filter.maintainerId) {
+        return false;
+      }
+      if (filter.templateId !== "all" && row.templateId !== filter.templateId) {
+        return false;
+      }
+      if (filter.hasNc === "yes" && !row.hasNc) {
+        return false;
+      }
+      if (filter.hasNc === "no" && row.hasNc) {
+        return false;
+      }
+      if (filter.matricula?.trim()) {
+        const wanted = filter.matricula.trim().toLowerCase();
+        const matricula = row.maintainerMatricula?.toLowerCase() ?? "";
+        if (!matricula.includes(wanted)) {
+          return false;
+        }
+      }
+      if (filter.from) {
+        const fromDate = new Date(`${filter.from}T00:00:00`);
+        const createdAt = normalizeDate(row.createdAt);
+        if (!createdAt || createdAt < fromDate) {
+          return false;
+        }
+      }
+      if (filter.to) {
+        const toDate = new Date(`${filter.to}T23:59:59`);
+        const createdAt = normalizeDate(row.createdAt);
+        if (!createdAt || createdAt > toDate) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [rawRows, filter]);
 
   const onFilterChange = (patch: Partial<FilterState>) => {
     setFilter(prev => ({ ...prev, ...patch }));
