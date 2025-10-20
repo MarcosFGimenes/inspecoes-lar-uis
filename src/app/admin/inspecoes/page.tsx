@@ -54,8 +54,8 @@ export default function AdminInspectionsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<InspectionListItem[]>([]);
-  const [selectedMaintainer, setSelectedMaintainer] = useState<string>("all");
-  const [visibleCount, setVisibleCount] = useState<number>(25);
+  const [selectedMaintainers, setSelectedMaintainers] = useState<string[]>([]);
+  const [visibleCount, setVisibleCount] = useState<number>(0);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [actionFeedback, setActionFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
@@ -155,8 +155,13 @@ export default function AdminInspectionsPage() {
   }, []);
 
   useEffect(() => {
-    setVisibleCount(selectedMaintainer === "all" ? 25 : 10);
-  }, [selectedMaintainer]);
+    setVisibleCount(prev => {
+      if (selectedMaintainers.length === 0) {
+        return 0;
+      }
+      return prev === 0 ? 10 : prev;
+    });
+  }, [selectedMaintainers]);
 
   useEffect(() => {
     loadData();
@@ -192,12 +197,13 @@ export default function AdminInspectionsPage() {
   }, []);
 
   useEffect(() => {
-    if (selectedMaintainer === "all") return;
-    const stillExists = items.some(item => item.maintainerKey === selectedMaintainer);
-    if (!stillExists) {
-      setSelectedMaintainer("all");
-    }
-  }, [items, selectedMaintainer]);
+    setSelectedMaintainers(prev => {
+      if (prev.length === 0) return prev;
+      const validMaintainers = new Set(items.map(item => item.maintainerKey));
+      const filtered = prev.filter(id => validMaintainers.has(id));
+      return filtered.length === prev.length ? prev : filtered;
+    });
+  }, [items]);
 
   const maintainerOptions = useMemo(() => {
     const map = new Map<
@@ -227,27 +233,41 @@ export default function AdminInspectionsPage() {
   }, [items]);
 
   const filteredItems = useMemo(() => {
-    const base = selectedMaintainer === "all"
-      ? items
-      : items.filter(item => item.maintainerKey === selectedMaintainer);
-    return base;
-  }, [items, selectedMaintainer]);
+    if (selectedMaintainers.length === 0) {
+      return [];
+    }
+    const selectedSet = new Set(selectedMaintainers);
+    return items.filter(item => selectedSet.has(item.maintainerKey));
+  }, [items, selectedMaintainers]);
 
   const visibleItems = useMemo(
-    () => filteredItems.slice(0, visibleCount),
+    () => (visibleCount === 0 ? [] : filteredItems.slice(0, visibleCount)),
     [filteredItems, visibleCount]
   );
 
-  const hasMore = filteredItems.length > visibleItems.length;
+  const hasMore = visibleCount > 0 && filteredItems.length > visibleItems.length;
 
-  const selectedMaintainerInfo = useMemo(() => {
-    if (selectedMaintainer === "all") return null;
-    return maintainerOptions.find(option => option.id === selectedMaintainer) ?? null;
-  }, [maintainerOptions, selectedMaintainer]);
+  const activeMaintainers = useMemo(
+    () => maintainerOptions.filter(option => selectedMaintainers.includes(option.id)),
+    [maintainerOptions, selectedMaintainers]
+  );
 
   const handleLoadMore = useCallback(() => {
-    setVisibleCount(prev => prev + (selectedMaintainer === "all" ? 25 : 10));
-  }, [selectedMaintainer]);
+    setVisibleCount(prev => (prev === 0 ? 10 : prev + 10));
+  }, []);
+
+  const toggleMaintainer = useCallback((maintainerId: string) => {
+    setSelectedMaintainers(prev => {
+      if (prev.includes(maintainerId)) {
+        return prev.filter(id => id !== maintainerId);
+      }
+      return [...prev, maintainerId];
+    });
+  }, []);
+
+  const clearMaintainers = useCallback(() => {
+    setSelectedMaintainers([]);
+  }, []);
 
   const handleDeleteInspection = useCallback(
     async (inspectionId: string) => {
@@ -285,6 +305,9 @@ export default function AdminInspectionsPage() {
   const signedCount = useMemo(() => items.filter(item => item.signed).length, [items]);
   const pendingCount = useMemo(() => items.filter(item => !item.signed).length, [items]);
   const withNcCount = useMemo(() => items.filter(item => item.hasNc).length, [items]);
+
+  const activeMaintainerBadgeClass =
+    "inline-flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 py-1";
 
   return (
     <div className="max-w-7xl mx-auto space-y-6 p-6">
@@ -374,48 +397,58 @@ export default function AdminInspectionsPage() {
             <div className="flex flex-col gap-2">
               <span className="text-sm font-medium text-[var(--text)]">Filtrar por mantenedor</span>
               <p className="text-xs text-[var(--muted)]">
-                Selecione um mantenedor para visualizar apenas suas inspeções recentes.
+                Selecione um ou mais mantenedores para visualizar apenas suas inspeções recentes.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
               <Button
                 type="button"
                 size="sm"
-                variant={selectedMaintainer === "all" ? "default" : "ghost"}
-                onClick={() => setSelectedMaintainer("all")}
+                variant="ghost"
+                onClick={clearMaintainers}
+                disabled={selectedMaintainers.length === 0}
               >
-                Todos
-                <span className="ml-2 rounded-full bg-white/20 px-2 py-0.5 text-xs font-normal">
-                  {items.length}
-                </span>
+                Limpar seleção
               </Button>
-              {maintainerOptions.map(option => (
-                <Button
-                  key={option.id}
-                  type="button"
-                  size="sm"
-                  variant={selectedMaintainer === option.id ? "secondary" : "ghost"}
-                  onClick={() => setSelectedMaintainer(option.id)}
-                >
-                  <span className="flex flex-col items-start text-left">
-                    <span className="text-sm font-medium text-[var(--text)]">
+              {maintainerOptions.map(option => {
+                const isActive = selectedMaintainers.includes(option.id);
+                return (
+                  <Button
+                    key={option.id}
+                    type="button"
+                    size="sm"
+                    variant={isActive ? "secondary" : "ghost"}
+                    onClick={() => toggleMaintainer(option.id)}
+                  >
+                    <span className="flex flex-col items-start text-left">
+                      <span className="text-sm font-medium text-[var(--text)]">
+                        {option.nome ?? option.matricula ?? "Sem identificação"}
+                      </span>
+                      {option.matricula ? (
+                        <span className="text-xs text-[var(--muted)]">{option.matricula}</span>
+                      ) : null}
+                    </span>
+                    <span className="ml-2 rounded-full bg-white/20 px-2 py-0.5 text-xs font-normal">
+                      {option.total}
+                    </span>
+                  </Button>
+                );
+              })}
+            </div>
+            {activeMaintainers.length > 0 ? (
+              <div className="flex flex-wrap gap-2 text-xs text-[var(--muted)]">
+                {activeMaintainers.map(option => (
+                  <span key={`active-${option.id}`} className={activeMaintainerBadgeClass}>
+                    <span className="font-medium text-[var(--text)]">
                       {option.nome ?? option.matricula ?? "Sem identificação"}
                     </span>
-                    {option.matricula ? (
-                      <span className="text-xs text-[var(--muted)]">{option.matricula}</span>
-                    ) : null}
+                    {option.matricula ? <span>{option.matricula}</span> : null}
                   </span>
-                  <span className="ml-2 rounded-full bg-white/20 px-2 py-0.5 text-xs font-normal">
-                    {option.total}
-                  </span>
-                </Button>
-              ))}
-            </div>
-            {selectedMaintainerInfo ? (
-              <p className="text-xs text-[var(--muted)]">
-                Mostrando inspeções de {selectedMaintainerInfo.nome ?? selectedMaintainerInfo.matricula ?? "Sem identificação"}.
-              </p>
-            ) : null}
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-[var(--muted)]">Selecione um mantenedor para carregar suas inspeções.</p>
+            )}
           </div>
 
           {actionFeedback ? (
@@ -430,7 +463,13 @@ export default function AdminInspectionsPage() {
             </div>
           ) : null}
 
-          {loading ? (
+          {selectedMaintainers.length === 0 ? (
+            <EmptyState
+              title="Selecione mantenedores"
+              description="Escolha pelo menos um mantenedor para visualizar as inspeções correspondentes."
+              className="py-12"
+            />
+          ) : loading ? (
             <div className="space-y-3">
               {[0, 1, 2, 3, 4].map(key => (
                 <div key={key} className="rounded-lg border border-[var(--border)] p-4">
@@ -439,10 +478,10 @@ export default function AdminInspectionsPage() {
                 </div>
               ))}
             </div>
-          ) : items.length === 0 ? (
+          ) : filteredItems.length === 0 ? (
             <EmptyState
               title="Nenhuma inspeção encontrada"
-              description="As inspeções serão exibidas aqui assim que forem registradas."
+              description="Não há inspeções registradas para os mantenedores selecionados."
               className="py-12"
             />
           ) : (
@@ -551,8 +590,7 @@ export default function AdminInspectionsPage() {
           {!loading && filteredItems.length > 0 ? (
             <div className="mt-6 flex items-center justify-between text-sm text-[var(--muted)]">
               <span>
-                Mostrando {visibleItems.length} de {filteredItems.length} inspeções
-                {selectedMaintainer === "all" ? "" : " deste mantenedor"}.
+                Mostrando {visibleItems.length} de {filteredItems.length} inspeções selecionadas.
               </span>
               {hasMore ? (
                 <Button type="button" variant="outline" size="sm" onClick={handleLoadMore}>

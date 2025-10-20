@@ -663,10 +663,26 @@ export default function PendingSignaturesPage() {
     });
   }, [withNc.length]);
 
+  const handlePreviousWithNc = useCallback(() => {
+    setWithNcIndex(prev => {
+      if (withNc.length === 0) return 0;
+      const next = Math.max(prev - 1, 0);
+      return next;
+    });
+  }, [withNc.length]);
+
   const handleNextWithoutNc = useCallback(() => {
     setWithoutNcIndex(prev => {
       if (withoutNc.length === 0) return 0;
       const next = Math.min(prev + 1, withoutNc.length - 1);
+      return next;
+    });
+  }, [withoutNc.length]);
+
+  const handlePreviousWithoutNc = useCallback(() => {
+    setWithoutNcIndex(prev => {
+      if (withoutNc.length === 0) return 0;
+      const next = Math.max(prev - 1, 0);
       return next;
     });
   }, [withoutNc.length]);
@@ -1082,15 +1098,26 @@ export default function PendingSignaturesPage() {
                       <span>
                         Mostrando {withNcIndex + 1} de {withNc.length} inspeções com NC.
                       </span>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={handleNextWithNc}
-                        disabled={withNcIndex >= withNc.length - 1}
-                      >
-                        Carregar próxima
-                      </Button>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={handlePreviousWithNc}
+                          disabled={withNcIndex === 0}
+                        >
+                          Carregar anterior
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={handleNextWithNc}
+                          disabled={withNcIndex >= withNc.length - 1}
+                        >
+                          Carregar próxima
+                        </Button>
+                      </div>
                     </div>
                   ) : null}
                 </CardContent>
@@ -1134,15 +1161,26 @@ export default function PendingSignaturesPage() {
                       <span>
                         Mostrando {withoutNcIndex + 1} de {withoutNc.length} inspeções sem NC.
                       </span>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={handleNextWithoutNc}
-                        disabled={withoutNcIndex >= withoutNc.length - 1}
-                      >
-                        Carregar próxima
-                      </Button>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={handlePreviousWithoutNc}
+                          disabled={withoutNcIndex === 0}
+                        >
+                          Carregar anterior
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={handleNextWithoutNc}
+                          disabled={withoutNcIndex >= withoutNc.length - 1}
+                        >
+                          Carregar próxima
+                        </Button>
+                      </div>
                     </div>
                   ) : null}
                 </CardContent>
