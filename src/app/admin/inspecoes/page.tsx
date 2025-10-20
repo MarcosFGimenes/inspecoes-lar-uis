@@ -24,6 +24,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { ChecklistAnswer } from "@/types";
+import { cn } from "@/lib/cn";
 
 interface InspectionListItem {
   id: string;
@@ -247,11 +248,6 @@ export default function AdminInspectionsPage() {
 
   const hasMore = visibleCount > 0 && filteredItems.length > visibleItems.length;
 
-  const activeMaintainers = useMemo(
-    () => maintainerOptions.filter(option => selectedMaintainers.includes(option.id)),
-    [maintainerOptions, selectedMaintainers]
-  );
-
   const handleLoadMore = useCallback(() => {
     setVisibleCount(prev => (prev === 0 ? 10 : prev + 10));
   }, []);
@@ -305,9 +301,6 @@ export default function AdminInspectionsPage() {
   const signedCount = useMemo(() => items.filter(item => item.signed).length, [items]);
   const pendingCount = useMemo(() => items.filter(item => !item.signed).length, [items]);
   const withNcCount = useMemo(() => items.filter(item => item.hasNc).length, [items]);
-
-  const activeMaintainerBadgeClass =
-    "inline-flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 py-1";
 
   return (
     <div className="max-w-7xl mx-auto space-y-6 p-6">
@@ -410,45 +403,61 @@ export default function AdminInspectionsPage() {
               >
                 Limpar seleção
               </Button>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {maintainerOptions.map(option => {
                 const isActive = selectedMaintainers.includes(option.id);
                 return (
-                  <Button
+                  <button
                     key={option.id}
                     type="button"
-                    size="sm"
-                    variant={isActive ? "secondary" : "ghost"}
                     onClick={() => toggleMaintainer(option.id)}
+                    className={cn(
+                      buttonStyles({ variant: "ghost", size: "lg" }),
+                      "group flex h-full min-h-[120px] w-full flex-col items-stretch justify-between gap-4 rounded-3xl border px-4 py-5 text-left",
+                      "shadow-[0_18px_38px_-28px_rgba(37,99,235,0.65)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_20px_40px_-30px_rgba(37,99,235,0.55)]",
+                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)]",
+                      isActive
+                        ? "border-transparent bg-gradient-to-r from-[#2563eb] via-[#2563eb] to-[#1d4ed8] text-white focus-visible:ring-[#1d4ed8]"
+                        : "border-[color-mix(in_oklab,var(--border),#fff_35%)] bg-[color-mix(in_oklab,var(--surface),#fff_65%)] text-[var(--text)] focus-visible:ring-[#2563eb]/40"
+                    )}
+                    aria-pressed={isActive}
+                    data-active={isActive ? "true" : undefined}
                   >
-                    <span className="flex flex-col items-start text-left">
-                      <span className="text-sm font-medium text-[var(--text)]">
+                    <span className="flex flex-col gap-1 text-left">
+                      <span className="text-sm font-semibold leading-tight">
                         {option.nome ?? option.matricula ?? "Sem identificação"}
                       </span>
                       {option.matricula ? (
-                        <span className="text-xs text-[var(--muted)]">{option.matricula}</span>
+                        <span
+                          className={cn(
+                            "inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-medium uppercase tracking-wide",
+                            isActive
+                              ? "border-white/40 bg-white/20 text-white"
+                              : "border-[rgba(37,99,235,0.18)] bg-[rgba(37,99,235,0.08)] text-[color-mix(in_oklab,#1d4ed8,#111827_25%)]"
+                          )}
+                        >
+                          {option.matricula}
+                        </span>
                       ) : null}
                     </span>
-                    <span className="ml-2 rounded-full bg-white/20 px-2 py-0.5 text-xs font-normal">
-                      {option.total}
+                    <span
+                      className={cn(
+                        "inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold tracking-tight",
+                        isActive
+                          ? "bg-white/15 text-white"
+                          : "bg-[rgba(37,99,235,0.08)] text-[color-mix(in_oklab,#1d4ed8,#0f172a_35%)]"
+                      )}
+                    >
+                      {option.total} inspeções
                     </span>
-                  </Button>
+                  </button>
                 );
               })}
             </div>
-            {activeMaintainers.length > 0 ? (
-              <div className="flex flex-wrap gap-2 text-xs text-[var(--muted)]">
-                {activeMaintainers.map(option => (
-                  <span key={`active-${option.id}`} className={activeMaintainerBadgeClass}>
-                    <span className="font-medium text-[var(--text)]">
-                      {option.nome ?? option.matricula ?? "Sem identificação"}
-                    </span>
-                    {option.matricula ? <span>{option.matricula}</span> : null}
-                  </span>
-                ))}
-              </div>
-            ) : (
+            {selectedMaintainers.length === 0 ? (
               <p className="text-xs text-[var(--muted)]">Selecione um mantenedor para carregar suas inspeções.</p>
-            )}
+            ) : null}
           </div>
 
           {actionFeedback ? (
