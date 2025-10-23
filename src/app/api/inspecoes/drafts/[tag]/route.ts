@@ -22,6 +22,7 @@ const itemSchema = z.object({
   observacao: z.string().trim().max(4000).optional(),
   fotos: z.array(itemPhotoSchema).max(3).optional(),
   osNumero: z.string().trim().max(120).optional(),
+  criticidade: z.number().int().min(1).max(5).optional(),
 });
 
 const payloadSchema = z.object({
@@ -198,12 +199,18 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       const observacao = coerceString(entry?.observacao) ?? "";
       const fotos = extractFotosFromData(entry?.fotos);
       const osNumero = coerceString(entry?.osNumero) ?? "";
+      const criticidadeValue = entry?.criticidade;
+      const criticidade =
+        typeof criticidadeValue === "number" && Number.isInteger(criticidadeValue) && criticidadeValue >= 1 && criticidadeValue <= 5
+          ? criticidadeValue
+          : null;
       return {
         templateItemId: item.id as string,
         resultado,
         observacao,
         osNumero,
         fotos,
+        criticidade,
       };
     });
 
@@ -259,7 +266,10 @@ export async function PUT(req: NextRequest, context: RouteContext) {
   const resolveIssuesIds = Array.isArray(payload.resolveIssues)
     ? payload.resolveIssues.filter(id => typeof id === "string" && id.trim().length > 0)
     : [];
-  const itensMap: Record<string, { resultado: string; observacao: string | null; osNumero: string | null; fotos: DraftFoto[] }> = {};
+  const itensMap: Record<
+    string,
+    { resultado: string; observacao: string | null; osNumero: string | null; fotos: DraftFoto[]; criticidade: number | null }
+  > = {};
 
   let answered = 0;
   for (const item of itens) {
@@ -267,7 +277,11 @@ export async function PUT(req: NextRequest, context: RouteContext) {
     const observacao = item.observacao?.trim() ? item.observacao.trim() : null;
     const fotos = normalizeFotosPayload(item.fotos);
     const osNumero = item.osNumero?.trim() ? item.osNumero.trim().toUpperCase() : null;
-    itensMap[item.templateItemId] = { resultado, observacao, osNumero, fotos };
+    const criticidade =
+      typeof item.criticidade === "number" && Number.isFinite(item.criticidade)
+        ? Math.max(1, Math.min(5, Math.trunc(item.criticidade)))
+        : null;
+    itensMap[item.templateItemId] = { resultado, observacao, osNumero, fotos, criticidade };
     if (resultado === "C" || resultado === "NC" || resultado === "NA") {
       answered += 1;
     }
@@ -318,6 +332,7 @@ export async function PUT(req: NextRequest, context: RouteContext) {
         observacao: value.observacao ?? "",
         osNumero: value.osNumero ?? undefined,
         fotos: value.fotos,
+        criticidade: value.criticidade ?? undefined,
       })),
       totalItens: total,
       answeredItens: answered,

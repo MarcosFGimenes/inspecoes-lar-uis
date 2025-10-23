@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+
+import { parseSeverityState, getEffectiveSeverity } from "@/lib/adapters/dataAdapter";
 import { adminDb } from "@/lib/firebase-admin";
 import { findMachineByTag } from "@/lib/db/machines";
 import { requireMaint } from "@/lib/guards";
@@ -68,6 +70,8 @@ export async function GET(req: NextRequest) {
 
     const openIssues = issuesSnap.docs.map(doc => {
       const data = doc.data() ?? {};
+      const severity = parseSeverityState(data.severity);
+      const effectiveSeverity = getEffectiveSeverity(severity);
       return {
         id: doc.id,
         templateItemId: data.templateItemId ?? null,
@@ -75,6 +79,8 @@ export async function GET(req: NextRequest) {
         osNumero: data.osNumero ?? null,
         fotos: Array.isArray(data.fotos) ? data.fotos.filter(Boolean).map(String) : [],
         createdAt: data.createdAt ?? null,
+        severity,
+        effectiveSeverity,
       };
     });
 

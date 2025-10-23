@@ -3,6 +3,8 @@ import { z } from "zod";
 import { adminDb } from "@/lib/firebase-admin";
 import { requireAdminFromRequest, requireMaint } from "@/lib/guards";
 import { uploadToImgbbFromDataUrl } from "@/lib/imgbb";
+import { parseSeverityState, updateSignerSeverity } from "@/lib/adapters/dataAdapter";
+import type { Severity, SeverityState } from "@/types/severity";
 import type {
   ChecklistAnswer,
   ChecklistNonConformityTreatment,
@@ -36,6 +38,7 @@ const patchSchema = z.object({
         observation: z.string().trim().optional(),
         photoUrls: z.array(itemPhotoSchema).max(5).optional(),
         osNumeroItem: z.string().trim().min(1).optional(),
+        criticidade: z.number().int().min(1).max(5).nullable().optional(),
       })
     )
     .optional(),
@@ -51,6 +54,17 @@ type TemplateItem = {
   criterio?: string;
   oQueFazer?: string;
 };
+
+function clampSeverity(value: unknown): Severity | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return null;
+  }
+  const normalized = Math.trunc(value);
+  if (normalized < 1 || normalized > 5) {
+    return null;
+  }
+  return normalized as Severity;
+}
 
 function resolveId(params: Record<string, string | string[] | undefined>) {
   const value = params.id;
@@ -72,6 +86,7 @@ function normalizeAnswers(data: Record<string, unknown>, templateItemsMap: Map<s
         photoUrls: Array.isArray(item.photoUrls) ? item.photoUrls.filter(Boolean) : [],
         recurrence: item.recurrence ?? false,
         itemOsNumero: item.itemOsNumero ?? null,
+        severity: item.severity ?? undefined,
       }));
   }
 
@@ -277,6 +292,7 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       photoUrls: Array.isArray(answer.photoUrls) ? answer.photoUrls.filter(Boolean) : [],
       recurrence: answer.recurrence ?? false,
       itemOsNumero: answer.itemOsNumero ?? null,
+      severity: answer.severity ?? undefined,
     }));
     const answersPersistMap = new Map(answersToPersist.map(answer => [answer.questionId, answer]));
     const itensToPersist: Array<Record<string, unknown>> = Array.isArray(data.itens)
@@ -309,6 +325,13 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
           return NextResponse.json({ error: "ITEM_OS_REQUIRED" }, { status: 422 });
         }
 
+        const severityPayload =
+          typeof item.criticidade === "number"
+            ? clampSeverity(item.criticidade)
+            : item.criticidade === null
+              ? null
+              : undefined;
+
         const photoUrls: string[] = [];
         if (Array.isArray(item.photoUrls)) {
           for (const photo of item.photoUrls) {
@@ -324,6 +347,8 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
         }
 
         const observation = item.observation?.trim() ? item.observation.trim() : null;
+
+        let severityStateForItem: SeverityState | undefined;
 
         if (existingAnswer) {
           existingAnswer.response = response;
@@ -369,19 +394,6 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
 
         const existingTreatment = treatmentsMap.get(item.questionId);
         if (response === "nc") {
-          const updatedTreatment = existingTreatment
-            ? {
-                ...existingTreatment,
-                status: existingTreatment.status === "resolved" ? "open" : existingTreatment.status,
-                updatedAt: nowIso,
-              }
-            : {
-                questionId: item.questionId,
-                status: "open" as NonConformityStatus,
-                createdAt: nowIso,
-              };
-          treatmentsMap.set(item.questionId, updatedTreatment);
-
           if (openIssuesMap.has(item.questionId)) {
             const issueDoc = openIssuesMap.get(item.questionId)!;
             const updatesIssue: Record<string, unknown> = {};
@@ -397,6 +409,15 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
             }
             if (Object.keys(updatesIssue).length > 0) {
               await issueDoc.ref.update(updatesIssue);
+            }
+            if (severityPayload !== undefined) {
+              try {
+                severityStateForItem = await updateSignerSeverity(issueDoc.id, severityPayload, null);
+              } catch {
+                severityStateForItem = parseSeverityState(issueDoc.data()?.severity);
+              }
+            } else {
+              severityStateForItem = parseSeverityState(issueDoc.data()?.severity);
             }
           } else if (inspection.machine?.machineId) {
             const issueRef = adminDb.collection("issues").doc();
@@ -416,14 +437,43 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
               createdAt: nowIso,
             });
             issuesCriadas.push(issueRef.id);
+            if (severityPayload !== undefined) {
+              try {
+                severityStateForItem = await updateSignerSeverity(issueRef.id, severityPayload, null);
+              } catch {
+                severityStateForItem = undefined;
+              }
+            }
           }
+
+          const updatedTreatment = existingTreatment
+            ? {
+                ...existingTreatment,
+                status: existingTreatment.status === "resolved" ? "open" : existingTreatment.status,
+                updatedAt: nowIso,
+              }
+            : {
+                questionId: item.questionId,
+                status: "open" as NonConformityStatus,
+                createdAt: nowIso,
+              };
+          if (severityStateForItem) {
+            updatedTreatment.severity = severityStateForItem;
+          } else if (severityPayload !== undefined && "severity" in updatedTreatment) {
+            delete (updatedTreatment as Record<string, unknown>).severity;
+          }
+          treatmentsMap.set(item.questionId, updatedTreatment);
         } else {
           if (existingTreatment) {
-            treatmentsMap.set(item.questionId, {
+            const resolvedTreatment = {
               ...existingTreatment,
-              status: "resolved",
+              status: "resolved" as NonConformityStatus,
               updatedAt: nowIso,
-            });
+            };
+            if ("severity" in resolvedTreatment) {
+              delete (resolvedTreatment as Record<string, unknown>).severity;
+            }
+            treatmentsMap.set(item.questionId, resolvedTreatment);
           }
           const issueDoc = openIssuesMap.get(item.questionId);
           if (issueDoc) {
@@ -438,6 +488,19 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
             openIssuesMap.delete(item.questionId);
           }
         }
+
+        const targetAnswer = answersPersistMap.get(item.questionId);
+        if (response === "nc") {
+          if (targetAnswer) {
+            if (severityStateForItem) {
+              targetAnswer.severity = severityStateForItem;
+            } else if (severityPayload !== undefined && targetAnswer.severity) {
+              delete (targetAnswer as Record<string, unknown>).severity;
+            }
+          }
+        } else if (targetAnswer && targetAnswer.severity) {
+          delete (targetAnswer as Record<string, unknown>).severity;
+        }
       }
     }
 
@@ -447,6 +510,7 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       ...answer,
       response: answer.response === "nc" || answer.response === "na" ? answer.response : "c",
       photoUrls: Array.isArray(answer.photoUrls) ? answer.photoUrls.filter(Boolean) : [],
+      severity: answer.severity ?? undefined,
     }));
 
     const qtdNC = finalAnswers.filter(answer => answer.response === "nc").length;

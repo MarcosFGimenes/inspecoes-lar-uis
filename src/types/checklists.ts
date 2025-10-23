@@ -1,5 +1,7 @@
 export type NonConformityStatus = "open" | "in_progress" | "resolved";
 
+import type { SeverityState } from "./severity";
+
 export interface ChecklistAnswer {
   questionId: string;
   questionText?: string | null;
@@ -8,6 +10,7 @@ export interface ChecklistAnswer {
   photoUrls?: string[];
   recurrence?: boolean;
   itemOsNumero?: string | null;
+  severity?: SeverityState;
 }
 
 export interface ChecklistNonConformityTreatment {
@@ -18,6 +21,7 @@ export interface ChecklistNonConformityTreatment {
   status: NonConformityStatus;
   createdAt: string;
   updatedAt?: string | null;
+  severity?: SeverityState;
 }
 
 export interface ChecklistResponseMaintainer {

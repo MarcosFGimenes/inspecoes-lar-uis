@@ -1,0 +1,25 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "./dist-tests",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "target": "ES2019",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "allowJs": false,
+    "types": ["node"],
+    "baseUrl": "."
+  },
+  "include": [
+    "tests/**/*.ts",
+    "src/lib/adapters/severity-utils.ts",
+    "src/lib/programacao/scheduling-helpers.ts",
+    "src/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}

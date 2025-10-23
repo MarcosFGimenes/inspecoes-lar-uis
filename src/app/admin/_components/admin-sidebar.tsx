@@ -68,6 +68,16 @@ const programacaoSubnav: AdminNavItem[] = [
     icon: "fas fa-database",
   },
   {
+    href: "/admin/programacao/programar",
+    label: "Programar manutenção",
+    icon: "fas fa-calendar-plus",
+  },
+  {
+    href: "/admin/programacao/agenda",
+    label: "Agenda",
+    icon: "fas fa-calendar-days",
+  },
+  {
     href: "/admin/programacao/detalhes",
     label: "Detalhamento",
     icon: "fas fa-clipboard-list",

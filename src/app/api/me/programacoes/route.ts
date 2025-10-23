@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase-admin";
 import { requireMaint } from "@/lib/guards";
 import { normalizeName } from "@/lib/string-utils";
+import { parseSeverityState, getEffectiveSeverity } from "@/lib/adapters/dataAdapter";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -107,6 +108,10 @@ export async function GET() {
         manutencao: {
           tipo: typeof data.manutencao?.tipo === "string" ? data.manutencao.tipo : null,
           criticidade: typeof data.manutencao?.criticidade === "string" ? data.manutencao.criticidade : null,
+          severity: data.manutencao?.severity ? parseSeverityState(data.manutencao.severity) : undefined,
+          effectiveSeverity: data.manutencao?.severity
+            ? getEffectiveSeverity(parseSeverityState(data.manutencao.severity))
+            : undefined,
         },
         responsavel: {
           nome: typeof data.responsavel?.nome === "string" ? data.responsavel.nome : null,
