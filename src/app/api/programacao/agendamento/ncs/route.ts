@@ -20,7 +20,7 @@ function parseSeverity(value: string | null): Severity | undefined {
   if (!value) return undefined;
   const parsed = Number(value);
   if (!Number.isInteger(parsed)) return undefined;
-  if (parsed < 1 || parsed > 5) return undefined;
+  if (parsed < 1 || parsed > 6) return undefined;
   return parsed as Severity;
 }
 

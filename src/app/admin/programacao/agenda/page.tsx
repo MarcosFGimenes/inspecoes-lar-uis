@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { CriticidadeBadge } from "@/components/criticidade-badge";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -17,6 +18,7 @@ const areaOptions: Array<{ value: AreaFilter | "todas"; label: string }> = [
 
 const severityOptions = [
   { value: "", label: "Todas" },
+  { value: "6", label: "6 - Emergencial" },
   { value: "5", label: "5 - Crítica" },
   { value: "4", label: "4" },
   { value: "3", label: "3" },
@@ -234,6 +236,7 @@ export default function AgendaProgramacaoPage() {
                 <tr>
                   <th className="px-4 py-2 text-left font-medium text-[var(--muted)]">Data</th>
                   <th className="px-4 py-2 text-left font-medium text-[var(--muted)]">Máquina</th>
+                  <th className="px-4 py-2 text-left font-medium text-[var(--muted)]">NC / Execução</th>
                   <th className="px-4 py-2 text-left font-medium text-[var(--muted)]">Responsáveis</th>
                   <th className="px-4 py-2 text-left font-medium text-[var(--muted)]">Criticidade</th>
                   <th className="px-4 py-2 text-left font-medium text-[var(--muted)]">OS</th>
@@ -242,7 +245,7 @@ export default function AgendaProgramacaoPage() {
               <tbody className="divide-y divide-[var(--border)]">
                 {items.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-4 py-6 text-center text-[var(--muted)]">
+                    <td colSpan={6} className="px-4 py-6 text-center text-[var(--muted)]">
                       Nenhuma programação registrada para o período.
                     </td>
                   </tr>
@@ -258,6 +261,64 @@ export default function AgendaProgramacaoPage() {
                       <td className="px-4 py-3">
                         <p className="font-medium text-[var(--text)]">{item.machine.nome ?? "-"}</p>
                         <p className="text-xs text-[var(--muted)]">TAG {item.machine.tag ?? "-"}</p>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="space-y-1">
+                          <p className="font-medium text-[var(--text)]">
+                            {item.issue?.descricao ?? "NC sem descrição"}
+                          </p>
+                          <div className="flex flex-wrap items-center gap-2 text-xs">
+                            <Badge
+                              variant={item.execucao?.status === "concluida" ? "success" : "muted"}
+                              className="text-[10px]"
+                            >
+                              {item.execucao?.status === "concluida"
+                                ? `Concluída ${formatDate(item.execucao?.concluidaEm, true)}`
+                                : "Pendente"}
+                            </Badge>
+                            {item.issue?.severity ? (
+                              <CriticidadeBadge
+                                state={item.issue.severity}
+                                value={item.issue.effectiveSeverity ?? undefined}
+                              />
+                            ) : null}
+                          </div>
+                          {item.execucao?.descricao ? (
+                            <p className="text-xs text-[var(--muted)]">Conclusão: {item.execucao.descricao}</p>
+                          ) : null}
+                          {item.issue?.fotos?.length ? (
+                            <p className="text-xs text-[var(--muted)]">
+                              Fotos NC:{" "}
+                              {item.issue.fotos.map((foto, index) => (
+                                <a
+                                  key={foto}
+                                  href={foto}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-[var(--primary)] underline decoration-dotted"
+                                >
+                                  #{index + 1}
+                                </a>
+                              ))}
+                            </p>
+                          ) : null}
+                          {item.execucao?.fotos?.length ? (
+                            <p className="text-xs text-[var(--muted)]">
+                              Fotos conclusão:{" "}
+                              {item.execucao.fotos.map((foto, index) => (
+                                <a
+                                  key={foto}
+                                  href={foto}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-[var(--primary)] underline decoration-dotted"
+                                >
+                                  #{index + 1}
+                                </a>
+                              ))}
+                            </p>
+                          ) : null}
+                        </div>
                       </td>
                       <td className="px-4 py-3">
                         <p className="font-medium text-[var(--text)]">{item.responsavel.nome ?? "-"}</p>
@@ -293,15 +354,41 @@ export default function AgendaProgramacaoPage() {
                   </div>
                   <ul className="divide-y divide-[var(--border)]">
                     {group.list.map(item => (
-                      <li key={item.id} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div>
+                      <li key={item.id} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="space-y-1">
                           <p className="font-medium text-[var(--text)]">{item.machine.nome ?? item.machine.tag ?? "Máquina"}</p>
                           <p className="text-xs text-[var(--muted)]">
                             {formatDate(item.datas.programada, true)} · Responsável: {item.responsavel.nome ?? "-"}
                           </p>
+                          <p className="text-xs text-[var(--muted)]">
+                            NC: {item.issue?.descricao ?? "NC sem descrição"}
+                          </p>
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--muted)]">
+                            <Badge variant={item.execucao?.status === "concluida" ? "success" : "muted"}>
+                              {item.execucao?.status === "concluida"
+                                ? `Concluída ${formatDate(item.execucao?.concluidaEm, true)}`
+                                : "Pendente"}
+                            </Badge>
+                            {item.issue?.fotos?.length ? (
+                              <span>
+                                Fotos NC: {item.issue.fotos.length}
+                              </span>
+                            ) : null}
+                            {item.execucao?.fotos?.length ? (
+                              <span>
+                                Fotos conclusão: {item.execucao.fotos.length}
+                              </span>
+                            ) : null}
+                          </div>
+                          {item.execucao?.descricao ? (
+                            <p className="text-xs text-[var(--muted)]">Conclusão: {item.execucao.descricao}</p>
+                          ) : null}
                         </div>
-                        <div className="flex items-center gap-3">
-                          <CriticidadeBadge state={item.manutencao.severity} value={item.effectiveSeverity ?? undefined} />
+                        <div className="flex flex-col items-end gap-2 sm:items-end">
+                          <CriticidadeBadge
+                            state={item.manutencao.severity}
+                            value={item.effectiveSeverity ?? undefined}
+                          />
                           <span className="text-xs text-[var(--muted)]">OS {item.osNumero ?? "-"}</span>
                         </div>
                       </li>

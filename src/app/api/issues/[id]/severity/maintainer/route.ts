@@ -9,7 +9,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const payloadSchema = z.object({
-  value: z.number().int().min(1).max(5),
+  value: z.number().int().min(1).max(6),
 });
 
 type RouteContext = { params: Promise<{ id?: string } | undefined> };

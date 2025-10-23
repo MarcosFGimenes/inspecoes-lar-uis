@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 
 const payloadSchema = z.object({
   area: z.string().trim().optional(),
-  minSeverity: z.number().int().min(1).max(5).optional(),
+  minSeverity: z.number().int().min(1).max(6).optional(),
   from: z.string().trim().optional(),
   to: z.string().trim().optional(),
   responsavelId: z.string().trim().optional(),
@@ -28,7 +28,7 @@ function parseArea(value: string | undefined): AreaFilter | undefined {
 
 function parseSeverity(value: number | undefined): Severity | undefined {
   if (typeof value !== "number") return undefined;
-  if (value < 1 || value > 5) return undefined;
+  if (value < 1 || value > 6) return undefined;
   return value as Severity;
 }
 
@@ -70,6 +70,21 @@ export async function POST(req: NextRequest) {
           .map(resp => resp.nome ?? resp.maintId ?? "")
           .filter(Boolean)
           .join(", ");
+        const issueDescricao = escape(item.issue?.descricao ?? "");
+        const issueFotos = item.issue?.fotos?.length
+          ? item.issue.fotos.map(url => `<a href="${escape(url)}">${escape(url)}</a>`).join("<br />")
+          : "";
+        const execStatus = item.execucao?.status === "concluida"
+          ? `Concluída em ${
+              item.execucao.concluidaEm
+                ? escape(new Date(item.execucao.concluidaEm).toLocaleString("pt-BR"))
+                : ""
+            }`
+          : "Pendente";
+        const execDescricao = escape(item.execucao?.descricao ?? "");
+        const execFotos = item.execucao?.fotos?.length
+          ? item.execucao.fotos.map(url => `<a href="${escape(url)}">${escape(url)}</a>`).join("<br />")
+          : "";
         return `
           <tr>
             <td>${item.datas.programada ? escape(new Date(item.datas.programada).toLocaleString("pt-BR")) : ""}</td>
@@ -81,7 +96,11 @@ export async function POST(req: NextRequest) {
             <td>${item.effectiveSeverity ?? ""}</td>
             <td>${escape(item.responsavel.nome ?? "")}</td>
             <td>${escape(mantenedores)}</td>
-            <td>${escape(item.manutencao.tipo ?? "")}</td>
+            <td>${issueDescricao}</td>
+            <td>${escape(execStatus)}</td>
+            <td>${execDescricao}</td>
+            <td>${issueFotos}</td>
+            <td>${execFotos}</td>
           </tr>
         `;
       })
@@ -99,7 +118,11 @@ export async function POST(req: NextRequest) {
           <th>Criticidade Efetiva</th>
           <th>Responsável</th>
           <th>Mantenedores</th>
-          <th>Descrição</th>
+          <th>NC</th>
+          <th>Status Execução</th>
+          <th>Descrição da Conclusão</th>
+          <th>Fotos NC</th>
+          <th>Fotos Conclusão</th>
         </tr>
       </thead>
       <tbody>${rowsHtml}</tbody>

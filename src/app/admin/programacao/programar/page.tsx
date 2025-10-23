@@ -25,6 +25,7 @@ const areaOptions: Array<{ value: AreaFilter | "todas"; label: string }> = [
 
 const severityOptions = [
   { value: "", label: "Todas" },
+  { value: "6", label: "6 - Emergencial" },
   { value: "5", label: "5 - Crítica" },
   { value: "4", label: "4" },
   { value: "3", label: "3" },
@@ -82,6 +83,7 @@ export default function ProgramarManutencaoPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [form, setForm] = useState({
     responsavel: "",
     mantenedor1: "",
@@ -237,12 +239,47 @@ export default function ProgramarManutencaoPage() {
     }
   };
 
+  const handleCancelProgramacao = async () => {
+    if (!selected || !selected.programacao?.id) {
+      setFeedback({ type: "error", message: "Selecione uma programação existente para cancelar." });
+      return;
+    }
+    const confirmed = window.confirm("Deseja cancelar a programação desta não conformidade?");
+    if (!confirmed) {
+      return;
+    }
+    setDeleting(true);
+    setFeedback(null);
+    try {
+      const response = await fetch("/api/programacao/agendamento/schedule", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          issueId: selected.id,
+          programacaoId: selected.programacao.id,
+        }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.error ?? "Falha ao cancelar programação.");
+      }
+      setFeedback({ type: "success", message: "Programação cancelada." });
+      setForm({ responsavel: "", mantenedor1: "", mantenedor2: "", dataProgramada: "", prazo: "", descricao: "" });
+      setFilters(prev => ({ ...prev }));
+    } catch (error: unknown) {
+      const message = error instanceof Error && error.message ? error.message : "Falha ao cancelar programação.";
+      setFeedback({ type: "error", message });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <header className="space-y-2">
-        <h1 className="text-2xl font-semibold text-[var(--text)]">Programar manutenção</h1>
+        <h1 className="text-2xl font-semibold text-[var(--text)]">Programar correção</h1>
         <p className="text-sm text-[var(--muted)]">
-          Selecione uma não conformidade aberta, defina responsáveis e registre a programação da OS vinculada.
+          Selecione uma não conformidade aberta, defina responsáveis e registre a programação da correção vinculada à OS.
         </p>
       </header>
 
@@ -481,11 +518,29 @@ export default function ProgramarManutencaoPage() {
                 </div>
               ) : null}
 
-              <div className="flex justify-end">
-                <Button onClick={handleSubmit} disabled={saving} loading={saving}>
-                  <i className="fas fa-save" aria-hidden />
-                  Programar
-                </Button>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                {selected?.programacao?.id ? (
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    onClick={handleCancelProgramacao}
+                    disabled={deleting}
+                    loading={deleting}
+                  >
+                    <i className="fas fa-ban" aria-hidden />
+                    Cancelar programação
+                  </Button>
+                ) : (
+                  <span className="text-xs text-[var(--muted)]">
+                    Defina a data programada e os responsáveis para salvar.
+                  </span>
+                )}
+                <div className="flex justify-end">
+                  <Button onClick={handleSubmit} disabled={saving} loading={saving}>
+                    <i className="fas fa-save" aria-hidden />
+                    Programar
+                  </Button>
+                </div>
               </div>
             </div>
           ) : (

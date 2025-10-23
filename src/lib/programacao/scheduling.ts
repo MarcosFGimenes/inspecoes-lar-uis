@@ -102,6 +102,15 @@ function normalizeIso(value: unknown): string | null {
   return null;
 }
 
+function readStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map(entry => (typeof entry === "string" ? entry.trim() : ""))
+    .filter((entry): entry is string => entry.length > 0);
+}
+
 async function fetchProgramacoesByIds(ids: string[]): Promise<Map<string, FirebaseFirestore.DocumentData>> {
   if (!ids.length) return new Map();
   const chunks: string[][] = [];
@@ -413,9 +422,32 @@ export async function getScheduleView(filters: ScheduleFilters = {}): Promise<Sc
   const responsavelId = filters.responsavelId?.trim();
   const searchTerm = filters.search?.trim().toLowerCase() ?? "";
 
+  const docs = snapshot.docs.map(doc => ({ id: doc.id, data: doc.data() ?? {} }));
+
+  const issueIds = Array.from(
+    new Set(
+      docs
+        .map(entry => (typeof entry.data.issueId === "string" ? entry.data.issueId : null))
+        .filter((value): value is string => Boolean(value)),
+    ),
+  );
+
+  const issuesById = new Map<string, FirebaseFirestore.DocumentData>();
+  for (let index = 0; index < issueIds.length; index += 10) {
+    const chunk = issueIds.slice(index, index + 10);
+    if (!chunk.length) continue;
+    const snap = await adminDb
+      .collection("issues")
+      .where(FieldPath.documentId(), "in", chunk)
+      .get()
+      .catch(() => null);
+    snap?.forEach(issueDoc => {
+      issuesById.set(issueDoc.id, issueDoc.data() ?? {});
+    });
+  }
+
   const records: ScheduleRecord[] = [];
-  snapshot.forEach(doc => {
-    const data = doc.data() ?? {};
+  docs.forEach(({ id, data }) => {
     const programada = normalizeIso(data.datas?.programada);
     if (fromDate && programada) {
       const programadaDate = new Date(programada);
@@ -453,12 +485,16 @@ export async function getScheduleView(filters: ScheduleFilters = {}): Promise<Sc
       }
     }
 
+    const issueId = typeof data.issueId === "string" ? data.issueId : null;
+    const issueData = issueId ? issuesById.get(issueId) ?? {} : undefined;
+
     if (searchTerm) {
       const haystack = [
         typeof data.machine?.nome === "string" ? data.machine.nome : null,
         typeof data.machine?.tag === "string" ? data.machine.tag : null,
         typeof data.osNumero === "string" ? data.osNumero : null,
         typeof data.manutencao?.tipo === "string" ? data.manutencao.tipo : null,
+        typeof issueData?.descricao === "string" ? issueData.descricao : null,
       ]
         .filter(Boolean)
         .map(value => value!.toLowerCase());
@@ -476,7 +512,7 @@ export async function getScheduleView(filters: ScheduleFilters = {}): Promise<Sc
       : [];
 
     records.push({
-      id: doc.id,
+      id,
       osNumero: typeof data.osNumero === "string" ? data.osNumero : null,
       status: typeof data.status === "string" ? data.status : null,
       machine: {
@@ -504,6 +540,38 @@ export async function getScheduleView(filters: ScheduleFilters = {}): Promise<Sc
       },
       responsaveis: responsaveisArray,
       effectiveSeverity,
+      issue: issueId
+        ? {
+            id: issueId,
+            descricao: typeof issueData?.descricao === "string" ? issueData.descricao : null,
+            fotos: readStringArray(issueData?.fotos),
+            severity: issueData?.severity ? parseSeverityState(issueData.severity) : null,
+            effectiveSeverity: issueData?.severity
+              ? getEffectiveSeverity(parseSeverityState(issueData.severity))
+              : undefined,
+          }
+        : null,
+      execucao: (() => {
+        const raw = data.execucao as Record<string, unknown> | undefined;
+        if (!raw) {
+          return null;
+        }
+        const concluidaPorRaw = raw.concluidaPor as Record<string, unknown> | undefined;
+        return {
+          status: typeof raw.status === "string" ? raw.status : null,
+          descricao: typeof raw.descricao === "string" ? raw.descricao : null,
+          fotos: readStringArray(raw.fotos),
+          concluidaEm: normalizeIso(raw.concluidaEm ?? raw.concluidaEmIso),
+          concluidaPor: concluidaPorRaw
+            ? {
+                maintId: typeof concluidaPorRaw.maintId === "string" ? concluidaPorRaw.maintId : null,
+                nome: typeof concluidaPorRaw.nome === "string" ? concluidaPorRaw.nome : null,
+                matricula:
+                  typeof concluidaPorRaw.matricula === "string" ? concluidaPorRaw.matricula : null,
+              }
+            : null,
+        };
+      })(),
     });
   });
 

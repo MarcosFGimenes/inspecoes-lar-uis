@@ -34,6 +34,24 @@ export interface ScheduleRecord {
     matricula: string | null;
   }>;
   effectiveSeverity: Severity | null;
+  issue: {
+    id: string | null;
+    descricao: string | null;
+    fotos: string[];
+    severity?: SeverityState | null;
+    effectiveSeverity?: Severity | null;
+  } | null;
+  execucao: {
+    status: string | null;
+    descricao: string | null;
+    fotos: string[];
+    concluidaEm: string | null;
+    concluidaPor: {
+      maintId: string | null;
+      nome: string | null;
+      matricula: string | null;
+    } | null;
+  } | null;
 }
 
 export function inferArea(tipo: unknown, setor: unknown): AreaFilter {

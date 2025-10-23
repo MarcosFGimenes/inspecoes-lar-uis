@@ -15,6 +15,8 @@ import type { Severity } from "@/types/severity";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const severitySchema = z.union([z.number().int().min(1).max(6), z.null()]);
+
 const payloadSchema = z.object({
   tag: z.string().trim().min(1),
   osNumero: z.string().trim().min(1).optional(),
@@ -32,7 +34,7 @@ const payloadSchema = z.object({
         observacaoItem: z.string().trim().optional(),
         fotos: z.array(z.string().trim().min(1)).max(3).optional(),
         osNumeroItem: z.string().trim().min(1).optional(),
-        criticidade: z.number().int().min(1).max(5).optional(),
+        criticidade: severitySchema.optional(),
       })
     )
     .min(1),
@@ -265,7 +267,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "ITEM_OS_REQUIRED" }, { status: 422 });
       }
       const fotosBase64 = item.fotos ? item.fotos.slice(0, 3) : [];
-      const criticidade = (typeof item.criticidade === "number" && item.criticidade >= 1 && item.criticidade <= 5
+      const criticidade = (typeof item.criticidade === "number" && item.criticidade >= 1 && item.criticidade <= 6
         ? (Math.trunc(item.criticidade) as Severity)
         : null);
       if (item.resultado === "NC" && !criticidade) {

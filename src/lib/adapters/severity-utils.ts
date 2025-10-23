@@ -16,7 +16,7 @@ export type FirestoreSeverityState = {
 };
 
 export function isSeverity(value: unknown): value is Severity {
-  return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 5;
+  return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 6;
 }
 
 export function normalizeTimestamp(value: unknown): Timestamp | undefined {

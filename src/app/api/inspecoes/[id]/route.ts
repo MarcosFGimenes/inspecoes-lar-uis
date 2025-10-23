@@ -26,6 +26,8 @@ const itemPhotoSchema = z.union([
   }),
 ]);
 
+const severitySchema = z.union([z.number().int().min(1).max(6), z.null()]);
+
 const patchSchema = z.object({
   osNumero: z.string().trim().optional(),
   observacoes: z.string().trim().optional(),
@@ -38,7 +40,7 @@ const patchSchema = z.object({
         observation: z.string().trim().optional(),
         photoUrls: z.array(itemPhotoSchema).max(5).optional(),
         osNumeroItem: z.string().trim().min(1).optional(),
-        criticidade: z.number().int().min(1).max(5).nullable().optional(),
+        criticidade: severitySchema.optional(),
       })
     )
     .optional(),
@@ -60,7 +62,7 @@ function clampSeverity(value: unknown): Severity | null {
     return null;
   }
   const normalized = Math.trunc(value);
-  if (normalized < 1 || normalized > 5) {
+  if (normalized < 1 || normalized > 6) {
     return null;
   }
   return normalized as Severity;

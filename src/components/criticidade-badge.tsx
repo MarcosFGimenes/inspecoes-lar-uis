@@ -29,10 +29,15 @@ const palette: Record<Severity, { bg: string; text: string; border: string }> = 
     text: "text-rose-50",
     border: "border-rose-600/80 dark:border-rose-500/80",
   },
+  6: {
+    bg: "bg-rose-600/90 dark:bg-rose-950",
+    text: "text-rose-50 dark:text-rose-50",
+    border: "border-rose-700/90 dark:border-rose-700/80",
+  },
 };
 
 function deriveSeverity(value?: Severity | null, state?: SeverityState | null): Severity | null {
-  if (typeof value === "number" && value >= 1 && value <= 5) {
+  if (typeof value === "number" && value >= 1 && value <= 6) {
     return value as Severity;
   }
   if (!state) return null;

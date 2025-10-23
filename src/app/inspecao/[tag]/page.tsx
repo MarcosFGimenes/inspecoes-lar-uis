@@ -183,7 +183,7 @@ function createPhotoId() {
 }
 
 function coerceSeverity(value: unknown): Severity | null {
-  if (typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 5) {
+  if (typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 6) {
     return value as Severity;
   }
   return null;

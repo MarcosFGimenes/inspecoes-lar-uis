@@ -1,10 +1,14 @@
 "use client";
 
 import Image from "next/image";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ChangeEvent } from "react";
 import { useRouter } from "next/navigation";
 
 import { Badge } from "@/components/ui/badge";
+import { CriticidadeBadge } from "@/components/criticidade-badge";
+import { cn } from "@/lib/cn";
+import type { Severity, SeverityState } from "@/types/severity";
 
 type MaintSessionInfo = {
   nome?: string | null;
@@ -33,6 +37,8 @@ type ProgramacaoRecord = {
   manutencao: {
     tipo: string | null;
     criticidade: string | null;
+    severity?: SeverityState;
+    effectiveSeverity?: Severity | null;
   };
   responsavel: {
     nome: string | null;
@@ -40,14 +46,46 @@ type ProgramacaoRecord = {
     matricula: string | null;
     origem: string | null;
   };
+  mantenedores: Array<{
+    nome: string | null;
+    maintId: string | null;
+    matricula: string | null;
+    origem: string | null;
+  }>;
   datas: {
     emissao: string | null;
     vencimento: string | null;
     fechamento: string | null;
+    programada: string | null;
+    prazo: string | null;
   };
   atrasada: boolean;
   status: string | null;
+  issue: {
+    id: string | null;
+    descricao: string | null;
+    fotos: string[];
+    osNumero: string | null;
+    severity?: SeverityState;
+    effectiveSeverity?: Severity | null;
+  } | null;
+  execucao: {
+    status: string | null;
+    descricao: string | null;
+    fotos: string[];
+    concluidaEm: string | null;
+    concluidaPor: {
+      maintId: string | null;
+      nome: string | null;
+      matricula: string | null;
+    } | null;
+  } | null;
 };
+
+type CompletionPhoto = { id: string; dataUrl: string };
+
+const MAX_COMPLETION_PHOTOS = 6;
+const MAX_UPLOAD_BYTES = 1.5 * 1024 * 1024;
 
 export default function MaintHomeStartPage() {
   const router = useRouter();
@@ -63,6 +101,13 @@ export default function MaintHomeStartPage() {
   const [programacoesLoading, setProgramacoesLoading] = useState(true);
   const [programacoesError, setProgramacoesError] = useState<string | null>(null);
   const [programacoes, setProgramacoes] = useState<ProgramacaoRecord[]>([]);
+
+  const [selectedProgramacaoId, setSelectedProgramacaoId] = useState<string | null>(null);
+  const [detailFeedback, setDetailFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [completionDescricao, setCompletionDescricao] = useState("");
+  const [completionFotos, setCompletionFotos] = useState<CompletionPhoto[]>([]);
+  const [completionLoading, setCompletionLoading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [searchTag, setSearchTag] = useState("");
   const [logoutLoading, setLogoutLoading] = useState(false);
@@ -156,20 +201,23 @@ export default function MaintHomeStartPage() {
     };
   }, [session]);
 
-  useEffect(() => {
-    if (!session) {
-      setProgramacoes([]);
-      setProgramacoesError(null);
-      setProgramacoesLoading(false);
-      return;
-    }
+  const loadProgramacoes = useCallback(
+    async (signal?: AbortSignal) => {
+      if (!session) {
+        setProgramacoes([]);
+        setProgramacoesError(null);
+        setProgramacoesLoading(false);
+        setSelectedProgramacaoId(null);
+        return;
+      }
 
-    let cancelled = false;
-    async function loadProgramacoes() {
       setProgramacoesLoading(true);
       setProgramacoesError(null);
       try {
-        const response = await fetch("/api/me/programacoes", { cache: "no-store" });
+        const response = await fetch("/api/me/programacoes", { cache: "no-store", signal });
+        if (signal?.aborted) {
+          return;
+        }
         if (response.status === 401) {
           window.location.href = "/login";
           return;
@@ -179,27 +227,39 @@ export default function MaintHomeStartPage() {
           throw new Error(payload?.error ?? "Falha ao carregar programações");
         }
         const data = (await response.json()) as ProgramacaoRecord[];
-        if (!cancelled) {
-          setProgramacoes(data);
+        if (signal?.aborted) {
+          return;
         }
+        setProgramacoes(data);
+        setSelectedProgramacaoId(current => {
+          if (current && data.some(record => record.id === current)) {
+            return current;
+          }
+          return data.length > 0 ? data[0]!.id : null;
+        });
       } catch (err: unknown) {
-        if (!cancelled) {
-          const message = err instanceof Error && err.message ? err.message : "Falha ao carregar programações";
-          setProgramacoesError(message);
-          setProgramacoes([]);
+        if (signal?.aborted) {
+          return;
         }
+        const message = err instanceof Error && err.message ? err.message : "Falha ao carregar programações";
+        setProgramacoesError(message);
+        setProgramacoes([]);
       } finally {
-        if (!cancelled) {
+        if (!signal?.aborted) {
           setProgramacoesLoading(false);
         }
       }
-    }
+    },
+    [session],
+  );
 
-    loadProgramacoes();
+  useEffect(() => {
+    const controller = new AbortController();
+    loadProgramacoes(controller.signal).catch(() => undefined);
     return () => {
-      cancelled = true;
+      controller.abort();
     };
-  }, [session]);
+  }, [loadProgramacoes]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -242,6 +302,21 @@ export default function MaintHomeStartPage() {
     [router]
   );
 
+  const readFileAsDataUrl = useCallback((file: File) => {
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === "string") {
+          resolve(reader.result);
+        } else {
+          reject(new Error("Falha ao ler arquivo"));
+        }
+      };
+      reader.onerror = () => reject(reader.error ?? new Error("Falha ao ler arquivo"));
+      reader.readAsDataURL(file);
+    });
+  }, []);
+
   const formatDate = useCallback((iso: string | null | undefined) => {
     if (!iso) return "-";
     try {
@@ -253,25 +328,107 @@ export default function MaintHomeStartPage() {
     }
   }, []);
 
-  const handleStartProgramada = useCallback(
-    (record: ProgramacaoRecord) => {
-      const tag = record.machine?.tag;
-      if (!tag) return;
-      const params = new URLSearchParams();
-      params.set("programacaoId", record.id);
-      if (record.osNumero) {
-        params.set("os", record.osNumero);
-      }
-      if (record.batchId) {
-        params.set("batchId", record.batchId);
-      }
-      if (record.datas?.vencimento) {
-        params.set("prazo", record.datas.vencimento);
-      }
-      router.push(`/inspecao/${encodeURIComponent(tag)}?${params.toString()}`);
-    },
-    [router]
+  const selectedProgramacao = useMemo(
+    () => programacoes.find(record => record.id === selectedProgramacaoId) ?? null,
+    [programacoes, selectedProgramacaoId],
   );
+
+  useEffect(() => {
+    setCompletionDescricao("");
+    setCompletionFotos([]);
+    setDetailFeedback(null);
+  }, [selectedProgramacaoId]);
+
+  const handleOpenProgramacao = useCallback((record: ProgramacaoRecord) => {
+    setSelectedProgramacaoId(record.id);
+    setCompletionDescricao("");
+    setCompletionFotos([]);
+    setDetailFeedback(null);
+  }, []);
+
+  const handleCompletionPhotosChange = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const files = Array.from(event.target.files ?? []);
+      if (files.length === 0) {
+        return;
+      }
+      const available = MAX_COMPLETION_PHOTOS - completionFotos.length;
+      if (available <= 0) {
+        setDetailFeedback({ type: "error", message: "Limite de fotos atingido." });
+        event.target.value = "";
+        return;
+      }
+      const selectedFiles = files.slice(0, available);
+      const additions: CompletionPhoto[] = [];
+      for (const file of selectedFiles) {
+        if (file.size > MAX_UPLOAD_BYTES) {
+          setDetailFeedback({ type: "error", message: "Reduza as fotos para até 1,5MB." });
+          continue;
+        }
+        try {
+          const dataUrl = await readFileAsDataUrl(file);
+          additions.push({ id: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`, dataUrl });
+        } catch (error) {
+          console.error(error);
+          setDetailFeedback({ type: "error", message: "Não foi possível ler uma das imagens." });
+        }
+      }
+      if (additions.length > 0) {
+        setCompletionFotos(prev => [...prev, ...additions]);
+      }
+      event.target.value = "";
+    },
+    [completionFotos.length, readFileAsDataUrl],
+  );
+
+  const handleRemoveCompletionPhoto = useCallback((id: string) => {
+    setCompletionFotos(prev => prev.filter(photo => photo.id !== id));
+  }, []);
+
+  const handleTriggerPhotoPicker = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  const handleConcludeProgramacao = useCallback(async () => {
+    if (!selectedProgramacao) {
+      setDetailFeedback({ type: "error", message: "Selecione uma programação." });
+      return;
+    }
+    setCompletionLoading(true);
+    setDetailFeedback(null);
+    try {
+      const payload = {
+        descricao: completionDescricao.trim() ? completionDescricao.trim() : null,
+        fotos: completionFotos.map(photo => photo.dataUrl),
+      };
+      const response = await fetch(`/api/me/programacoes/${selectedProgramacao.id}/complete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) {
+        const errorPayload = await response.json().catch(() => null);
+        throw new Error(errorPayload?.error ?? "Falha ao concluir correção.");
+      }
+      setDetailFeedback({ type: "success", message: "Correção concluída e enviada ao PCM." });
+      setCompletionDescricao("");
+      setCompletionFotos([]);
+      await loadProgramacoes();
+    } catch (error: unknown) {
+      const message = error instanceof Error && error.message ? error.message : "Falha ao concluir correção.";
+      setDetailFeedback({ type: "error", message });
+    } finally {
+      setCompletionLoading(false);
+    }
+  }, [completionDescricao, completionFotos, loadProgramacoes, selectedProgramacao]);
+
+  const selectedSeverityState =
+    selectedProgramacao?.issue?.severity ?? selectedProgramacao?.manutencao.severity;
+  const selectedSeverityValue =
+    selectedProgramacao?.issue?.effectiveSeverity ?? selectedProgramacao?.manutencao.effectiveSeverity ?? null;
+  const issuePhotos = selectedProgramacao?.issue?.fotos ?? [];
+  const mantenedoresSelecionados = selectedProgramacao?.mantenedores ?? [];
+  const remainingPhotoSlots = Math.max(0, MAX_COMPLETION_PHOTOS - completionFotos.length);
 
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-8">
@@ -307,81 +464,299 @@ export default function MaintHomeStartPage() {
       </header>
 
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h2 className="text-lg font-semibold text-slate-900">Suas inspeções programadas</h2>
-            <p className="text-sm text-slate-500">Priorize as ordens de serviço planejadas para você.</p>
-          </div>
-          {programacoesLoading && <span className="text-xs text-slate-400">Carregando programações...</span>}
+        <div className="flex flex-col gap-1">
+          <h2 className="text-lg font-semibold text-slate-900">Correções programadas</h2>
+          <p className="text-sm text-slate-500">
+            Visualize as não conformidades direcionadas a você, confira as evidências e conclua após a correção.
+          </p>
         </div>
 
         {programacoesError ? (
           <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {programacoesError}
           </div>
-        ) : programacoesLoading ? (
-          <div className="mt-4 space-y-3">
-            {Array.from({ length: 2 }).map((_, index) => (
-              <div key={index} className="h-24 animate-pulse rounded-2xl bg-slate-100" />
-            ))}
-          </div>
-        ) : programacoes.length === 0 ? (
-          <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500 shadow-sm">
-            Nenhuma inspeção programada para você no momento.
-          </div>
         ) : (
-          <div className="mt-4 space-y-3">
-            {programacoes.map(record => {
-              const criticidade = record.manutencao.criticidade?.toUpperCase() ?? null;
-              const criticidadeVariant: "default" | "success" | "warning" | "danger" | "muted" =
-                criticidade === "A" ? "danger" : criticidade === "B" ? "warning" : "muted";
-              const disableStart = !record.machine.tag || record.machine.machineNotFound;
+          <div className="mt-6 flex flex-col gap-6 lg:flex-row">
+            <div className="space-y-3 lg:w-[42%]">
+              {programacoesLoading ? (
+                <div className="space-y-3">
+                  {Array.from({ length: 3 }).map((_, index) => (
+                    <div key={index} className="h-28 animate-pulse rounded-2xl bg-slate-100" />
+                  ))}
+                </div>
+              ) : programacoes.length === 0 ? (
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500 shadow-sm">
+                  Nenhuma correção programada para você no momento.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {programacoes.map(record => {
+                    const isSelected = selectedProgramacaoId === record.id;
+                    const severityState = record.issue?.severity ?? record.manutencao.severity;
+                    const severityValue =
+                      record.issue?.effectiveSeverity ?? record.manutencao.effectiveSeverity ?? null;
+                    const mantenedorNames = record.mantenedores
+                      .map(entry => entry.nome || entry.matricula || entry.maintId || null)
+                      .filter((name): name is string => Boolean(name));
 
-              return (
-                <article
-                  key={record.id}
-                  className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-blue-200 hover:shadow-md md:flex md:items-center md:justify-between"
-                >
-                  <div className="space-y-2 md:pr-6">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="text-base font-semibold text-slate-900">
-                        {record.machine.nome ?? record.machine.tag ?? "Máquina"}
+                    return (
+                      <button
+                        key={record.id}
+                        type="button"
+                        onClick={() => handleOpenProgramacao(record)}
+                        aria-pressed={isSelected}
+                        className={cn(
+                          "w-full rounded-2xl border px-4 py-4 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500",
+                          isSelected
+                            ? "border-blue-500 bg-blue-50/70 shadow-sm"
+                            : "border-slate-200 hover:border-blue-200 hover:bg-blue-50/40",
+                        )}
+                      >
+                        <div className="flex flex-col gap-3">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div className="space-y-1">
+                              <h3 className="text-base font-semibold text-slate-900">
+                                {record.issue?.descricao ?? record.machine.nome ?? record.machine.tag ?? "Correção programada"}
+                              </h3>
+                              <p className="text-xs uppercase tracking-wide text-slate-400">
+                                OS {record.osNumero ?? record.issue?.osNumero ?? "-"}
+                              </p>
+                            </div>
+                            <CriticidadeBadge
+                              value={severityValue}
+                              state={severityState}
+                              label="Criticidade"
+                              showStatus
+                            />
+                          </div>
+                          <div className="flex flex-wrap gap-3 text-xs text-slate-500">
+                            <span>Máquina: {record.machine.nome ?? "-"}</span>
+                            <span>TAG: {record.machine.tag ?? "-"}</span>
+                          </div>
+                          <div className="flex flex-wrap gap-3 text-xs text-slate-500">
+                            <span>Programada: {formatDate(record.datas.programada)}</span>
+                            <span>Prazo: {formatDate(record.datas.prazo)}</span>
+                            <span>Vencimento: {formatDate(record.datas.vencimento)}</span>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                            <span className="font-medium text-slate-600">
+                              Responsável: {record.responsavel.nome ?? record.responsavel.matricula ?? "-"}
+                            </span>
+                            {record.atrasada ? <Badge variant="danger">Atrasada</Badge> : null}
+                            {record.status ? (
+                              <Badge variant="muted" className="uppercase tracking-wide">
+                                {record.status}
+                              </Badge>
+                            ) : null}
+                          </div>
+                          {mantenedorNames.length > 0 ? (
+                            <p className="text-xs text-slate-500">
+                              Mantenedores de apoio: {mantenedorNames.join(", ")}
+                            </p>
+                          ) : null}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="lg:flex-1">
+              {programacoesLoading ? (
+                <div className="h-72 animate-pulse rounded-2xl bg-slate-100" />
+              ) : selectedProgramacao ? (
+                <div className="space-y-5 rounded-2xl border border-slate-200 bg-slate-50/60 p-5">
+                  <header className="space-y-3">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <h3 className="text-xl font-semibold text-slate-900">
+                        {selectedProgramacao.machine.nome ?? selectedProgramacao.machine.tag ?? "Correção programada"}
                       </h3>
-                      {record.manutencao.tipo && (
+                      {selectedProgramacao.atrasada ? <Badge variant="danger">Atrasada</Badge> : null}
+                      {selectedProgramacao.status ? (
                         <Badge variant="muted" className="uppercase tracking-wide">
-                          {record.manutencao.tipo}
+                          {selectedProgramacao.status}
                         </Badge>
+                      ) : null}
+                    </div>
+                    <p className="whitespace-pre-wrap text-sm text-slate-600">
+                      {selectedProgramacao.issue?.descricao ?? "Sem descrição cadastrada para esta não conformidade."}
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <CriticidadeBadge
+                        value={selectedSeverityValue}
+                        state={selectedSeverityState}
+                        label="Criticidade atual"
+                        showStatus
+                      />
+                    </div>
+                  </header>
+
+                  {detailFeedback ? (
+                    <div
+                      className={cn(
+                        "rounded-xl px-4 py-3 text-sm",
+                        detailFeedback.type === "success"
+                          ? "border border-emerald-200 bg-emerald-50 text-emerald-700"
+                          : "border border-red-200 bg-red-50 text-red-700",
                       )}
-                      {criticidade && <Badge variant={criticidadeVariant}>Criticidade {criticidade}</Badge>}
-                      {record.atrasada && <Badge variant="danger">Atrasada</Badge>}
+                    >
+                      {detailFeedback.message}
                     </div>
-                    <div className="flex flex-wrap gap-4 text-xs text-slate-500">
-                      <span>TAG: {record.machine.tag ?? "-"}</span>
-                      <span>Vencimento: {formatDate(record.datas?.vencimento)}</span>
-                      <span>OS: {record.osNumero ?? "-"}</span>
-                    </div>
-                    {record.machine.machineNotFound && (
-                      <p className="text-xs text-amber-600">
-                        TAG não encontrada no cadastro. Solicite suporte ao PCM.
+                  ) : null}
+
+                  <div className="grid gap-4 text-sm sm:grid-cols-2">
+                    <div>
+                      <p className="text-xs font-medium uppercase text-slate-500">Máquina</p>
+                      <p className="text-sm text-slate-900">
+                        {selectedProgramacao.machine.nome ?? selectedProgramacao.machine.tag ?? "-"}
                       </p>
-                    )}
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium uppercase text-slate-500">TAG</p>
+                      <p className="text-sm text-slate-900">{selectedProgramacao.machine.tag ?? "-"}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium uppercase text-slate-500">OS vinculada</p>
+                      <p className="text-sm text-slate-900">
+                        {selectedProgramacao.osNumero ?? selectedProgramacao.issue?.osNumero ?? "-"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium uppercase text-slate-500">Data programada</p>
+                      <p className="text-sm text-slate-900">{formatDate(selectedProgramacao.datas.programada)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium uppercase text-slate-500">Prazo</p>
+                      <p className="text-sm text-slate-900">{formatDate(selectedProgramacao.datas.prazo)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium uppercase text-slate-500">Responsável</p>
+                      <p className="text-sm text-slate-900">
+                        {selectedProgramacao.responsavel.nome ??
+                          selectedProgramacao.responsavel.matricula ??
+                          "-"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium uppercase text-slate-500">Mantenedores de apoio</p>
+                      <p className="text-sm text-slate-900">
+                        {mantenedoresSelecionados.length > 0
+                          ? mantenedoresSelecionados
+                              .map(entry => entry.nome ?? entry.matricula ?? entry.maintId ?? "-")
+                              .join(", ")
+                          : "-"}
+                      </p>
+                    </div>
                   </div>
-                  <div className="mt-3 flex flex-col items-start gap-2 md:mt-0 md:items-end">
+
+                  {issuePhotos.length > 0 ? (
+                    <div className="space-y-2">
+                      <h4 className="text-sm font-semibold text-slate-900">Fotos da não conformidade</h4>
+                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                        {issuePhotos.map((url, index) => (
+                          <a
+                            key={`${url}-${index}`}
+                            href={url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="group relative block overflow-hidden rounded-xl border border-slate-200 bg-white"
+                          >
+                            <Image
+                              src={url}
+                              alt="Foto da não conformidade"
+                              fill
+                              className="object-cover transition-transform duration-200 group-hover:scale-105"
+                              sizes="(min-width: 1024px) 200px, (min-width: 640px) 160px, 45vw"
+                            />
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <div className="space-y-2">
+                    <label htmlFor="descricaoConclusao" className="text-sm font-semibold text-slate-900">
+                      Descreva como a correção foi concluída
+                    </label>
+                    <textarea
+                      id="descricaoConclusao"
+                      value={completionDescricao}
+                      onChange={event => setCompletionDescricao(event.target.value)}
+                      rows={4}
+                      placeholder="Inclua as ações executadas, peças trocadas ou observações relevantes."
+                      className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+                      disabled={completionLoading}
+                    />
+                  </div>
+
+                  {completionFotos.length > 0 ? (
+                    <div className="space-y-2">
+                      <h4 className="text-sm font-semibold text-slate-900">Fotos adicionadas</h4>
+                      <div className="flex flex-wrap gap-3">
+                        {completionFotos.map(photo => (
+                          <div
+                            key={photo.id}
+                            className="relative h-24 w-24 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
+                          >
+                            <Image
+                              src={photo.dataUrl}
+                              alt="Foto adicionada"
+                              fill
+                              unoptimized
+                              className="object-cover"
+                              sizes="96px"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveCompletionPhoto(photo.id)}
+                              className="absolute right-1 top-1 rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-white shadow hover:bg-black/80"
+                            >
+                              Remover
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <div className="flex flex-wrap gap-3">
                     <button
                       type="button"
-                      onClick={() => handleStartProgramada(record)}
-                      disabled={disableStart}
-                      className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
+                      onClick={handleTriggerPhotoPicker}
+                      disabled={completionLoading || remainingPhotoSlots <= 0}
+                      className="inline-flex items-center justify-center rounded-xl border border-blue-200 px-4 py-2 text-sm font-semibold text-blue-600 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      Iniciar inspeção
+                      Adicionar fotos ({completionFotos.length}/{MAX_COMPLETION_PHOTOS})
                     </button>
-                    <p className="text-xs text-slate-400">
-                      Responsável: {record.responsavel.nome ?? "-"}
-                    </p>
+                    <button
+                      type="button"
+                      onClick={handleConcludeProgramacao}
+                      disabled={completionLoading}
+                      className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-5 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-emerald-400"
+                    >
+                      {completionLoading ? "Enviando..." : "Concluir correção"}
+                    </button>
                   </div>
-                </article>
-              );
-            })}
+                  <p className="text-xs text-slate-500">
+                    Até {MAX_COMPLETION_PHOTOS} fotos (máx. 1,5&nbsp;MB cada). Restam {remainingPhotoSlots} vagas para novas fotos.
+                  </p>
+
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={handleCompletionPhotosChange}
+                  />
+                </div>
+              ) : (
+                <div className="flex min-h-[260px] items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50/60 p-6 text-center text-sm text-slate-500">
+                  Selecione uma correção programada para visualizar detalhes e concluir a execução.
+                </div>
+              )}
+            </div>
           </div>
         )}
       </section>

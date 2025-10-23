@@ -1,3 +1,4 @@
+import { FieldPath } from "firebase-admin/firestore";
 import type { DocumentData, DocumentSnapshot } from "firebase-admin/firestore";
 
 import { NextResponse } from "next/server";
@@ -23,6 +24,26 @@ function toIso(value: unknown) {
     } catch {
       return null;
     }
+  }
+  return null;
+}
+
+function readStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map(entry => (typeof entry === "string" ? entry.trim() : ""))
+    .filter((entry): entry is string => entry.length > 0);
+}
+
+function readNullableString(value: unknown): string | null {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+  if (value === null) {
+    return null;
   }
   return null;
 }
@@ -88,8 +109,32 @@ export async function GET() {
       return a.id.localeCompare(b.id);
     });
 
+    const issueIds = Array.from(
+      new Set(
+        records
+          .map(record => (typeof record.data.issueId === "string" ? record.data.issueId.trim() : null))
+          .filter((value): value is string => Boolean(value)),
+      ),
+    );
+
+    const issuesById = new Map<string, DocumentData>();
+    for (let index = 0; index < issueIds.length; index += 10) {
+      const chunk = issueIds.slice(index, index + 10);
+      if (chunk.length === 0) continue;
+      const snapshot = await adminDb
+        .collection("issues")
+        .where(FieldPath.documentId(), "in", chunk)
+        .get()
+        .catch(() => null);
+      snapshot?.forEach(doc => {
+        issuesById.set(doc.id, doc.data() ?? {});
+      });
+    }
+
     const results = records.map(record => {
       const data = record.data;
+      const issueId = typeof data.issueId === "string" ? data.issueId : null;
+      const issueData = issueId ? issuesById.get(issueId) ?? {} : undefined;
       const vencimentoIso = toIso(data?.datas?.vencimento);
       const vencimentoDate = vencimentoIso ? new Date(vencimentoIso) : null;
       const atrasada = Boolean(
@@ -123,9 +168,52 @@ export async function GET() {
           emissao: toIso(data?.datas?.emissao),
           vencimento: vencimentoIso,
           fechamento: toIso(data?.datas?.fechamento),
+          programada: toIso(data?.datas?.programada),
+          prazo: toIso(data?.datas?.prazo),
         },
         atrasada,
         status: data.status ?? null,
+        mantenedores: Array.isArray(data.responsaveis)
+          ? (data.responsaveis as Array<Record<string, unknown>>).map(entry => ({
+              nome: typeof entry?.nome === "string" ? entry.nome : null,
+              maintId: typeof entry?.maintId === "string" ? entry.maintId : null,
+              matricula: typeof entry?.matricula === "string" ? entry.matricula : null,
+              origem: typeof entry?.origem === "string" ? entry.origem : null,
+            }))
+          : [],
+        issue: issueId
+          ? {
+              id: issueId,
+              descricao: typeof issueData?.descricao === "string" ? issueData.descricao : null,
+              fotos: readStringArray(issueData?.fotos),
+              osNumero: typeof issueData?.osNumero === "string" ? issueData.osNumero : null,
+              severity: issueData?.severity ? parseSeverityState(issueData.severity) : undefined,
+              effectiveSeverity: issueData?.severity
+                ? getEffectiveSeverity(parseSeverityState(issueData.severity))
+                : undefined,
+            }
+          : null,
+        execucao: (() => {
+          const raw = data.execucao as Record<string, unknown> | undefined;
+          if (!raw) {
+            return null;
+          }
+          const concluidaPorRaw = raw.concluidaPor as Record<string, unknown> | undefined;
+          const fotos = readStringArray(raw.fotos);
+          return {
+            status: typeof raw.status === "string" ? raw.status : null,
+            descricao: readNullableString(raw.descricao),
+            fotos,
+            concluidaEm: toIso(raw.concluidaEm ?? raw.concluidaEmIso),
+            concluidaPor: concluidaPorRaw
+              ? {
+                  maintId: typeof concluidaPorRaw.maintId === "string" ? concluidaPorRaw.maintId : null,
+                  nome: typeof concluidaPorRaw.nome === "string" ? concluidaPorRaw.nome : null,
+                  matricula: typeof concluidaPorRaw.matricula === "string" ? concluidaPorRaw.matricula : null,
+                }
+              : null,
+          };
+        })(),
       };
     });
 

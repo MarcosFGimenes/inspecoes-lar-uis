@@ -16,13 +16,15 @@ const itemPhotoSchema = z.union([
   }),
 ]);
 
+const severitySchema = z.union([z.number().int().min(1).max(6), z.null()]);
+
 const itemSchema = z.object({
   templateItemId: z.string().trim().min(1),
   resultado: z.enum(["", "C", "NC", "NA"]).default(""),
   observacao: z.string().trim().max(4000).optional(),
   fotos: z.array(itemPhotoSchema).max(3).optional(),
   osNumero: z.string().trim().max(120).optional(),
-  criticidade: z.number().int().min(1).max(5).optional(),
+  criticidade: severitySchema.optional(),
 });
 
 const payloadSchema = z.object({
@@ -201,7 +203,7 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       const osNumero = coerceString(entry?.osNumero) ?? "";
       const criticidadeValue = entry?.criticidade;
       const criticidade =
-        typeof criticidadeValue === "number" && Number.isInteger(criticidadeValue) && criticidadeValue >= 1 && criticidadeValue <= 5
+        typeof criticidadeValue === "number" && Number.isInteger(criticidadeValue) && criticidadeValue >= 1 && criticidadeValue <= 6
           ? criticidadeValue
           : null;
       return {
@@ -279,7 +281,7 @@ export async function PUT(req: NextRequest, context: RouteContext) {
     const osNumero = item.osNumero?.trim() ? item.osNumero.trim().toUpperCase() : null;
     const criticidade =
       typeof item.criticidade === "number" && Number.isFinite(item.criticidade)
-        ? Math.max(1, Math.min(5, Math.trunc(item.criticidade)))
+        ? Math.max(1, Math.min(6, Math.trunc(item.criticidade)))
         : null;
     itensMap[item.templateItemId] = { resultado, observacao, osNumero, fotos, criticidade };
     if (resultado === "C" || resultado === "NC" || resultado === "NA") {

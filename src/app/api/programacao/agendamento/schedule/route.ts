@@ -27,6 +27,11 @@ const payloadSchema = z.object({
   descricao: z.union([z.string(), z.null()]).optional(),
 });
 
+const deleteSchema = z.object({
+  issueId: z.string().trim().min(1),
+  programacaoId: z.string().trim().min(1).optional(),
+});
+
 function toIso(value: string | null | undefined) {
   if (!value) return null;
   const parsed = new Date(value);
@@ -362,4 +367,76 @@ export async function POST(req: NextRequest) {
     programacaoId: programacaoRef.id,
     severity: parseSeverityState(issueData.severity),
   });
+}
+
+export async function DELETE(req: NextRequest) {
+  const authorized = await requireAdminFromRequest(req);
+  if (!authorized) {
+    return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 });
+  }
+
+  let payload: z.infer<typeof deleteSchema>;
+  try {
+    payload = deleteSchema.parse(await req.json());
+  } catch (error: unknown) {
+    const message = error instanceof Error && error.message ? error.message : "INVALID_PAYLOAD";
+    return NextResponse.json({ error: message }, { status: 422 });
+  }
+
+  const issueRef = adminDb.collection("issues").doc(payload.issueId);
+  const issueSnap = await issueRef.get();
+  if (!issueSnap.exists) {
+    return NextResponse.json({ error: "ISSUE_NOT_FOUND" }, { status: 404 });
+  }
+  const issueData = issueSnap.data() ?? {};
+
+  let programacaoRef = payload.programacaoId
+    ? adminDb.collection("programacoes_inspecao").doc(payload.programacaoId)
+    : null;
+
+  if (!programacaoRef) {
+    const issueProgramacaoId =
+      typeof issueData.agendamento === "object" && issueData.agendamento
+        ? (issueData.agendamento as Record<string, unknown>).programacaoId
+        : undefined;
+    const resolvedId = typeof issueProgramacaoId === "string" ? issueProgramacaoId : null;
+    programacaoRef = resolvedId ? adminDb.collection("programacoes_inspecao").doc(resolvedId) : null;
+  }
+
+  if (!programacaoRef) {
+    return NextResponse.json({ error: "PROGRAMACAO_NOT_FOUND" }, { status: 404 });
+  }
+
+  const nowIso = new Date().toISOString();
+
+  await programacaoRef.set(
+    {
+      status: "PENDENTE",
+      updatedAt: FieldValue.serverTimestamp(),
+      atrasada: false,
+      "datas.programada": FieldValue.delete(),
+      "datas.prazo": FieldValue.delete(),
+      agendamento: {
+        status: "cancelado",
+        canceladoEm: nowIso,
+        canceladoPor: { tipo: "pcm" },
+      },
+      responsavel: null,
+      responsaveis: [],
+      responsavelIds: [],
+      responsavelNomesNormalizados: [],
+      execucao: FieldValue.delete(),
+    },
+    { merge: true },
+  );
+
+  await issueRef.set(
+    {
+      agendamento: FieldValue.delete(),
+      updatedAt: FieldValue.serverTimestamp(),
+    },
+    { merge: true },
+  );
+
+  return NextResponse.json({ ok: true });
 }

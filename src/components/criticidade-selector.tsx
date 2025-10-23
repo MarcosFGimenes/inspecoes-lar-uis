@@ -5,7 +5,7 @@ import { useCallback, useMemo } from "react";
 import type { Severity } from "@/types/severity";
 import { cn } from "@/lib/cn";
 
-const LEVELS: Severity[] = [1, 2, 3, 4, 5];
+const LEVELS: Severity[] = [1, 2, 3, 4, 5, 6];
 
 const palette: Array<{ background: string; border: string; text: string; shadow: string }> = [
   {
@@ -38,6 +38,12 @@ const palette: Array<{ background: string; border: string; text: string; shadow:
     text: "#7f1d1d",
     shadow: "rgba(153,27,27,0.5)",
   },
+  {
+    background: "linear-gradient(135deg, rgba(220,38,38,0.97), rgba(153,27,27,0.94))",
+    border: "rgba(185,28,28,1)",
+    text: "#fef2f2",
+    shadow: "rgba(127,29,29,0.55)",
+  },
 ];
 
 export interface CriticidadeSelectorProps {
@@ -57,7 +63,7 @@ export function CriticidadeSelector({ value, onChange, disabled, className, name
       const base = currentValue ?? level;
       if (event.key === "ArrowRight" || event.key === "ArrowUp") {
         event.preventDefault();
-        const next = Math.min(5, base + 1) as Severity;
+        const next = Math.min(6, base + 1) as Severity;
         if (next !== currentValue) {
           onChange(next);
         }
@@ -80,8 +86,8 @@ export function CriticidadeSelector({ value, onChange, disabled, className, name
       }
       if (event.key === "End") {
         event.preventDefault();
-        if (currentValue !== 5) {
-          onChange(5 as Severity);
+        if (currentValue !== 6) {
+          onChange(6 as Severity);
         }
       }
     },

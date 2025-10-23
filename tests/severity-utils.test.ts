@@ -25,13 +25,13 @@ test("parseSeverityState prioritizes signer severity when available", () => {
   const result = parseSeverityState({
     maintainer: 2,
     maintainerAt: "2024-01-01T08:00:00Z",
-    signer: 5,
+    signer: 6,
     signerAt: "2024-01-05T12:00:00Z",
   });
 
   assert.equal(result.maintainer, 2);
-  assert.equal(result.signer, 5);
-  assert.equal(result.effective, 5);
+  assert.equal(result.signer, 6);
+  assert.equal(result.effective, 6);
   const signerAtIso =
     typeof result.signerAt === "string" ? result.signerAt : result.signerAt?.toISOString();
   assert.ok(signerAtIso?.startsWith("2024-01-05T12:00:00.000Z"));
