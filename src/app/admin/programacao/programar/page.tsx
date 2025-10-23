@@ -41,6 +41,28 @@ function formatDate(value: string | null | undefined, withTime = false) {
     : date.toLocaleDateString("pt-BR");
 }
 
+function toDateInputValue(value: string | null | undefined) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function toDateTimeLocalValue(value: string | null | undefined) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
 function filterMaintainersByArea(options: MaintainerOption[], area: AreaFilter | "todas") {
   if (area === "todas") return options;
   return options.filter(option => {
@@ -66,6 +88,7 @@ export default function ProgramarManutencaoPage() {
     mantenedor2: "",
     dataProgramada: "",
     prazo: "",
+    descricao: "",
   });
 
   useEffect(() => {
@@ -111,11 +134,15 @@ export default function ProgramarManutencaoPage() {
         }
         const payload = (await response.json()) as { items: SchedulingNCRecord[] };
         setItems(payload.items);
-        if (payload.items.length > 0) {
-          setSelectedId(payload.items[0]!.id);
-        } else {
-          setSelectedId(null);
-        }
+        setSelectedId(current => {
+          if (payload.items.length === 0) {
+            return null;
+          }
+          if (current && payload.items.some(item => item.id === current)) {
+            return current;
+          }
+          return payload.items[0]!.id;
+        });
       })
       .catch(() => {
         setItems([]);
@@ -128,10 +155,34 @@ export default function ProgramarManutencaoPage() {
 
   const availableMaintainers = useMemo(() => filterMaintainersByArea(maintainers, filters.area), [maintainers, filters.area]);
 
+  useEffect(() => {
+    if (!selected) {
+      setForm({
+        responsavel: "",
+        mantenedor1: "",
+        mantenedor2: "",
+        dataProgramada: "",
+        prazo: "",
+        descricao: "",
+      });
+      return;
+    }
+
+    const responsaveis = selected.programacao?.responsaveis ?? [];
+    setForm({
+      responsavel: selected.programacao?.responsavel?.maintId ?? "",
+      mantenedor1: responsaveis[0]?.maintId ?? "",
+      mantenedor2: responsaveis[1]?.maintId ?? "",
+      dataProgramada: toDateTimeLocalValue(selected.programacao?.datas?.programada ?? null),
+      prazo: toDateInputValue(selected.programacao?.datas?.prazo ?? null),
+      descricao: selected.descricao ?? "",
+    });
+  }, [selected]);
+
   const getMaintainerPayload = (id: string) => {
-    if (!id) return undefined;
+    if (!id) return null;
     const record = maintainers.find(item => item.id === id);
-    if (!record) return undefined;
+    if (!record) return null;
     return {
       maintId: record.id,
       nome: record.nome ?? undefined,
@@ -151,15 +202,20 @@ export default function ProgramarManutencaoPage() {
     setSaving(true);
     setFeedback(null);
     try {
+      const responsavelPayload = getMaintainerPayload(form.responsavel);
+      const mantenedoresPayload = [form.mantenedor1, form.mantenedor2]
+        .map(id => getMaintainerPayload(id))
+        .filter(
+          (entry): entry is NonNullable<ReturnType<typeof getMaintainerPayload>> => entry !== null,
+        );
       const payload = {
         issueId: selected.id,
         programacaoId: selected.programacao?.id ?? undefined,
         dataProgramada: form.dataProgramada,
-        prazo: form.prazo || undefined,
-        responsavel: getMaintainerPayload(form.responsavel),
-        mantenedores: [form.mantenedor1, form.mantenedor2]
-          .map(id => getMaintainerPayload(id))
-          .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry)),
+        prazo: form.prazo === "" ? null : form.prazo,
+        responsavel: responsavelPayload,
+        mantenedores: mantenedoresPayload,
+        descricao: form.descricao,
       };
       const response = await fetch("/api/programacao/agendamento/schedule", {
         method: "POST",
@@ -171,7 +227,7 @@ export default function ProgramarManutencaoPage() {
         throw new Error(errorPayload?.error ?? "Falha ao programar manutenção.");
       }
       setFeedback({ type: "success", message: "Programação salva com sucesso." });
-      setForm({ responsavel: "", mantenedor1: "", mantenedor2: "", dataProgramada: "", prazo: "" });
+      setForm({ responsavel: "", mantenedor1: "", mantenedor2: "", dataProgramada: "", prazo: "", descricao: "" });
       setFilters(prev => ({ ...prev }));
     } catch (error: unknown) {
       const message = error instanceof Error && error.message ? error.message : "Falha ao programar manutenção.";
@@ -307,10 +363,21 @@ export default function ProgramarManutencaoPage() {
         <div className="space-y-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)]/70 p-4 shadow-sm">
           {selected ? (
             <div className="space-y-4">
-              <div>
+              <div className="space-y-2">
                 <h2 className="text-lg font-semibold text-[var(--text)]">Resumo da não conformidade</h2>
-                <p className="text-sm text-[var(--muted)]">
-                  {selected.descricao ?? "Sem descrição registrada."}
+                <label className="space-y-1 text-sm text-[var(--text)]">
+                  <span className="text-xs font-medium uppercase tracking-wide text-[var(--muted)]">
+                    Descrição da NC
+                  </span>
+                  <textarea
+                    className="min-h-[112px] w-full resize-y rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] focus:border-[var(--primary)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                    value={form.descricao}
+                    onChange={event => setForm(prev => ({ ...prev, descricao: event.target.value }))}
+                    placeholder="Descreva a não conformidade"
+                  />
+                </label>
+                <p className="text-xs text-[var(--muted)]">
+                  A descrição será atualizada diretamente na não conformidade selecionada.
                 </p>
               </div>
 

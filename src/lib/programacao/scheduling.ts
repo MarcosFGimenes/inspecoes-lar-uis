@@ -55,7 +55,18 @@ export interface SchedulingNCRecord {
       emissao: string | null;
       vencimento: string | null;
       programada: string | null;
+      prazo: string | null;
     };
+    responsavel?: {
+      maintId: string | null;
+      nome: string | null;
+      matricula: string | null;
+    } | null;
+    responsaveis?: Array<{
+      maintId: string | null;
+      nome: string | null;
+      matricula: string | null;
+    }>;
   } | null;
 }
 
@@ -284,6 +295,38 @@ export async function getNCsForScheduling(filters: SchedulingFilters = {}): Prom
       continue;
     }
 
+    const responsavelRecord =
+      programacaoData?.responsavel && typeof programacaoData.responsavel === "object"
+        ? {
+            maintId:
+              typeof programacaoData.responsavel.maintId === "string"
+                ? programacaoData.responsavel.maintId
+                : null,
+            nome:
+              typeof programacaoData.responsavel.nome === "string"
+                ? programacaoData.responsavel.nome
+                : null,
+            matricula:
+              typeof programacaoData.responsavel.matricula === "string"
+                ? programacaoData.responsavel.matricula
+                : null,
+          }
+        : null;
+
+    const responsaveisRecords = Array.isArray(programacaoData?.responsaveis)
+      ? (programacaoData?.responsaveis as unknown[]).map(entry => {
+          if (!entry || typeof entry !== "object") {
+            return { maintId: null, nome: null, matricula: null };
+          }
+          const payload = entry as Record<string, unknown>;
+          return {
+            maintId: typeof payload.maintId === "string" ? payload.maintId : null,
+            nome: typeof payload.nome === "string" ? payload.nome : null,
+            matricula: typeof payload.matricula === "string" ? payload.matricula : null,
+          };
+        })
+      : [];
+
     const record: SchedulingNCRecord = {
       id: issue.id,
       templateItemId: typeof issue.data.templateItemId === "string" ? issue.data.templateItemId : null,
@@ -328,7 +371,10 @@ export async function getNCsForScheduling(filters: SchedulingFilters = {}): Prom
               emissao: normalizeIso(programacaoData.datas?.emissao),
               vencimento: normalizeIso(programacaoData.datas?.vencimento),
               programada: normalizeIso(programacaoData.datas?.programada),
+              prazo: normalizeIso(programacaoData.datas?.prazo),
             },
+            responsavel: responsavelRecord,
+            responsaveis: responsaveisRecords,
           }
         : null,
     };
