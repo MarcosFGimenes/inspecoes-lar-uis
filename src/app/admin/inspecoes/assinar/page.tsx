@@ -15,10 +15,6 @@ import { Select } from "@/components/ui/select";
 import SignatureCanvas, { SignatureCanvasInstance } from "@/components/signature-canvas-client";
 import { cn } from "@/lib/cn";
 import type { ChecklistAnswer, ChecklistResponse } from "@/types";
-import {
-  ImagePreviewDialog,
-  type ImagePreviewData,
-} from "@/components/ui/image-preview-dialog";
 
 interface PendingSignInspection {
   id: string;
@@ -77,7 +73,6 @@ interface SignatureModalProps {
   detail: InspectionDetailData | null;
   detailLoading: boolean;
   detailError: string | null;
-  onPreviewImage(image: ImagePreviewData): void;
 }
 
 type PcmSignResponse = {
@@ -146,7 +141,6 @@ function SignatureModal({
   detail,
   detailLoading,
   detailError,
-  onPreviewImage,
 }: SignatureModalProps) {
   const [mounted, setMounted] = useState(false);
 
@@ -305,15 +299,11 @@ function SignatureModal({
                           {Array.isArray(answer.photoUrls) && answer.photoUrls.length > 0 ? (
                             <div className="mt-3 flex flex-wrap gap-2">
                               {answer.photoUrls.map((url, index) => (
-                                <button
+                                <a
                                   key={`${answer.questionId}-photo-${index}`}
-                                  type="button"
-                                  onClick={() =>
-                                    onPreviewImage({
-                                      src: url,
-                                      alt: `Foto da inspeção - item ${answer.questionId}`,
-                                    })
-                                  }
+                                  href={url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
                                   className="group overflow-hidden rounded-md border focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--primary)]"
                                 >
                                   <Image
@@ -324,7 +314,7 @@ function SignatureModal({
                                     className="h-24 w-40 object-cover transition-transform duration-200 group-hover:scale-105"
                                     unoptimized
                                   />
-                                </button>
+                                </a>
                               ))}
                             </div>
                           ) : null}
@@ -515,7 +505,6 @@ export default function PendingSignaturesPage() {
   const [detail, setDetail] = useState<InspectionDetailData | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
-  const [previewImage, setPreviewImage] = useState<ImagePreviewData | null>(null);
   const signatureRef = useRef<SignatureCanvasInstance | null>(null);
   const detailAbortRef = useRef<AbortController | null>(null);
   const broadcastRef = useRef<BroadcastChannel | null>(null);
@@ -686,14 +675,6 @@ export default function PendingSignaturesPage() {
       return next;
     });
   }, [withoutNc.length]);
-
-  const openImagePreview = useCallback((image: ImagePreviewData) => {
-    setPreviewImage(image);
-  }, []);
-
-  const closeImagePreview = useCallback(() => {
-    setPreviewImage(null);
-  }, []);
 
   const fetchDetail = useCallback(
     async (inspectionId: string) => {
@@ -1214,9 +1195,7 @@ export default function PendingSignaturesPage() {
         detail={detail}
         detailLoading={detailLoading}
         detailError={detailError}
-        onPreviewImage={openImagePreview}
       />
-      {previewImage ? <ImagePreviewDialog image={previewImage} onClose={closeImagePreview} /> : null}
     </div>
   );
 }
