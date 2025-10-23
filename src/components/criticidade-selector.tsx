@@ -54,7 +54,7 @@ export function CriticidadeSelector({ value, onChange, disabled, className, name
   const handleArrowChange = useCallback(
     (event: React.KeyboardEvent<HTMLButtonElement>, level: Severity) => {
       if (disabled) return;
-      let base = currentValue ?? level;
+      const base = currentValue ?? level;
       if (event.key === "ArrowRight" || event.key === "ArrowUp") {
         event.preventDefault();
         const next = Math.min(5, base + 1) as Severity;

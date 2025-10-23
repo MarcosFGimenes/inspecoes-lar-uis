@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 import { updateMaintainerSeverity } from "@/lib/adapters/dataAdapter";
+import type { Severity } from "@/types/severity";
 import { requireMaint } from "@/lib/guards";
 
 export const runtime = "nodejs";
@@ -39,7 +40,7 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
   }
 
   try {
-    const severity = await updateMaintainerSeverity(issueId, payload.value, auth.store.id ?? null);
+    const severity = await updateMaintainerSeverity(issueId, payload.value as Severity, auth.store.id ?? null);
     return NextResponse.json({ severity });
   } catch (error: unknown) {
     const message = error instanceof Error && error.message ? error.message : "INTERNAL_ERROR";

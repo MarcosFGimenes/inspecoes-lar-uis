@@ -129,33 +129,6 @@ function buildAudit(role: "maint" | "pcm", id?: string | null): FirestoreSeverit
   };
 }
 
-function toSerializableState(state: FirestoreSeverityState): SeverityState {
-  return {
-    maintainer: state.maintainer,
-    maintainerAt: state.maintainerAt ? state.maintainerAt.toDate().toISOString() : undefined,
-    signer:
-      typeof state.signer === "number"
-        ? state.signer
-        : state.signer === null
-          ? null
-          : undefined,
-    signerAt:
-      state.signerAt === null
-        ? null
-        : state.signerAt
-        ? state.signerAt.toDate().toISOString()
-        : undefined,
-    effective: state.effective,
-    audit: state.audit
-      ? {
-          role: state.audit.role,
-          id: typeof state.audit.id === "string" ? state.audit.id : state.audit.id ?? null,
-          updatedAt: state.audit.updatedAt ? state.audit.updatedAt.toDate().toISOString() : undefined,
-        }
-      : undefined,
-  };
-}
-
 export async function propagateSeverityToWO(
   issueId: string,
   overrideState?: FirestoreSeverityState,

@@ -108,6 +108,7 @@ function normalizeAnswers(data: Record<string, unknown>, templateItemsMap: Map<s
         itemOsNumero: typeof item.osNumeroItem === "string" && item.osNumeroItem.trim()
           ? item.osNumeroItem.trim().toUpperCase()
           : null,
+        severity: undefined,
       } satisfies ChecklistAnswer;
     });
 }
@@ -446,21 +447,23 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
             }
           }
 
-          const updatedTreatment = existingTreatment
+          const updatedTreatment: ChecklistNonConformityTreatment = existingTreatment
             ? {
                 ...existingTreatment,
                 status: existingTreatment.status === "resolved" ? "open" : existingTreatment.status,
                 updatedAt: nowIso,
+                severity: existingTreatment.severity,
               }
             : {
                 questionId: item.questionId,
                 status: "open" as NonConformityStatus,
                 createdAt: nowIso,
+                severity: undefined,
               };
           if (severityStateForItem) {
             updatedTreatment.severity = severityStateForItem;
           } else if (severityPayload !== undefined && "severity" in updatedTreatment) {
-            delete (updatedTreatment as Record<string, unknown>).severity;
+            updatedTreatment.severity = undefined;
           }
           treatmentsMap.set(item.questionId, updatedTreatment);
         } else {
@@ -471,7 +474,7 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
               updatedAt: nowIso,
             };
             if ("severity" in resolvedTreatment) {
-              delete (resolvedTreatment as Record<string, unknown>).severity;
+              resolvedTreatment.severity = undefined;
             }
             treatmentsMap.set(item.questionId, resolvedTreatment);
           }
@@ -495,11 +498,11 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
             if (severityStateForItem) {
               targetAnswer.severity = severityStateForItem;
             } else if (severityPayload !== undefined && targetAnswer.severity) {
-              delete (targetAnswer as Record<string, unknown>).severity;
+              targetAnswer.severity = undefined;
             }
           }
         } else if (targetAnswer && targetAnswer.severity) {
-          delete (targetAnswer as Record<string, unknown>).severity;
+          targetAnswer.severity = undefined;
         }
       }
     }

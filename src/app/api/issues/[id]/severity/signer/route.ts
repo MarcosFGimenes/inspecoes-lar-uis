@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 import { updateSignerSeverity } from "@/lib/adapters/dataAdapter";
+import type { Severity } from "@/types/severity";
 import { requireAdminFromRequest } from "@/lib/guards";
 
 export const runtime = "nodejs";
@@ -39,7 +40,8 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
   }
 
   try {
-    const severity = await updateSignerSeverity(issueId, payload.value ?? null, null);
+    const severityInput = payload.value === null ? null : (payload.value as Severity);
+    const severity = await updateSignerSeverity(issueId, severityInput, null);
     return NextResponse.json({ severity });
   } catch (error: unknown) {
     const message = error instanceof Error && error.message ? error.message : "INTERNAL_ERROR";

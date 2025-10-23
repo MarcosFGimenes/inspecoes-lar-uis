@@ -259,7 +259,7 @@ export async function getNCsForScheduling(filters: SchedulingFilters = {}): Prom
     }
 
     const severity = parseSeverityState(issue.data.severity);
-    const effectiveSeverity = getEffectiveSeverity(severity);
+    const effectiveSeverity = getEffectiveSeverity(severity) ?? null;
 
     if (!severityWithinRange(effectiveSeverity, filters.minSeverity, filters.maxSeverity)) {
       continue;
@@ -300,7 +300,7 @@ export async function getNCsForScheduling(filters: SchedulingFilters = {}): Prom
       },
       osNumero,
       severity,
-      effectiveSeverity: effectiveSeverity ?? null,
+      effectiveSeverity,
       inspection: inspectionData
         ? {
             id: issue.data.abertaEmInspecaoId ? String(issue.data.abertaEmInspecaoId) : null,
