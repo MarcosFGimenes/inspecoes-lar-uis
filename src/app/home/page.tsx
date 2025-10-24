@@ -666,6 +666,7 @@ export default function MaintHomeStartPage() {
                               src={url}
                               alt="Foto da não conformidade"
                               fill
+                              unoptimized
                               className="object-cover transition-transform duration-200 group-hover:scale-105"
                               sizes="(min-width: 1024px) 200px, (min-width: 640px) 160px, 45vw"
                             />
