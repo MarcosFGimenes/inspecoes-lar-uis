@@ -6,7 +6,7 @@ import { requireAdminFromRequest } from "@/lib/guards";
 
 import { mapDoc, normalizeIsoDate, updateSchema } from "../route";
 
-type RouteContext = { params: Promise<{ id?: string | string[] }> };
+type RouteContext = { params: { id?: string | string[] } };
 
 function resolveId(params: { id?: string | string[] } | null | undefined) {
   if (!params) return null;
@@ -17,13 +17,13 @@ function resolveId(params: { id?: string | string[] } | null | undefined) {
   return value ?? null;
 }
 
-export async function PATCH(req: NextRequest, context: RouteContext) {
+export async function PATCH(req: NextRequest, { params }: RouteContext) {
   const authorized = await requireAdminFromRequest(req);
   if (!authorized) {
     return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 });
   }
 
-  const id = resolveId(await context.params);
+  const id = resolveId(params);
   if (!id) {
     return NextResponse.json({ error: "MISSING_ID" }, { status: 400 });
   }
