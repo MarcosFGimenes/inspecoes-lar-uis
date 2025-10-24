@@ -89,7 +89,7 @@ interface FormItem {
   response: "c" | "nc" | "na";
   observation: string;
   itemOsNumero: string;
-  existingPhotos: string[];
+  existingPhotos: StoredImage[];
   newPhotos: NewPhoto[];
 }
 
@@ -370,9 +370,9 @@ export default function EditInspectionPage() {
         }
 
         const itensPayload = form.items.map(item => {
-          const photosPayload: Array<string | { dataUrl: string; name?: string } | undefined> = [];
-          item.existingPhotos.forEach(url => {
-            photosPayload.push(url);
+          const photosPayload: Array<StoredImage | { dataUrl: string; name?: string }> = [];
+          item.existingPhotos.forEach(photo => {
+            photosPayload.push(photo);
           });
           item.newPhotos.forEach(photo => {
             photosPayload.push({ dataUrl: photo.dataUrl, name: photo.name });
@@ -649,13 +649,13 @@ export default function EditInspectionPage() {
                         {item.existingPhotos.map((photo, index) => (
                           <a
                             key={`${item.questionId}-existing-${index}`}
-                            href={photo}
+                            href={photo.url}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="group overflow-hidden rounded-lg border border-[var(--border)] bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--primary)]"
                           >
                             <Image
-                              src={photo}
+                              src={photo.url}
                               alt={`Foto existente ${index + 1}`}
                               width={160}
                               height={120}

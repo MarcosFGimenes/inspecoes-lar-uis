@@ -8,7 +8,7 @@ import { ensureStoredPhotos, photosToUrls } from "@/lib/photos";
 type InspectionAnswer = Omit<ChecklistAnswer, "questionText" | "observation" | "photoUrls" | "itemOsNumero"> & {
   questionText: string | null;
   observation: string | null;
-  photoUrls: string[];
+  photoUrls: StoredImage[];
   itemOsNumero: string | null;
 };
 
@@ -275,9 +275,14 @@ export default function MaintInspectionDetailPage() {
                   <div className="space-y-1 text-sm text-gray-700">
                     <p className="font-medium">Fotos anexadas:</p>
                     <ul className="list-inside list-disc space-y-1">
-                      {answer.photoUrls.map((url, index) => (
-                        <li key={url}>
-                          <a href={url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">
+                      {answer.photoUrls.map((photo, index) => (
+                        <li key={`${answer.questionId}-photo-${index}`}>
+                          <a
+                            href={photo.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-blue-600 hover:underline"
+                          >
                             Ver foto {index + 1}
                           </a>
                         </li>

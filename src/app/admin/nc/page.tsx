@@ -24,6 +24,7 @@ import type {
   ChecklistAnswer,
   ChecklistNonConformityTreatment,
   NonConformityStatus,
+  StoredImage,
 } from "@/types";
 import { ensureStoredPhotos, photosToUrls } from "@/lib/photos";
 
@@ -62,7 +63,7 @@ interface NonConformityItem {
   operatorNome: string | null;
   operatorMatricula: string | null;
   observation: string | null;
-  photos: string[];
+  photos: StoredImage[];
   itemOsNumero: string | null;
   status: NonConformityStatus;
   summary: string;
@@ -506,7 +507,7 @@ export default function AdminNonConformitiesPage() {
                               className="overflow-hidden rounded-lg border border-[var(--border)] bg-white"
                             >
                               <Image
-                                src={photo}
+                                src={photo.url}
                                 alt={`Foto da não conformidade ${index + 1}`}
                                 width={160}
                                 height={120}

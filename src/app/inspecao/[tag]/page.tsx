@@ -29,7 +29,7 @@ type IssueRecord = {
   templateItemId: string | null;
   descricao: string | null;
   osNumero: string | null;
-  fotos: string[];
+  fotos: StoredImage[];
   createdAt: string | null;
   severity?: SeverityState | null;
   effectiveSeverity?: Severity | null;
@@ -1292,13 +1292,13 @@ export default function InspectionPage() {
                           {issue.fotos.map((foto, index) => (
                             <a
                               key={`${issue.id}-list-foto-${index}`}
-                              href={foto}
+                              href={foto.url}
                               target="_blank"
                               rel="noreferrer"
                               className="block overflow-hidden rounded border border-blue-200"
                             >
                               <Image
-                                src={foto}
+                                src={foto.url}
                                 alt={`Foto da NC anterior`}
                                 width={96}
                                 height={72}
@@ -1438,13 +1438,13 @@ export default function InspectionPage() {
                           {issue.fotos.map((foto, index) => (
                             <a
                               key={`${issue.id}-list-foto-${index}`}
-                              href={foto}
+                              href={foto.url}
                               target="_blank"
                               rel="noreferrer"
                               className="block overflow-hidden rounded border border-blue-200"
                             >
                               <Image
-                                src={foto}
+                                src={foto.url}
                                 alt={`Foto da NC anterior`}
                                 width={96}
                                 height={72}
@@ -1529,13 +1529,13 @@ export default function InspectionPage() {
                                 {issue.fotos.map((foto, fotoIdx) => (
                                   <a
                                     key={`${issue.id}-foto-${fotoIdx}`}
-                                    href={foto}
+                                    href={foto.url}
                                     target="_blank"
                                     rel="noreferrer"
                                     className="block overflow-hidden rounded border border-amber-200"
                                   >
                                     <Image
-                                      src={foto}
+                                      src={foto.url}
                                       alt={`Foto da NC anterior - ${label}`}
                                       width={96}
                                       height={72}
