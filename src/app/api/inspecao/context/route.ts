@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase-admin";
 import { findMachineByTag } from "@/lib/db/machines";
 import { requireMaint } from "@/lib/guards";
+import { normalizeStoredImages } from "@/lib/storage/images";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -73,7 +74,7 @@ export async function GET(req: NextRequest) {
         templateItemId: data.templateItemId ?? null,
         descricao: data.descricao ?? null,
         osNumero: data.osNumero ?? null,
-        fotos: Array.isArray(data.fotos) ? data.fotos.filter(Boolean).map(String) : [],
+        fotos: normalizeStoredImages(data.fotos ?? []),
         createdAt: data.createdAt ?? null,
       };
     });

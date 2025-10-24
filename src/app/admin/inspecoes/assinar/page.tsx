@@ -15,6 +15,7 @@ import { Select } from "@/components/ui/select";
 import SignatureCanvas, { SignatureCanvasInstance } from "@/components/signature-canvas-client";
 import { cn } from "@/lib/cn";
 import type { ChecklistAnswer, ChecklistResponse } from "@/types";
+import { normalizeStoredImages } from "@/lib/storage/images";
 
 interface PendingSignInspection {
   id: string;
@@ -160,6 +161,10 @@ function SignatureModal({
   const answers: ChecklistAnswer[] = Array.isArray(detail?.inspection?.answers)
     ? (detail?.inspection?.answers as ChecklistAnswer[])
     : [];
+  const normalizedAnswers = answers.map(answer => ({
+    ...answer,
+    photoUrls: normalizeStoredImages(answer.photoUrls ?? []),
+  }));
 
   const inspectionInfo = detail?.inspection ?? null;
   const machineInfo = inspectionInfo?.machine ?? null;
@@ -255,7 +260,7 @@ function SignatureModal({
                         : "Sem NC"}
                     </Badge>
                   </div>
-                  {answers.length === 0 ? (
+                  {normalizedAnswers.length === 0 ? (
                     <EmptyState
                       title="Sem itens registrados"
                       description="Não foi possível localizar as respostas desta inspeção."
@@ -263,7 +268,7 @@ function SignatureModal({
                     />
                   ) : (
                     <div className="space-y-3">
-                      {answers.map(answer => (
+                      {normalizedAnswers.map(answer => (
                         <div
                           key={answer.questionId}
                           className={cn(
@@ -296,18 +301,18 @@ function SignatureModal({
                               Nº da O.S. do item: <span className="font-medium text-[var(--text)]">{answer.itemOsNumero}</span>
                             </p>
                           ) : null}
-                          {Array.isArray(answer.photoUrls) && answer.photoUrls.length > 0 ? (
+                          {answer.photoUrls && answer.photoUrls.length > 0 ? (
                             <div className="mt-3 flex flex-wrap gap-2">
-                              {answer.photoUrls.map((url, index) => (
+                              {answer.photoUrls.map((photo, index) => (
                                 <a
                                   key={`${answer.questionId}-photo-${index}`}
-                                  href={url}
+                                  href={photo.url}
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   className="group overflow-hidden rounded-md border focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--primary)]"
                                 >
                                   <Image
-                                    src={url}
+                                    src={photo.url}
                                     alt={`Foto da inspeção - item ${answer.questionId}`}
                                     width={160}
                                     height={120}

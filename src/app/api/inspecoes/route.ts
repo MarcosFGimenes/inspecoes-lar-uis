@@ -5,10 +5,12 @@ import type { QueryDocumentSnapshot, DocumentData, DocumentSnapshot } from "fire
 import { adminDb } from "@/lib/firebase-admin";
 import { findMachineByTag } from "@/lib/db/machines";
 import { requireMaint } from "@/lib/guards";
-import { uploadToImgbbFromDataUrl } from "@/lib/imgbb";
 import { randomUUID } from "crypto";
 import type { ChecklistAnswer, ChecklistNonConformityTreatment } from "@/types";
 import { isMaintainerProfileId } from "@/lib/signature-profiles";
+import { fromDataUrl } from "@/lib/storage/dataUrl";
+import { r2Provider } from "@/lib/storage/r2Provider";
+import type { StoredImage } from "@/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -237,7 +239,8 @@ export async function POST(req: NextRequest) {
     } else if (payload.assinaturaDataUrl) {
       const assinaturaDataUrl = ensureDataUrl(payload.assinaturaDataUrl, "ASSINATURA");
       const assinaturaName = buildUploadName(["sign", inspectionId]);
-      const upload = await uploadToImgbbFromDataUrl(assinaturaDataUrl, assinaturaName);
+      const { buffer, mime } = fromDataUrl(assinaturaDataUrl);
+      const upload = await r2Provider.upload(buffer, mime, assinaturaName, `inspecoes/${inspectionId}`);
       assinaturaUrl = upload.url;
     }
 
@@ -245,7 +248,7 @@ export async function POST(req: NextRequest) {
       templateItemId: string;
       resultado: "C" | "NC" | "NA";
       observacaoItem: string | null;
-      fotos: string[];
+      fotos: StoredImage[];
       osNumeroItem: string | null;
     }> = [];
     const answersPayload: ChecklistAnswer[] = [];
@@ -261,7 +264,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "ITEM_OS_REQUIRED" }, { status: 422 });
       }
       const fotosBase64 = item.fotos ? item.fotos.slice(0, 3) : [];
-      const fotoUrls: string[] = [];
+      const fotoAttachments: StoredImage[] = [];
       for (let index = 0; index < fotosBase64.length; index += 1) {
         const dataUrl = ensureDataUrl(fotosBase64[index]!, `ITEM_FOTO_${index + 1}`);
         const uploadName = buildUploadName([
@@ -270,14 +273,20 @@ export async function POST(req: NextRequest) {
           item.templateItemId,
           `foto-${index + 1}`,
         ]);
-        const upload = await uploadToImgbbFromDataUrl(dataUrl, uploadName);
-        fotoUrls.push(upload.url);
+        const { buffer, mime } = fromDataUrl(dataUrl);
+        const upload = await r2Provider.upload(
+          buffer,
+          mime,
+          uploadName,
+          `inspecoes/${inspectionId}/${item.templateItemId}`
+        );
+        fotoAttachments.push(upload);
       }
       itensPayload.push({
         templateItemId: item.templateItemId,
         resultado: item.resultado,
         observacaoItem: item.observacaoItem?.trim() ? item.observacaoItem.trim() : null,
-        fotos: fotoUrls,
+        fotos: fotoAttachments,
         osNumeroItem,
       });
 
@@ -288,7 +297,7 @@ export async function POST(req: NextRequest) {
         questionText: templateItem.oQueChecar ?? templateItem.criterio ?? templateItem.componente ?? null,
         response,
         observation: item.observacaoItem?.trim() ? item.observacaoItem.trim() : null,
-        photoUrls: fotoUrls,
+        photoUrls: fotoAttachments,
         itemOsNumero: osNumeroItem,
       });
 

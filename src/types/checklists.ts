@@ -1,11 +1,13 @@
 export type NonConformityStatus = "open" | "in_progress" | "resolved";
 
+import type { StoredImage } from "./images";
+
 export interface ChecklistAnswer {
   questionId: string;
   questionText?: string | null;
   response: "c" | "nc" | "na";
   observation?: string | null;
-  photoUrls?: string[];
+  photoUrls?: StoredImage[];
   recurrence?: boolean;
   itemOsNumero?: string | null;
 }

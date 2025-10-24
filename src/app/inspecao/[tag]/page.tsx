@@ -5,6 +5,8 @@ import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import type { SignatureCanvasInstance } from "@/components/signature-canvas-client";
+import type { StoredImage } from "@/types";
+import { normalizeStoredImages } from "@/lib/storage/images";
 
 type SignatureCanvasComponent = typeof import("@/components/signature-canvas-client").default;
 const SignatureCanvas = dynamic(() => import("@/components/signature-canvas-client"), { ssr: false }) as unknown as SignatureCanvasComponent;
@@ -25,7 +27,7 @@ type IssueRecord = {
   templateItemId: string | null;
   descricao: string | null;
   osNumero: string | null;
-  fotos: string[];
+  fotos: StoredImage[];
   createdAt: string | null;
 };
 type InspectionContext = { maintainer: MaintainerInfo; machine: MachineInfo; template: TemplateInfo; openIssues: IssueRecord[] };
@@ -797,7 +799,7 @@ export default function InspectionPage() {
     const map = new Map<string, IssueRecord>();
     for (const issue of context?.openIssues ?? []) {
       if (issue.templateItemId) {
-        map.set(issue.templateItemId, { ...issue, fotos: Array.isArray(issue.fotos) ? issue.fotos : [] });
+        map.set(issue.templateItemId, { ...issue, fotos: normalizeStoredImages(issue.fotos ?? []) });
       }
     }
     return map;
@@ -1237,13 +1239,13 @@ export default function InspectionPage() {
                           {issue.fotos.map((foto, index) => (
                             <a
                               key={`${issue.id}-list-foto-${index}`}
-                              href={foto}
+                              href={foto.url}
                               target="_blank"
                               rel="noreferrer"
                               className="block overflow-hidden rounded border border-blue-200"
                             >
                               <Image
-                                src={foto}
+                                src={foto.url}
                                 alt={`Foto da NC anterior`}
                                 width={96}
                                 height={72}
@@ -1383,13 +1385,13 @@ export default function InspectionPage() {
                           {issue.fotos.map((foto, index) => (
                             <a
                               key={`${issue.id}-list-foto-${index}`}
-                              href={foto}
+                              href={foto.url}
                               target="_blank"
                               rel="noreferrer"
                               className="block overflow-hidden rounded border border-blue-200"
                             >
                               <Image
-                                src={foto}
+                                src={foto.url}
                                 alt={`Foto da NC anterior`}
                                 width={96}
                                 height={72}
@@ -1474,13 +1476,13 @@ export default function InspectionPage() {
                                 {issue.fotos.map((foto, fotoIdx) => (
                                   <a
                                     key={`${issue.id}-foto-${fotoIdx}`}
-                                    href={foto}
+                                    href={foto.url}
                                     target="_blank"
                                     rel="noreferrer"
                                     className="block overflow-hidden rounded border border-amber-200"
                                   >
                                     <Image
-                                      src={foto}
+                                      src={foto.url}
                                       alt={`Foto da NC anterior - ${label}`}
                                       width={96}
                                       height={72}

@@ -24,7 +24,9 @@ import type {
   ChecklistAnswer,
   ChecklistNonConformityTreatment,
   NonConformityStatus,
+  StoredImage,
 } from "@/types";
+import { normalizeStoredImages } from "@/lib/storage/images";
 
 interface MachineOption {
   id: string;
@@ -61,7 +63,7 @@ interface NonConformityItem {
   operatorNome: string | null;
   operatorMatricula: string | null;
   observation: string | null;
-  photos: string[];
+  photos: StoredImage[];
   itemOsNumero: string | null;
   status: NonConformityStatus;
   summary: string;
@@ -109,7 +111,7 @@ function normalizeAnswers(
           `Item ${item.questionId}`,
         response: item.response === "nc" || item.response === "na" ? item.response : "c",
         observation: item.observation ?? null,
-        photoUrls: Array.isArray(item.photoUrls) ? item.photoUrls.filter(Boolean) : [],
+        photoUrls: normalizeStoredImages(item.photoUrls ?? []),
         recurrence: item.recurrence === true,
         itemOsNumero: item.itemOsNumero ?? null,
       }));
@@ -132,7 +134,7 @@ function normalizeAnswers(
           (typeof item.componente === "string" ? item.componente : `Item ${questionId}`),
         response,
         observation: typeof item.observacaoItem === "string" ? item.observacaoItem : null,
-        photoUrls: Array.isArray(item.fotos) ? item.fotos.filter(Boolean).map(String) : [],
+        photoUrls: normalizeStoredImages(item.fotos ?? []),
         recurrence: false,
         itemOsNumero: typeof item.osNumeroItem === "string" && item.osNumeroItem.trim()
           ? item.osNumeroItem.trim().toUpperCase()
@@ -260,7 +262,7 @@ export default function AdminNonConformitiesPage() {
               operatorNome: maintainer.nome ? String(maintainer.nome) : null,
               operatorMatricula: maintainer.matricula ? String(maintainer.matricula) : null,
               observation: answer.observation ?? null,
-              photos: Array.isArray(answer.photoUrls) ? answer.photoUrls.filter(Boolean) : [],
+              photos: normalizeStoredImages(answer.photoUrls ?? []),
               itemOsNumero: answer.itemOsNumero ?? null,
               status: treatment?.status ?? "open",
               summary: treatment?.summary ?? "",
@@ -505,7 +507,7 @@ export default function AdminNonConformitiesPage() {
                               className="overflow-hidden rounded-lg border border-[var(--border)] bg-white"
                             >
                               <Image
-                                src={photo}
+                                src={photo.url}
                                 alt={`Foto da não conformidade ${index + 1}`}
                                 width={160}
                                 height={120}
