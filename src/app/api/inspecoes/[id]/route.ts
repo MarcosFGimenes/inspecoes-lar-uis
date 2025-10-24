@@ -12,6 +12,7 @@ import type {
   ChecklistNonConformityTreatment,
   ChecklistResponse,
   NonConformityStatus,
+  StoredImage,
 } from "@/types";
 import type { QueryDocumentSnapshot, DocumentData } from "firebase-admin/firestore";
 
@@ -25,6 +26,12 @@ const itemPhotoSchema = z.union([
   z.object({
     dataUrl: z.string().trim().min(1),
     name: z.string().trim().optional(),
+  }),
+  z.object({
+    url: z.string().trim().min(1),
+    provider: z.enum(["r2", "imgbb"]).optional(),
+    mime: z.string().trim().optional(),
+    key: z.string().trim().optional(),
   }),
 ]);
 
@@ -84,7 +91,10 @@ function normalizeAnswers(data: Record<string, unknown>, templateItemsMap: Map<s
       .map(item => ({
         questionId: item.questionId,
         questionText:
-          item.questionText ?? templateItemsMap.get(item.questionId)?.oQueChecar ?? templateItemsMap.get(item.questionId)?.criterio ?? null,
+          item.questionText ??
+          templateItemsMap.get(item.questionId)?.oQueChecar ??
+          templateItemsMap.get(item.questionId)?.criterio ??
+          null,
         response: item.response === "nc" || item.response === "na" ? item.response : "c",
         observation: item.observation ?? null,
         photoUrls: ensureStoredPhotos(item.photoUrls),
@@ -263,7 +273,8 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
     }
 
     if (payload.assinaturaDataUrl) {
-      const upload = await uploadToImgbbFromDataUrl(payload.assinaturaDataUrl, `pcm-sign-${id}`);
+      const { buffer, mime } = fromDataUrl(payload.assinaturaDataUrl);
+      const upload = await r2Provider.upload(buffer, mime, `pcm-sign-${id}`, `inspecoes/${id}`);
       updates.pcmSign = {
         ...(inspection.pcmSign ?? {}),
         assinaturaUrl: upload.url,

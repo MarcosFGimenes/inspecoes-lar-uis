@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase-admin";
 import { requireAdminFromRequest } from "@/lib/guards";
-import { uploadToImgbbFromDataUrl } from "@/lib/imgbb";
+import { fromDataUrl } from "@/lib/storage/dataUrl";
+import { r2Provider } from "@/lib/storage/r2Provider";
 import { isPcmProfileId } from "@/lib/signature-profiles";
 
 export const runtime = "nodejs";
@@ -64,7 +65,8 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
       }
       assinaturaUrl = profileUrl;
     } else {
-      const upload = await uploadToImgbbFromDataUrl(assinaturaDataUrl, `pcm-sign-${id}`);
+      const { buffer, mime } = fromDataUrl(assinaturaDataUrl);
+      const upload = await r2Provider.upload(buffer, mime, `pcm-sign-${id}`, `inspecoes/${id}`);
       assinaturaUrl = upload.url;
     }
 

@@ -26,6 +26,7 @@ import {
 import type { ChecklistAnswer } from "@/types";
 import { ensureStoredPhotos, photosToUrls } from "@/lib/photos";
 import { cn } from "@/lib/cn";
+import { normalizeStoredImages } from "@/lib/storage/images";
 
 interface InspectionListItem {
   id: string;
@@ -42,7 +43,7 @@ interface InspectionListItem {
   signed: boolean;
   signedAt: string | null;
   pcmNome: string | null;
-  ncItems: Array<{ questionId: string; questionText: string | null; osNumero: string | null; photoUrls: string[] }>;
+  ncItems: Array<{ questionId: string; questionText: string | null; osNumero: string | null; photoUrls: StoredImage[] }>;
 }
 
 function formatDateTime(value: string | null) {

@@ -243,7 +243,8 @@ export async function POST(req: NextRequest) {
     } else if (payload.assinaturaDataUrl) {
       const assinaturaDataUrl = ensureDataUrl(payload.assinaturaDataUrl, "ASSINATURA");
       const assinaturaName = buildUploadName(["sign", inspectionId]);
-      const upload = await uploadToImgbbFromDataUrl(assinaturaDataUrl, assinaturaName);
+      const { buffer, mime } = fromDataUrl(assinaturaDataUrl);
+      const upload = await r2Provider.upload(buffer, mime, assinaturaName, `inspecoes/${inspectionId}`);
       assinaturaUrl = upload.url;
     }
 

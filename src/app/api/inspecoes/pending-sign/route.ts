@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase-admin";
 import { requireAdminFromRequest } from "@/lib/guards";
+import { normalizeStoredImages } from "@/lib/storage/images";
 import type { ChecklistAnswer } from "@/types";
 import { ensureStoredPhotos } from "@/lib/photos";
 
