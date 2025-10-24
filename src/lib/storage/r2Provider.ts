@@ -59,6 +59,12 @@ function sanitizeName(name: string) {
     .slice(0, 120);
 }
 
+interface MimeWithExtension {
+  getExtension(type: string): string | null;
+}
+
+const mimeWithExtension = mime as unknown as MimeWithExtension;
+
 function pickExtension(mimeType: string, fileName?: string) {
   if (fileName) {
     const parts = fileName.split(".");
@@ -69,7 +75,7 @@ function pickExtension(mimeType: string, fileName?: string) {
       }
     }
   }
-  return mime.extension(mimeType) ?? undefined;
+  return mimeWithExtension.getExtension(mimeType) ?? undefined;
 }
 
 function buildKey(prefix: string | undefined, fileName: string | undefined, mimeType: string) {
