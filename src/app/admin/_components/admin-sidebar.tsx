@@ -35,6 +35,11 @@ const navItems: AdminNavItem[] = [
     icon: "fas fa-calendar-check",
   },
   {
+    href: "/admin/manutencoes",
+    label: "Programar manutenção",
+    icon: "fas fa-screwdriver-wrench",
+  },
+  {
     href: "/admin/nc",
     label: "Tratativas",
     icon: "fas fa-exclamation-triangle",

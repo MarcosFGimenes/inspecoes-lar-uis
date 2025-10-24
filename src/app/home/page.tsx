@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -49,6 +50,25 @@ type ProgramacaoRecord = {
   status: string | null;
 };
 
+type MaintenanceSummary = {
+  id: string;
+  pendencia: string;
+  status: string;
+  origem: "NC" | "MANUAL" | string;
+  prazo: string | null;
+  updatedAt: string | null;
+  nc: {
+    machineTag: string | null;
+    machineName: string | null;
+  } | null;
+};
+
+const MAINT_STATUS_LABELS: Record<string, { label: string; variant: "default" | "warning" | "success" }> = {
+  PENDENTE: { label: "Pendente", variant: "default" },
+  EM_ANDAMENTO: { label: "Em andamento", variant: "warning" },
+  CONCLUIDA: { label: "Concluída", variant: "success" },
+};
+
 export default function MaintHomeStartPage() {
   const router = useRouter();
 
@@ -63,6 +83,10 @@ export default function MaintHomeStartPage() {
   const [programacoesLoading, setProgramacoesLoading] = useState(true);
   const [programacoesError, setProgramacoesError] = useState<string | null>(null);
   const [programacoes, setProgramacoes] = useState<ProgramacaoRecord[]>([]);
+
+  const [maintenanceLoading, setMaintenanceLoading] = useState(true);
+  const [maintenanceError, setMaintenanceError] = useState<string | null>(null);
+  const [maintenance, setMaintenance] = useState<MaintenanceSummary[]>([]);
 
   const [searchTag, setSearchTag] = useState("");
   const [logoutLoading, setLogoutLoading] = useState(false);
@@ -202,6 +226,77 @@ export default function MaintHomeStartPage() {
   }, [session]);
 
   useEffect(() => {
+    if (!session) {
+      setMaintenance([]);
+      setMaintenanceError(null);
+      setMaintenanceLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    async function loadMaintenance() {
+      setMaintenanceLoading(true);
+      setMaintenanceError(null);
+      try {
+        const response = await fetch("/api/me/manutencoes", { cache: "no-store" });
+        if (response.status === 401) {
+          window.location.href = "/login";
+          return;
+        }
+        if (!response.ok) {
+          const payload = await response.json().catch(() => null);
+          throw new Error(payload?.error ?? "Falha ao carregar programação de manutenção");
+        }
+        const data = (await response.json()) as Array<Record<string, unknown>>;
+        if (!cancelled) {
+          const items: MaintenanceSummary[] = data.map(item => ({
+            id: typeof item.id === "string" ? item.id : String(item.id ?? ""),
+            pendencia: typeof item.pendencia === "string" ? item.pendencia : "",
+            status: typeof item.status === "string" ? item.status : "PENDENTE",
+            origem: item.origem === "NC" ? "NC" : "MANUAL",
+            prazo: typeof item.prazo === "string" ? item.prazo : null,
+            updatedAt:
+              typeof item.updatedAt === "string"
+                ? item.updatedAt
+                : typeof item.createdAt === "string"
+                ? item.createdAt
+                : null,
+            nc:
+              item.nc && typeof item.nc === "object"
+                ? {
+                    machineTag:
+                      typeof (item.nc as Record<string, unknown>).machineTag === "string"
+                        ? String((item.nc as Record<string, unknown>).machineTag)
+                        : null,
+                    machineName:
+                      typeof (item.nc as Record<string, unknown>).machineName === "string"
+                        ? String((item.nc as Record<string, unknown>).machineName)
+                        : null,
+                  }
+                : null,
+          }));
+          setMaintenance(items);
+        }
+      } catch (err: unknown) {
+        if (!cancelled) {
+          const message = err instanceof Error && err.message ? err.message : "Falha ao carregar programação";
+          setMaintenanceError(message);
+          setMaintenance([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setMaintenanceLoading(false);
+        }
+      }
+    }
+
+    loadMaintenance();
+    return () => {
+      cancelled = true;
+    };
+  }, [session]);
+
+  useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
     setInspectionSaved(params.get("ok") === "1");
@@ -217,6 +312,12 @@ export default function MaintHomeStartPage() {
     const matricula = session.matricula?.trim();
     return matricula && matricula.length > 0 ? matricula : "mantenedor";
   }, [session]);
+
+  const maintenancePreview = useMemo(() => maintenance.slice(0, 3), [maintenance]);
+  const maintenanceOpenCount = useMemo(
+    () => maintenance.filter(item => item.status !== "CONCLUIDA").length,
+    [maintenance]
+  );
 
   const handleSearch = useCallback(() => {
     const trimmed = searchTag.trim();
@@ -382,6 +483,80 @@ export default function MaintHomeStartPage() {
                 </article>
               );
             })}
+          </div>
+        )}
+      </section>
+
+      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">Sua programação de manutenção</h2>
+            <p className="text-sm text-slate-500">Pendências designadas pelo PCM além das inspeções.</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
+            {maintenanceLoading ? (
+              <span className="text-slate-400">Carregando pendências...</span>
+            ) : (
+              <span>{maintenanceOpenCount} pendência(s) em aberto</span>
+            )}
+            <Link
+              href="/home/manutencoes"
+              className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-white shadow-sm transition hover:bg-slate-700"
+            >
+              Ver programação completa
+            </Link>
+          </div>
+        </div>
+
+        {maintenanceError ? (
+          <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {maintenanceError}
+          </div>
+        ) : maintenanceLoading ? (
+          <div className="mt-4 space-y-3">
+            {Array.from({ length: 2 }).map((_, index) => (
+              <div key={index} className="h-20 animate-pulse rounded-2xl bg-slate-100" />
+            ))}
+          </div>
+        ) : maintenance.length === 0 ? (
+          <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500 shadow-sm">
+            Nenhuma pendência de manutenção atribuída. Assim que o PCM programar algo, você verá aqui.
+          </div>
+        ) : (
+          <div className="mt-4 space-y-3">
+            {maintenancePreview.map(item => {
+              const badge = MAINT_STATUS_LABELS[item.status] ?? MAINT_STATUS_LABELS.PENDENTE;
+              return (
+                <div
+                  key={item.id}
+                  className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-blue-200 hover:shadow-md"
+                >
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <p className="text-base font-semibold text-slate-900">{item.pendencia}</p>
+                        <Badge variant={badge.variant}>{badge.label}</Badge>
+                        {item.origem === "NC" && <Badge variant="warning">NC</Badge>}
+                      </div>
+                      {item.nc?.machineTag || item.nc?.machineName ? (
+                        <p className="text-xs text-slate-500">
+                          {item.nc?.machineTag ? `${item.nc.machineTag} • ` : ""}
+                          {item.nc?.machineName ?? "Máquina"}
+                        </p>
+                      ) : null}
+                    </div>
+                    <div className="text-xs text-slate-500">
+                      Prazo: {formatDate(item.prazo)}
+                      <br />
+                      Atualizado em {formatDate(item.updatedAt)}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+            {maintenance.length > maintenancePreview.length && (
+              <p className="text-xs text-slate-400">Você tem mais pendências aguardando. Veja a programação completa.</p>
+            )}
           </div>
         )}
       </section>

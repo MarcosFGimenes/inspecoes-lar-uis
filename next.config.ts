@@ -39,7 +39,7 @@ const nextConfig: NextConfig = {
 
     try {
       require.resolve("@aws-sdk/client-s3");
-    } catch (error) {
+    } catch {
       // Provide a build-time stub so environments without the SDK can still compile.
       alias["@aws-sdk/client-s3"] = path.resolve(
         __dirname,
