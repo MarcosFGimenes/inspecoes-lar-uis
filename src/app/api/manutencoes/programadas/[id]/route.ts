@@ -6,13 +6,24 @@ import { requireAdminFromRequest } from "@/lib/guards";
 
 import { mapDoc, normalizeIsoDate, updateSchema } from "../route";
 
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+type RouteContext = { params: Promise<{ id?: string | string[] }> };
+
+function resolveId(params: { id?: string | string[] } | null | undefined) {
+  if (!params) return null;
+  const value = params.id;
+  if (Array.isArray(value)) {
+    return value[0] ?? null;
+  }
+  return value ?? null;
+}
+
+export async function PATCH(req: NextRequest, context: RouteContext) {
   const authorized = await requireAdminFromRequest(req);
   if (!authorized) {
     return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 });
   }
 
-  const id = params?.id;
+  const id = resolveId(await context.params);
   if (!id) {
     return NextResponse.json({ error: "MISSING_ID" }, { status: 400 });
   }
