@@ -11,7 +11,7 @@ declare module "@aws-sdk/client-s3" {
 
   export class S3Client {
     constructor(config: S3ClientConfig);
-    send<T>(command: T): Promise<any>;
+    send<TInput, TOutput = unknown>(command: TInput): Promise<TOutput>;
   }
 
   export class PutObjectCommand {

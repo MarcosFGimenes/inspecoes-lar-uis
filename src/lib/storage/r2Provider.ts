@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import mime from "mime";
 
-import { r2 } from "./r2Client";
+import { getR2Client } from "./r2Client";
 import type { StoredImage } from "@/types/images";
 
 export interface UploadedImage extends StoredImage {
@@ -16,18 +16,39 @@ export interface StorageProvider {
   getPublicUrl(key: string): string;
 }
 
-const bucket = process.env.R2_BUCKET;
-const baseUrl = process.env.R2_PUBLIC_BASE_URL;
-
-if (!bucket) {
-  throw new Error("R2_BUCKET env var is required for R2 uploads");
+function readEnv(name: string): string | undefined {
+  const value = process.env[name];
+  return value && value.length > 0 ? value : undefined;
 }
 
-if (!baseUrl) {
-  throw new Error("R2_PUBLIC_BASE_URL env var is required for R2 uploads");
+function requireEnv(name: string): string {
+  const value = readEnv(name);
+  if (!value) {
+    throw new Error(`${name} env var is required for R2 uploads`);
+  }
+  return value;
 }
 
-const normalizedBaseUrl = baseUrl.replace(/\/+$/, "");
+let normalizedBaseUrl: string | null = null;
+
+function getNormalizedBaseUrl() {
+  if (normalizedBaseUrl) {
+    return normalizedBaseUrl;
+  }
+  const baseUrl = requireEnv("R2_PUBLIC_BASE_URL");
+  normalizedBaseUrl = baseUrl.replace(/\/+$/, "");
+  return normalizedBaseUrl;
+}
+
+let cachedBucket: string | null = null;
+
+function getBucket() {
+  if (cachedBucket) {
+    return cachedBucket;
+  }
+  cachedBucket = requireEnv("R2_BUCKET");
+  return cachedBucket;
+}
 
 function sanitizeName(name: string) {
   return name
@@ -72,9 +93,9 @@ export const r2Provider: StorageProvider = {
   async upload(buffer, mimeType, fileName, prefix) {
     const key = buildKey(prefix, fileName, mimeType);
 
-    await r2.send(
+    await getR2Client().send(
       new PutObjectCommand({
-        Bucket: bucket,
+        Bucket: getBucket(),
         Key: key,
         Body: buffer,
         ContentType: mimeType,
@@ -85,7 +106,7 @@ export const r2Provider: StorageProvider = {
   },
 
   getPublicUrl(key: string) {
-    return `${normalizedBaseUrl}/${encodeKeyForUrl(key)}`;
+    return `${getNormalizedBaseUrl()}/${encodeKeyForUrl(key)}`;
   },
 };
 
