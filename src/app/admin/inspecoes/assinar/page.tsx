@@ -14,6 +14,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Select } from "@/components/ui/select";
 import SignatureCanvas, { SignatureCanvasInstance } from "@/components/signature-canvas-client";
 import { cn } from "@/lib/cn";
+import { ensureStoredPhotos, photosToUrls } from "@/lib/photos";
 import type { ChecklistAnswer, ChecklistResponse } from "@/types";
 
 interface PendingSignInspection {
@@ -263,16 +264,18 @@ function SignatureModal({
                     />
                   ) : (
                     <div className="space-y-3">
-                      {answers.map(answer => (
-                        <div
-                          key={answer.questionId}
-                          className={cn(
-                            "rounded-lg border p-4",
-                            answer.response === "nc"
-                              ? "border-[var(--danger)] bg-[color-mix(in_oklab,var(--danger),#fff_92%)]"
-                              : "border-[var(--border)] bg-white"
-                          )}
-                        >
+                      {answers.map(answer => {
+                        const answerPhotos = photosToUrls(ensureStoredPhotos(answer.photoUrls));
+                        return (
+                          <div
+                            key={answer.questionId}
+                            className={cn(
+                              "rounded-lg border p-4",
+                              answer.response === "nc"
+                                ? "border-[var(--danger)] bg-[color-mix(in_oklab,var(--danger),#fff_92%)]"
+                                : "border-[var(--border)] bg-white"
+                            )}
+                          >
                           <div className="flex flex-wrap items-center justify-between gap-3">
                             <p className="text-sm font-medium text-[var(--text)]">
                               {answer.questionText ?? `Item ${answer.questionId}`}
@@ -296,9 +299,9 @@ function SignatureModal({
                               Nº da O.S. do item: <span className="font-medium text-[var(--text)]">{answer.itemOsNumero}</span>
                             </p>
                           ) : null}
-                          {Array.isArray(answer.photoUrls) && answer.photoUrls.length > 0 ? (
+                          {answerPhotos.length > 0 ? (
                             <div className="mt-3 flex flex-wrap gap-2">
-                              {answer.photoUrls.map((url, index) => (
+                              {answerPhotos.map((url, index) => (
                                 <a
                                   key={`${answer.questionId}-photo-${index}`}
                                   href={url}
@@ -319,7 +322,8 @@ function SignatureModal({
                             </div>
                           ) : null}
                         </div>
-                      ))}
+                      );
+                      })}
                     </div>
                   )}
                 </div>

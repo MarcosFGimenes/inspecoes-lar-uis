@@ -6,12 +6,17 @@ import { adminDb } from "@/lib/firebase-admin";
 import { findMachineByTag } from "@/lib/db/machines";
 import { requireMaint } from "@/lib/guards";
 import { uploadToImgbbFromDataUrl } from "@/lib/imgbb";
+import type { StoredPhoto } from "@/lib/photos";
 import { randomUUID } from "crypto";
 import type { ChecklistAnswer, ChecklistNonConformityTreatment } from "@/types";
 import { isMaintainerProfileId } from "@/lib/signature-profiles";
+import { propagateSeverityToWO } from "@/lib/adapters/dataAdapter";
+import type { Severity } from "@/types/severity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const severitySchema = z.union([z.number().int().min(1).max(6), z.null()]);
 
 const payloadSchema = z.object({
   tag: z.string().trim().min(1),
@@ -30,6 +35,7 @@ const payloadSchema = z.object({
         observacaoItem: z.string().trim().optional(),
         fotos: z.array(z.string().trim().min(1)).max(3).optional(),
         osNumeroItem: z.string().trim().min(1).optional(),
+        criticidade: severitySchema.optional(),
       })
     )
     .min(1),
@@ -245,8 +251,9 @@ export async function POST(req: NextRequest) {
       templateItemId: string;
       resultado: "C" | "NC" | "NA";
       observacaoItem: string | null;
-      fotos: string[];
+      fotos: StoredPhoto[];
       osNumeroItem: string | null;
+      criticidade: Severity | null;
     }> = [];
     const answersPayload: ChecklistAnswer[] = [];
     const treatmentsPayload: ChecklistNonConformityTreatment[] = [];
@@ -261,7 +268,22 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "ITEM_OS_REQUIRED" }, { status: 422 });
       }
       const fotosBase64 = item.fotos ? item.fotos.slice(0, 3) : [];
-      const fotoUrls: string[] = [];
+      const criticidade = (typeof item.criticidade === "number" && item.criticidade >= 1 && item.criticidade <= 6
+        ? (Math.trunc(item.criticidade) as Severity)
+        : null);
+      if (item.resultado === "NC" && !criticidade) {
+        return NextResponse.json({ error: "ITEM_SEVERITY_REQUIRED" }, { status: 422 });
+      }
+      const severitySnapshot = criticidade
+        ? {
+            maintainer: criticidade,
+            maintainerAt: nowIso,
+            signer: null,
+            signerAt: null,
+            effective: criticidade,
+          }
+        : undefined;
+      const fotoUploads: StoredPhoto[] = [];
       for (let index = 0; index < fotosBase64.length; index += 1) {
         const dataUrl = ensureDataUrl(fotosBase64[index]!, `ITEM_FOTO_${index + 1}`);
         const uploadName = buildUploadName([
@@ -271,14 +293,15 @@ export async function POST(req: NextRequest) {
           `foto-${index + 1}`,
         ]);
         const upload = await uploadToImgbbFromDataUrl(dataUrl, uploadName);
-        fotoUrls.push(upload.url);
+        fotoUploads.push(upload);
       }
       itensPayload.push({
         templateItemId: item.templateItemId,
         resultado: item.resultado,
         observacaoItem: item.observacaoItem?.trim() ? item.observacaoItem.trim() : null,
-        fotos: fotoUrls,
+        fotos: fotoUploads,
         osNumeroItem,
+        criticidade,
       });
 
       const templateItem = templateMap.get(item.templateItemId) ?? {};
@@ -288,8 +311,9 @@ export async function POST(req: NextRequest) {
         questionText: templateItem.oQueChecar ?? templateItem.criterio ?? templateItem.componente ?? null,
         response,
         observation: item.observacaoItem?.trim() ? item.observacaoItem.trim() : null,
-        photoUrls: fotoUrls,
+        photoUrls: fotoUploads,
         itemOsNumero: osNumeroItem,
+        severity: severitySnapshot,
       });
 
       if (response === "nc") {
@@ -297,6 +321,7 @@ export async function POST(req: NextRequest) {
           questionId: item.templateItemId,
           status: "open",
           createdAt: nowIso,
+          severity: severitySnapshot,
         });
       }
     }
@@ -339,8 +364,25 @@ export async function POST(req: NextRequest) {
         if (novaDescricao && existingIssue.data()?.descricao !== novaDescricao) {
           issueUpdates.descricao = novaDescricao;
         }
+        if (item.criticidade && (!existingIssue.data()?.severity?.maintainer || existingIssue.data()?.severity?.maintainer !== item.criticidade)) {
+          issueUpdates.severity = {
+            maintainer: item.criticidade,
+            maintainerAt: nowTimestamp,
+            effective: existingIssue.data()?.severity?.signer ?? item.criticidade,
+            signer: existingIssue.data()?.severity?.signer ?? null,
+            signerAt: existingIssue.data()?.severity?.signerAt ?? null,
+            audit: {
+              role: "maint",
+              id: auth.store.id ?? null,
+              updatedAt: nowTimestamp,
+            },
+          };
+        }
         if (Object.keys(issueUpdates).length > 0) {
           await existingIssue.ref.update(issueUpdates);
+          if (item.criticidade) {
+            await propagateSeverityToWO(existingIssue.id);
+          }
         }
         continue;
       }
@@ -348,6 +390,20 @@ export async function POST(req: NextRequest) {
       const templateItem = templateMap.get(item.templateItemId) ?? {};
       const descricao = item.observacaoItem || buildIssueDescription(templateItem, "NC identificada na inspeção");
       const issueRef = adminDb.collection("issues").doc();
+      const severityState = item.criticidade
+        ? {
+            maintainer: item.criticidade,
+            maintainerAt: nowTimestamp,
+            signer: null,
+            signerAt: null,
+            effective: item.criticidade,
+            audit: {
+              role: "maint" as const,
+              id: auth.store.id ?? null,
+              updatedAt: nowTimestamp,
+            },
+          }
+        : null;
       await issueRef.set({
         machineId: machineRecord.id,
         tag: machineRecord.tag ?? null,
@@ -358,8 +414,23 @@ export async function POST(req: NextRequest) {
         status: "aberta",
         abertaEmInspecaoId: inspectionId,
         createdAt: nowIso,
+        ...(severityState
+          ? {
+              severity: {
+                maintainer: severityState.maintainer,
+                maintainerAt: severityState.maintainerAt,
+                signer: severityState.signer,
+                signerAt: severityState.signerAt,
+                effective: severityState.effective,
+                audit: severityState.audit,
+              },
+            }
+          : {}),
       });
       issuesCriadas.push(issueRef.id);
+      if (severityState) {
+        await propagateSeverityToWO(issueRef.id, severityState);
+      }
     }
 
     const resolveIssuesIds = payload.resolveIssues ?? [];

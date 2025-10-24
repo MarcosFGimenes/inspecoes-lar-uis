@@ -1,13 +1,27 @@
 export type NonConformityStatus = "open" | "in_progress" | "resolved";
 
+import type { SeverityState } from "./severity";
+
+export type PhotoProvider = "imgbb" | "postimages" | "cloudflare-r2" | string;
+
+export interface ChecklistPhoto {
+  url: string;
+  display_url?: string | null;
+  provider?: PhotoProvider;
+  mime?: string | null;
+  delete_url?: string | null;
+  storage_key?: string | null;
+}
+
 export interface ChecklistAnswer {
   questionId: string;
   questionText?: string | null;
   response: "c" | "nc" | "na";
   observation?: string | null;
-  photoUrls?: string[];
+  photoUrls?: ChecklistPhoto[];
   recurrence?: boolean;
   itemOsNumero?: string | null;
+  severity?: SeverityState;
 }
 
 export interface ChecklistNonConformityTreatment {
@@ -18,6 +32,7 @@ export interface ChecklistNonConformityTreatment {
   status: NonConformityStatus;
   createdAt: string;
   updatedAt?: string | null;
+  severity?: SeverityState;
 }
 
 export interface ChecklistResponseMaintainer {

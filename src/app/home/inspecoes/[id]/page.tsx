@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import type { ChecklistAnswer } from "@/types";
+import { ensureStoredPhotos, photosToUrls } from "@/lib/photos";
 
 type InspectionAnswer = Omit<ChecklistAnswer, "questionText" | "observation" | "photoUrls" | "itemOsNumero"> & {
   questionText: string | null;
@@ -89,9 +90,7 @@ export default function MaintInspectionDetailPage() {
             return acc;
           }
           const response: "c" | "nc" | "na" = answer?.response === "nc" ? "nc" : answer?.response === "na" ? "na" : "c";
-          const photoUrls = Array.isArray(answer?.photoUrls)
-            ? answer.photoUrls.filter((url): url is string => typeof url === "string" && url.trim().length > 0)
-            : [];
+          const photoUrls = photosToUrls(ensureStoredPhotos(answer?.photoUrls));
           const itemOsNumero = typeof answer?.itemOsNumero === "string" && answer.itemOsNumero.trim().length > 0
             ? answer.itemOsNumero.trim()
             : null;

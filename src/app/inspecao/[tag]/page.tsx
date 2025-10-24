@@ -5,6 +5,10 @@ import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import type { SignatureCanvasInstance } from "@/components/signature-canvas-client";
+import { CriticidadeSelector } from "@/components/criticidade-selector";
+import { CriticidadeBadge } from "@/components/criticidade-badge";
+import { ensureStoredPhotos, photosToUrls } from "@/lib/photos";
+import type { Severity, SeverityState } from "@/types/severity";
 
 type SignatureCanvasComponent = typeof import("@/components/signature-canvas-client").default;
 const SignatureCanvas = dynamic(() => import("@/components/signature-canvas-client"), { ssr: false }) as unknown as SignatureCanvasComponent;
@@ -27,6 +31,8 @@ type IssueRecord = {
   osNumero: string | null;
   fotos: string[];
   createdAt: string | null;
+  severity?: SeverityState | null;
+  effectiveSeverity?: Severity | null;
 };
 type InspectionContext = { maintainer: MaintainerInfo; machine: MachineInfo; template: TemplateInfo; openIssues: IssueRecord[] };
 
@@ -44,6 +50,7 @@ type ItemFormState = {
   osNumero: string;
   fotos: ItemPhotoState[];
   fileKey: number;
+  criticidade: Severity | null;
 };
 type FeedbackState = { type: "success" | "error"; message: string };
 type DraftItemPhotoState = { dataUrl: string; name?: string | null };
@@ -53,6 +60,7 @@ type DraftItemState = {
   observacao: string;
   osNumero: string;
   fotos: DraftItemPhotoState[];
+  criticidade: number | null;
 };
 type DraftDataState = {
   osNumero: string;
@@ -175,6 +183,13 @@ function createPhotoId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+function coerceSeverity(value: unknown): Severity | null {
+  if (typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 6) {
+    return value as Severity;
+  }
+  return null;
+}
+
 /* ===== Botão C/NC/N/A no novo visual (mantém handlers) ===== */
 function ChoiceBtn({
   active, tone, children, onClick, ariaLabel,
@@ -287,6 +302,7 @@ export default function InspectionPage() {
       osNumero: osBloqueado ?? "",
       fotos: [],
       fileKey: Date.now(),
+      criticidade: null,
     }),
     [osBloqueado],
   );
@@ -455,6 +471,7 @@ export default function InspectionPage() {
           osNumero: lockedOsValue ?? saved?.osNumero?.trim().toUpperCase() ?? "",
           fotos,
           fileKey: now + idx,
+          criticidade: coerceSeverity(saved?.criticidade),
         };
       });
       setItemsState(base);
@@ -507,6 +524,7 @@ export default function InspectionPage() {
               dataUrl: String(foto.dataUrl),
               name: foto?.name?.trim() ? foto.name.trim() : null,
             })),
+            criticidade: coerceSeverity(saved?.criticidade),
           };
         });
       const normalizedPayload: DraftDataState = {
@@ -615,6 +633,7 @@ export default function InspectionPage() {
         observacao,
         osNumero: osNumeroItem,
         fotos,
+        criticidade: st?.criticidade ?? null,
       });
     });
     const resolveIds = Object.entries(resolveIssues)
@@ -797,7 +816,7 @@ export default function InspectionPage() {
     const map = new Map<string, IssueRecord>();
     for (const issue of context?.openIssues ?? []) {
       if (issue.templateItemId) {
-        map.set(issue.templateItemId, { ...issue, fotos: Array.isArray(issue.fotos) ? issue.fotos : [] });
+        map.set(issue.templateItemId, { ...issue, fotos: photosToUrls(ensureStoredPhotos(issue.fotos)) });
       }
     }
     return map;
@@ -824,12 +843,18 @@ export default function InspectionPage() {
     (itemId: string, value: "C" | "NC" | "NA") => {
       setItemsState(prev => {
         const previous = prev[itemId] ?? createEmptyItemState();
+        const nextState: ItemFormState = {
+          ...previous,
+          resultado: value,
+        };
+        if (value === "NC") {
+          nextState.criticidade = previous.criticidade ?? (3 as Severity);
+        } else {
+          nextState.criticidade = null;
+        }
         return {
           ...prev,
-          [itemId]: {
-            ...previous,
-            resultado: value,
-          },
+          [itemId]: nextState,
         };
       });
     },
@@ -867,6 +892,25 @@ export default function InspectionPage() {
       });
     },
     [createEmptyItemState, osBloqueado]
+  );
+
+  const handleCriticidadeChange = useCallback(
+    (itemId: string, value: Severity) => {
+      setItemsState(prev => {
+        const previous = prev[itemId] ?? createEmptyItemState();
+        if (previous.criticidade === value) {
+          return prev;
+        }
+        return {
+          ...prev,
+          [itemId]: {
+            ...previous,
+            criticidade: value,
+          },
+        };
+      });
+    },
+    [createEmptyItemState]
   );
 
   const handleFotosChange = useCallback(
@@ -961,6 +1005,7 @@ export default function InspectionPage() {
           observacaoItem?: string;
           fotos?: string[];
           osNumeroItem?: string;
+          criticidade?: Severity;
         }> = [];
         const lockedOsNumero = osBloqueado ?? null;
         for (const item of sortedItems) {
@@ -995,12 +1040,19 @@ export default function InspectionPage() {
             const normalized = fotosValues.filter((value): value is string => typeof value === "string" && value.trim().length > 0);
             fotosBase64 = normalized.length ? normalized : undefined;
           }
+          if (st.resultado === "NC" && !st.criticidade) {
+            setFeedback({ type: "error", message: "Informe a criticidade sugerida para cada item NC." });
+            setSaving(false);
+            setSavingAction(null);
+            return;
+          }
           payloadItems.push({
             templateItemId: item.id,
             resultado: st.resultado,
             observacaoItem: st.observacao.trim() || undefined,
             fotos: fotosBase64,
             osNumeroItem,
+            criticidade: st.resultado === "NC" && st.criticidade ? st.criticidade : undefined,
           });
         }
         if (!payloadItems.length) { setFeedback({ type: "error", message: "Template sem itens configurados." }); setSaving(false); setSavingAction(null); return; }
@@ -1229,6 +1281,9 @@ export default function InspectionPage() {
                         </p>
                       )}
                       {issue.osNumero && <p className="text-xs text-gray-500">Nº da O.S.: {issue.osNumero}</p>}
+                      {issue.severity ? (
+                        <CriticidadeBadge state={issue.severity} showStatus className="mt-1 inline-flex" />
+                      ) : null}
                       {issue.createdAt && (
                         <p className="text-xs text-gray-400">Aberta em {new Date(issue.createdAt).toLocaleString("pt-BR")}</p>
                       )}
@@ -1529,24 +1584,35 @@ export default function InspectionPage() {
                   </div>
 
                   {st?.resultado === "NC" && (
-                    <div className="mt-3 space-y-1">
-                      <label className="text-sm font-medium text-gray-700" htmlFor={`os-item-${item.id}`}>
-                        Nº da O.S. deste item
-                      </label>
-                      <input
-                        id={`os-item-${item.id}`}
-                        value={st?.osNumero ?? ""}
-                        onChange={event => handleItemOsNumeroChange(item.id!, event.target.value)}
-                        readOnly={Boolean(osBloqueado)}
-                        placeholder="Informe o número da O.S."
-                        className={`w-full rounded-md border border-gray-300 px-3 py-2 text-sm uppercase text-gray-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 ${osBloqueado ? "cursor-not-allowed bg-gray-100 text-gray-500" : "bg-white"}`}
-                      />
-                      <p className="text-xs text-gray-500">
-                        {osBloqueado
-                          ? "Número preenchido automaticamente a partir da programação."
-                          : "Obrigatório para itens marcados como não conformes."}
-                      </p>
-                    </div>
+                    <>
+                      <div className="mt-3 space-y-2">
+                        <p className="text-sm font-medium text-gray-700">Criticidade Sugerida (mantenedor)</p>
+                        <CriticidadeSelector
+                          value={st?.criticidade ?? null}
+                          onChange={value => handleCriticidadeChange(item.id!, value)}
+                          disabled={saving}
+                        />
+                        <p className="text-xs text-gray-500">1 = baixa, 5 = muito alta.</p>
+                      </div>
+                      <div className="mt-3 space-y-1">
+                        <label className="text-sm font-medium text-gray-700" htmlFor={`os-item-${item.id}`}>
+                          Nº da O.S. deste item
+                        </label>
+                        <input
+                          id={`os-item-${item.id}`}
+                          value={st?.osNumero ?? ""}
+                          onChange={event => handleItemOsNumeroChange(item.id!, event.target.value)}
+                          readOnly={Boolean(osBloqueado)}
+                          placeholder="Informe o número da O.S."
+                          className={`w-full rounded-md border border-gray-300 px-3 py-2 text-sm uppercase text-gray-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 ${osBloqueado ? "cursor-not-allowed bg-gray-100 text-gray-500" : "bg-white"}`}
+                        />
+                        <p className="text-xs text-gray-500">
+                          {osBloqueado
+                            ? "Número preenchido automaticamente a partir da programação."
+                            : "Obrigatório para itens marcados como não conformes."}
+                        </p>
+                      </div>
+                    </>
                   )}
 
                   {/* Fotos – área tracejada (mantendo seu handler) */}

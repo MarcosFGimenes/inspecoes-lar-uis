@@ -11,6 +11,8 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ensureStoredPhotos, photosToUrls } from "@/lib/photos";
+import type { ChecklistPhoto } from "@/types/checklists";
 
 interface TemplateItemData {
   id?: string;
@@ -27,7 +29,7 @@ interface ApiAnswer {
   questionText?: string | null;
   response: "c" | "nc" | "na";
   observation?: string | null;
-  photoUrls?: string[];
+  photoUrls?: ChecklistPhoto[];
   itemOsNumero?: string | null;
 }
 
@@ -208,7 +210,7 @@ export default function EditInspectionPage() {
           response,
           observation: answer?.observation ?? "",
           itemOsNumero: answer?.itemOsNumero ? String(answer.itemOsNumero).toUpperCase() : "",
-          existingPhotos: Array.isArray(answer?.photoUrls) ? answer!.photoUrls!.filter(Boolean) : [],
+          existingPhotos: photosToUrls(ensureStoredPhotos(answer?.photoUrls)),
           newPhotos: [],
         };
       });
@@ -228,7 +230,7 @@ export default function EditInspectionPage() {
             response: answer.response,
             observation: answer.observation ?? "",
             itemOsNumero: answer.itemOsNumero ? String(answer.itemOsNumero).toUpperCase() : "",
-            existingPhotos: Array.isArray(answer.photoUrls) ? answer.photoUrls.filter(Boolean) : [],
+            existingPhotos: photosToUrls(ensureStoredPhotos(answer.photoUrls)),
             newPhotos: [],
           });
         }

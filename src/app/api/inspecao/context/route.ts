@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
+
+import { parseSeverityState, getEffectiveSeverity } from "@/lib/adapters/dataAdapter";
 import { adminDb } from "@/lib/firebase-admin";
 import { findMachineByTag } from "@/lib/db/machines";
 import { requireMaint } from "@/lib/guards";
+import { ensureStoredPhotos, photosToUrls } from "@/lib/photos";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -68,13 +71,17 @@ export async function GET(req: NextRequest) {
 
     const openIssues = issuesSnap.docs.map(doc => {
       const data = doc.data() ?? {};
+      const severity = parseSeverityState(data.severity);
+      const effectiveSeverity = getEffectiveSeverity(severity);
       return {
         id: doc.id,
         templateItemId: data.templateItemId ?? null,
         descricao: data.descricao ?? null,
         osNumero: data.osNumero ?? null,
-        fotos: Array.isArray(data.fotos) ? data.fotos.filter(Boolean).map(String) : [],
+        fotos: photosToUrls(ensureStoredPhotos(data.fotos)),
         createdAt: data.createdAt ?? null,
+        severity,
+        effectiveSeverity,
       };
     });
 
