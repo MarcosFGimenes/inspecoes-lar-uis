@@ -2,12 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import type { ChecklistAnswer } from "@/types";
+import type { ChecklistAnswer, StoredImage } from "@/types";
+import { normalizeStoredImages } from "@/lib/storage/images";
 
 type InspectionAnswer = Omit<ChecklistAnswer, "questionText" | "observation" | "photoUrls" | "itemOsNumero"> & {
   questionText: string | null;
   observation: string | null;
-  photoUrls: string[];
+  photoUrls: StoredImage[];
   itemOsNumero: string | null;
 };
 
@@ -89,9 +90,7 @@ export default function MaintInspectionDetailPage() {
             return acc;
           }
           const response: "c" | "nc" | "na" = answer?.response === "nc" ? "nc" : answer?.response === "na" ? "na" : "c";
-          const photoUrls = Array.isArray(answer?.photoUrls)
-            ? answer.photoUrls.filter((url): url is string => typeof url === "string" && url.trim().length > 0)
-            : [];
+          const photoUrls = normalizeStoredImages(answer?.photoUrls ?? []);
           const itemOsNumero = typeof answer?.itemOsNumero === "string" && answer.itemOsNumero.trim().length > 0
             ? answer.itemOsNumero.trim()
             : null;
@@ -276,9 +275,14 @@ export default function MaintInspectionDetailPage() {
                   <div className="space-y-1 text-sm text-gray-700">
                     <p className="font-medium">Fotos anexadas:</p>
                     <ul className="list-inside list-disc space-y-1">
-                      {answer.photoUrls.map((url, index) => (
-                        <li key={url}>
-                          <a href={url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">
+                      {answer.photoUrls.map((photo, index) => (
+                        <li key={`${answer.questionId}-photo-${index}`}>
+                          <a
+                            href={photo.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-blue-600 hover:underline"
+                          >
                             Ver foto {index + 1}
                           </a>
                         </li>

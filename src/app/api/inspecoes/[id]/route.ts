@@ -2,12 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { adminDb } from "@/lib/firebase-admin";
 import { requireAdminFromRequest, requireMaint } from "@/lib/guards";
-import { uploadToImgbbFromDataUrl } from "@/lib/imgbb";
+import { fromDataUrl } from "@/lib/storage/dataUrl";
+import { normalizeStoredImages } from "@/lib/storage/images";
+import { r2Provider } from "@/lib/storage/r2Provider";
 import type {
   ChecklistAnswer,
   ChecklistNonConformityTreatment,
   ChecklistResponse,
   NonConformityStatus,
+  StoredImage,
 } from "@/types";
 import type { QueryDocumentSnapshot, DocumentData } from "firebase-admin/firestore";
 
@@ -21,6 +24,12 @@ const itemPhotoSchema = z.union([
   z.object({
     dataUrl: z.string().trim().min(1),
     name: z.string().trim().optional(),
+  }),
+  z.object({
+    url: z.string().trim().min(1),
+    provider: z.enum(["r2", "imgbb"]).optional(),
+    mime: z.string().trim().optional(),
+    key: z.string().trim().optional(),
   }),
 ]);
 
@@ -66,10 +75,17 @@ function normalizeAnswers(data: Record<string, unknown>, templateItemsMap: Map<s
       .map(item => ({
         questionId: item.questionId,
         questionText:
-          item.questionText ?? templateItemsMap.get(item.questionId)?.oQueChecar ?? templateItemsMap.get(item.questionId)?.criterio ?? null,
+          item.questionText ??
+          templateItemsMap.get(item.questionId)?.oQueChecar ??
+          templateItemsMap.get(item.questionId)?.criterio ??
+          null,
         response: item.response === "nc" || item.response === "na" ? item.response : "c",
         observation: item.observation ?? null,
-        photoUrls: Array.isArray(item.photoUrls) ? item.photoUrls.filter(Boolean) : [],
+        photoUrls: normalizeStoredImages(
+          (item as unknown as Record<string, unknown>).photoUrls ??
+            (item as unknown as Record<string, unknown>).photos ??
+            []
+        ),
         recurrence: item.recurrence ?? false,
         itemOsNumero: item.itemOsNumero ?? null,
       }));
@@ -88,7 +104,7 @@ function normalizeAnswers(data: Record<string, unknown>, templateItemsMap: Map<s
         questionText: templateItem.oQueChecar ?? templateItem.criterio ?? (typeof item.componente === "string" ? item.componente : null),
         response,
         observation: typeof item.observacaoItem === "string" ? item.observacaoItem : null,
-        photoUrls: Array.isArray(item.fotos) ? item.fotos.filter(Boolean).map(String) : [],
+        photoUrls: normalizeStoredImages(item.fotos ?? []),
         recurrence: false,
         itemOsNumero: typeof item.osNumeroItem === "string" && item.osNumeroItem.trim()
           ? item.osNumeroItem.trim().toUpperCase()
@@ -243,7 +259,8 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
     }
 
     if (payload.assinaturaDataUrl) {
-      const upload = await uploadToImgbbFromDataUrl(payload.assinaturaDataUrl, `pcm-sign-${id}`);
+      const { buffer, mime } = fromDataUrl(payload.assinaturaDataUrl);
+      const upload = await r2Provider.upload(buffer, mime, `pcm-sign-${id}`, `inspecoes/${id}`);
       updates.pcmSign = {
         ...(inspection.pcmSign ?? {}),
         assinaturaUrl: upload.url,
@@ -274,7 +291,7 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       questionText: answer.questionText ?? null,
       response: answer.response === "nc" ? "nc" : answer.response === "na" ? "na" : "c",
       observation: answer.observation ?? null,
-      photoUrls: Array.isArray(answer.photoUrls) ? answer.photoUrls.filter(Boolean) : [],
+      photoUrls: normalizeStoredImages(answer.photoUrls ?? []),
       recurrence: answer.recurrence ?? false,
       itemOsNumero: answer.itemOsNumero ?? null,
     }));
@@ -309,18 +326,29 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
           return NextResponse.json({ error: "ITEM_OS_REQUIRED" }, { status: 422 });
         }
 
-        const photoUrls: string[] = [];
+        const photoUrls: StoredImage[] = [];
         if (Array.isArray(item.photoUrls)) {
           for (const photo of item.photoUrls) {
             if (typeof photo === "string") {
-              photoUrls.push(photo);
-            } else if (photo?.dataUrl) {
-              const upload = await uploadToImgbbFromDataUrl(photo.dataUrl, `${id}-${item.questionId}-${photo.name ?? "foto"}`);
-              photoUrls.push(upload.url);
+              photoUrls.push(...normalizeStoredImages([photo]));
+            } else if (photo && typeof photo === "object") {
+              if ("dataUrl" in photo && typeof photo.dataUrl === "string") {
+                const fileName = typeof (photo as { name?: unknown }).name === "string" ? (photo as { name?: string }).name : undefined;
+                const { buffer, mime } = fromDataUrl(photo.dataUrl);
+                const upload = await r2Provider.upload(
+                  buffer,
+                  mime,
+                  `${id}-${item.questionId}-${fileName ?? "foto"}`,
+                  `inspecoes/${id}/${item.questionId}`
+                );
+                photoUrls.push(upload);
+              } else if ("url" in photo && typeof photo.url === "string") {
+                photoUrls.push(...normalizeStoredImages([photo]));
+              }
             }
           }
         } else if (existingAnswer?.photoUrls) {
-          photoUrls.push(...existingAnswer.photoUrls);
+          photoUrls.push(...normalizeStoredImages(existingAnswer.photoUrls));
         }
 
         const observation = item.observation?.trim() ? item.observation.trim() : null;
@@ -446,7 +474,7 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
     const finalAnswers = answersToPersist.map(answer => ({
       ...answer,
       response: answer.response === "nc" || answer.response === "na" ? answer.response : "c",
-      photoUrls: Array.isArray(answer.photoUrls) ? answer.photoUrls.filter(Boolean) : [],
+      photoUrls: normalizeStoredImages(answer.photoUrls ?? []),
     }));
 
     const qtdNC = finalAnswers.filter(answer => answer.response === "nc").length;
@@ -455,7 +483,7 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
     updates.itens = itensToPersist.map(item => ({
       ...item,
       resultado: typeof item.resultado === "string" ? item.resultado : "C",
-      fotos: Array.isArray(item.fotos) ? item.fotos : [],
+      fotos: normalizeStoredImages(item.fotos ?? []),
     }));
     updates.nonConformityTreatments = treatmentsArray;
     updates.qtdNC = qtdNC;

@@ -1,3 +1,5 @@
+import type { StoredImage } from "./images";
+
 export type Resultado = "C" | "NC" | "NA";
 
 export type TemplateItem = {
@@ -49,7 +51,7 @@ export type InspectionItemAnswer = {
   templateItemId: string;
   resultado: Resultado;
   observacaoItem?: string;
-  fotos?: string[];
+  fotos?: StoredImage[];
   osNumeroItem?: string | null;
 };
 
@@ -89,7 +91,7 @@ export type Issue = {
   templateItemId: string;
   descricao: string;
   osNumero?: string;
-  fotos?: string[];
+  fotos?: StoredImage[];
   status: "aberta" | "resolvida";
   abertaEmInspecaoId: string;
   resolvidaEmInspecaoId?: string;
@@ -98,3 +100,4 @@ export type Issue = {
 };
 
 export * from "./checklists";
+export * from "./images";

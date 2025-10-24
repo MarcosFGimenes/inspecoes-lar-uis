@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase-admin";
 import { requireAdminFromRequest } from "@/lib/guards";
+import { normalizeStoredImages } from "@/lib/storage/images";
 import type { ChecklistAnswer } from "@/types";
 
 export const runtime = "nodejs";
@@ -28,7 +29,7 @@ function normalizeAnswers(data: Record<string, unknown>): ChecklistAnswer[] {
       .map(item => ({
         ...item,
         response: item.response === "nc" || item.response === "c" || item.response === "na" ? item.response : "c",
-        photoUrls: Array.isArray(item.photoUrls) ? item.photoUrls.filter(Boolean) : [],
+        photoUrls: normalizeStoredImages(item.photoUrls ?? []),
         itemOsNumero: item.itemOsNumero ?? null,
       }));
   }
@@ -41,7 +42,7 @@ function normalizeAnswers(data: Record<string, unknown>): ChecklistAnswer[] {
       questionText: typeof item.componente === "string" ? item.componente : undefined,
       response: String(item.resultado || "C").toLowerCase() === "nc" ? "nc" : String(item.resultado || "C").toLowerCase() === "na" ? "na" : "c",
       observation: typeof item.observacaoItem === "string" ? item.observacaoItem : undefined,
-      photoUrls: Array.isArray(item.fotos) ? item.fotos.filter(Boolean).map(String) : [],
+      photoUrls: normalizeStoredImages(item.fotos ?? []),
       itemOsNumero: typeof item.osNumeroItem === "string" && item.osNumeroItem.trim()
         ? item.osNumeroItem.trim().toUpperCase()
         : null,

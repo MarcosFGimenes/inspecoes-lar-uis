@@ -23,8 +23,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { ChecklistAnswer } from "@/types";
+import type { ChecklistAnswer, StoredImage } from "@/types";
 import { cn } from "@/lib/cn";
+import { normalizeStoredImages } from "@/lib/storage/images";
 
 interface InspectionListItem {
   id: string;
@@ -41,7 +42,7 @@ interface InspectionListItem {
   signed: boolean;
   signedAt: string | null;
   pcmNome: string | null;
-  ncItems: Array<{ questionId: string; questionText: string | null; osNumero: string | null; photoUrls: string[] }>;
+  ncItems: Array<{ questionId: string; questionText: string | null; osNumero: string | null; photoUrls: StoredImage[] }>;
 }
 
 function formatDateTime(value: string | null) {
@@ -90,7 +91,7 @@ export default function AdminInspectionsPage() {
                   questionId: answer.questionId,
                   questionText: answer.questionText ?? null,
                   osNumero: answer.itemOsNumero ?? null,
-                  photoUrls: Array.isArray(answer.photoUrls) ? answer.photoUrls.filter(Boolean) : [],
+                  photoUrls: normalizeStoredImages(answer.photoUrls ?? []),
                 }))
             : itensRaw
                 .filter(item => String(item.resultado ?? item.response ?? "C").toLowerCase() === "nc")
@@ -106,7 +107,7 @@ export default function AdminInspectionsPage() {
                     typeof item.osNumeroItem === "string" && item.osNumeroItem.trim()
                       ? item.osNumeroItem.trim().toUpperCase()
                       : null,
-                  photoUrls: Array.isArray(item.fotos) ? item.fotos.filter(Boolean).map(String) : [],
+                  photoUrls: normalizeStoredImages(item.fotos ?? []),
                 }));
         const qtdNc = typeof data.qtdNC === "number" ? data.qtdNC : ncItems.length;
         const pcmSign = (data.pcmSign ?? {}) as Record<string, unknown>;
