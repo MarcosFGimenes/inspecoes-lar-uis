@@ -3,6 +3,7 @@ import { FieldPath } from "firebase-admin/firestore";
 import { adminDb } from "@/lib/firebase-admin";
 import { getMachinesByIdsChunked } from "@/lib/db/machines";
 import { parseSeverityState, getEffectiveSeverity } from "@/lib/adapters/dataAdapter";
+import { ensureStoredPhotos, photosToUrls } from "@/lib/photos";
 import type { Severity, SeverityState } from "@/types/severity";
 
 import { inferArea, severityWithinRange } from "./scheduling-helpers";
@@ -103,12 +104,7 @@ function normalizeIso(value: unknown): string | null {
 }
 
 function readStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return value
-    .map(entry => (typeof entry === "string" ? entry.trim() : ""))
-    .filter((entry): entry is string => entry.length > 0);
+  return photosToUrls(ensureStoredPhotos(value));
 }
 
 async function fetchProgramacoesByIds(ids: string[]): Promise<Map<string, FirebaseFirestore.DocumentData>> {

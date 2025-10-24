@@ -7,6 +7,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import type { SignatureCanvasInstance } from "@/components/signature-canvas-client";
 import { CriticidadeSelector } from "@/components/criticidade-selector";
 import { CriticidadeBadge } from "@/components/criticidade-badge";
+import { ensureStoredPhotos, photosToUrls } from "@/lib/photos";
 import type { Severity, SeverityState } from "@/types/severity";
 
 type SignatureCanvasComponent = typeof import("@/components/signature-canvas-client").default;
@@ -815,7 +816,7 @@ export default function InspectionPage() {
     const map = new Map<string, IssueRecord>();
     for (const issue of context?.openIssues ?? []) {
       if (issue.templateItemId) {
-        map.set(issue.templateItemId, { ...issue, fotos: Array.isArray(issue.fotos) ? issue.fotos : [] });
+        map.set(issue.templateItemId, { ...issue, fotos: photosToUrls(ensureStoredPhotos(issue.fotos)) });
       }
     }
     return map;

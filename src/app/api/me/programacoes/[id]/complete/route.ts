@@ -6,6 +6,7 @@ import { adminDb } from "@/lib/firebase-admin";
 import { requireMaint } from "@/lib/guards";
 import { uploadToImgbbFromDataUrl } from "@/lib/imgbb";
 import { parseSeverityState } from "@/lib/adapters/dataAdapter";
+import type { StoredPhoto } from "@/lib/photos";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -98,16 +99,16 @@ export async function POST(req: NextRequest, context: RouteContext) {
 
     const descricaoNormalized = normalizeDescricao(payload.descricao ?? undefined);
 
-    let photoUrls: string[] | undefined;
+    let photoUploads: StoredPhoto[] | undefined;
     if (Array.isArray(payload.fotos)) {
-      photoUrls = [];
+      photoUploads = [];
       for (let index = 0; index < payload.fotos.length; index += 1) {
         const dataUrl = ensureDataUrl(payload.fotos[index]!);
         const upload = await uploadToImgbbFromDataUrl(
           dataUrl,
           `programacao-${programacaoId}-execucao-${index + 1}`,
         );
-        photoUrls.push(upload.url);
+        photoUploads.push(upload);
       }
     }
 
@@ -129,8 +130,8 @@ export async function POST(req: NextRequest, context: RouteContext) {
     if (descricaoNormalized !== undefined) {
       updates["execucao.descricao"] = descricaoNormalized;
     }
-    if (photoUrls !== undefined) {
-      updates["execucao.fotos"] = photoUrls;
+    if (photoUploads !== undefined) {
+      updates["execucao.fotos"] = photoUploads;
     }
 
     const prazoIso = toIso(programacaoData?.datas?.prazo);
@@ -165,8 +166,8 @@ export async function POST(req: NextRequest, context: RouteContext) {
       if (descricaoNormalized !== undefined) {
         issueUpdates["execucao.descricao"] = descricaoNormalized;
       }
-      if (photoUrls !== undefined) {
-        issueUpdates["execucao.fotos"] = photoUrls;
+      if (photoUploads !== undefined) {
+        issueUpdates["execucao.fotos"] = photoUploads;
       }
       await issueRef.set(issueUpdates, { merge: true });
     }
@@ -183,8 +184,8 @@ export async function POST(req: NextRequest, context: RouteContext) {
     if (descricaoNormalized !== undefined) {
       execucaoState.descricao = descricaoNormalized;
     }
-    if (photoUrls !== undefined) {
-      execucaoState.fotos = photoUrls;
+    if (photoUploads !== undefined) {
+      execucaoState.fotos = photoUploads;
     }
 
     const severityState = programacaoData?.manutencao?.severity

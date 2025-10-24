@@ -6,6 +6,7 @@ import { adminDb } from "@/lib/firebase-admin";
 import { findMachineByTag } from "@/lib/db/machines";
 import { requireMaint } from "@/lib/guards";
 import { uploadToImgbbFromDataUrl } from "@/lib/imgbb";
+import type { StoredPhoto } from "@/lib/photos";
 import { randomUUID } from "crypto";
 import type { ChecklistAnswer, ChecklistNonConformityTreatment } from "@/types";
 import { isMaintainerProfileId } from "@/lib/signature-profiles";
@@ -250,7 +251,7 @@ export async function POST(req: NextRequest) {
       templateItemId: string;
       resultado: "C" | "NC" | "NA";
       observacaoItem: string | null;
-      fotos: string[];
+      fotos: StoredPhoto[];
       osNumeroItem: string | null;
       criticidade: Severity | null;
     }> = [];
@@ -282,7 +283,7 @@ export async function POST(req: NextRequest) {
             effective: criticidade,
           }
         : undefined;
-      const fotoUrls: string[] = [];
+      const fotoUploads: StoredPhoto[] = [];
       for (let index = 0; index < fotosBase64.length; index += 1) {
         const dataUrl = ensureDataUrl(fotosBase64[index]!, `ITEM_FOTO_${index + 1}`);
         const uploadName = buildUploadName([
@@ -292,13 +293,13 @@ export async function POST(req: NextRequest) {
           `foto-${index + 1}`,
         ]);
         const upload = await uploadToImgbbFromDataUrl(dataUrl, uploadName);
-        fotoUrls.push(upload.url);
+        fotoUploads.push(upload);
       }
       itensPayload.push({
         templateItemId: item.templateItemId,
         resultado: item.resultado,
         observacaoItem: item.observacaoItem?.trim() ? item.observacaoItem.trim() : null,
-        fotos: fotoUrls,
+        fotos: fotoUploads,
         osNumeroItem,
         criticidade,
       });
@@ -310,7 +311,7 @@ export async function POST(req: NextRequest) {
         questionText: templateItem.oQueChecar ?? templateItem.criterio ?? templateItem.componente ?? null,
         response,
         observation: item.observacaoItem?.trim() ? item.observacaoItem.trim() : null,
-        photoUrls: fotoUrls,
+        photoUrls: fotoUploads,
         itemOsNumero: osNumeroItem,
         severity: severitySnapshot,
       });

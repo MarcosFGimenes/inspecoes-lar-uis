@@ -4,6 +4,7 @@ import { parseSeverityState, getEffectiveSeverity } from "@/lib/adapters/dataAda
 import { adminDb } from "@/lib/firebase-admin";
 import { findMachineByTag } from "@/lib/db/machines";
 import { requireMaint } from "@/lib/guards";
+import { ensureStoredPhotos, photosToUrls } from "@/lib/photos";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -77,7 +78,7 @@ export async function GET(req: NextRequest) {
         templateItemId: data.templateItemId ?? null,
         descricao: data.descricao ?? null,
         osNumero: data.osNumero ?? null,
-        fotos: Array.isArray(data.fotos) ? data.fotos.filter(Boolean).map(String) : [],
+        fotos: photosToUrls(ensureStoredPhotos(data.fotos)),
         createdAt: data.createdAt ?? null,
         severity,
         effectiveSeverity,

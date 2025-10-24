@@ -2,12 +2,22 @@ export type NonConformityStatus = "open" | "in_progress" | "resolved";
 
 import type { SeverityState } from "./severity";
 
+export type PhotoProvider = "imgbb" | "postimages" | string;
+
+export interface ChecklistPhoto {
+  url: string;
+  display_url?: string | null;
+  provider?: PhotoProvider;
+  mime?: string | null;
+  delete_url?: string | null;
+}
+
 export interface ChecklistAnswer {
   questionId: string;
   questionText?: string | null;
   response: "c" | "nc" | "na";
   observation?: string | null;
-  photoUrls?: string[];
+  photoUrls?: ChecklistPhoto[];
   recurrence?: boolean;
   itemOsNumero?: string | null;
   severity?: SeverityState;

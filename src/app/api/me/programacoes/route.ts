@@ -7,6 +7,7 @@ import { adminDb } from "@/lib/firebase-admin";
 import { requireMaint } from "@/lib/guards";
 import { normalizeName } from "@/lib/string-utils";
 import { parseSeverityState, getEffectiveSeverity } from "@/lib/adapters/dataAdapter";
+import { ensureStoredPhotos, photosToUrls } from "@/lib/photos";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,12 +30,7 @@ function toIso(value: unknown) {
 }
 
 function readStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return value
-    .map(entry => (typeof entry === "string" ? entry.trim() : ""))
-    .filter((entry): entry is string => entry.length > 0);
+  return photosToUrls(ensureStoredPhotos(value));
 }
 
 function readNullableString(value: unknown): string | null {
