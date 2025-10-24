@@ -2,13 +2,14 @@
 
 ## Variáveis de ambiente relevantes
 
-Configure as chaves de upload de imagens antes de executar a aplicação:
+Configure as credenciais do Cloudflare R2 antes de executar a aplicação:
 
-- `IMGBB_API_KEYS`: lista separada por vírgulas com as chaves do ImgBB usadas em rotação (round-robin).
-- `IMGBB_API_KEY`: chave única do ImgBB utilizada como fallback caso `IMGBB_API_KEYS` não seja definida.
-- `POSTIMAGES_API_KEY`: chave da API do Postimages para o fallback automático quando todas as chaves do ImgBB falharem.
-- `POSTIMAGES_GALLERY`: identificador opcional da galeria no Postimages.
+- `R2_ACCESS_KEY_ID`: chave de acesso utilizada para assinar as requisições S3.
+- `R2_SECRET_ACCESS_KEY`: segredo correspondente à chave acima.
+- `R2_BUCKET_NAME`: bucket do R2 onde os arquivos serão gravados.
+- `R2_ENDPOINT`: endpoint S3 do R2 (ex.: `https://<account-id>.r2.cloudflarestorage.com`).
+- `R2_PUBLIC_BASE_URL`: URL pública usada para servir as imagens (pode conter `{bucket}` como placeholder). Caso não seja informada, o endpoint do R2 é utilizado como base.
+- `R2_REGION` (opcional): região utilizada na assinatura (`auto` por padrão).
+- `R2_PREFIX` (opcional): prefixo de diretório para organizar os uploads dentro do bucket.
 
-A rotina de upload tenta enviar a imagem para o ImgBB, trocando de chave automaticamente a cada requisição e realizando uma segunda tentativa com a próxima chave disponível em caso de erro (por exemplo, limite de requisições). Se todas as chaves falharem, o serviço faz o fallback para o Postimages utilizando `POSTIMAGES_API_KEY`.
-
-Certifique-se de definir pelo menos uma chave do ImgBB e a chave do Postimages em ambientes de produção para evitar falhas de upload.
+As imagens das inspeções são enviadas diretamente para o R2 utilizando assinatura AWS Signature v4. O retorno do upload inclui o caminho público e metadados mínimos para que o PCM visualize arquivos de qualquer provedor suportado no futuro.

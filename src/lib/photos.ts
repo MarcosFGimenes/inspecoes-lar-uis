@@ -40,12 +40,14 @@ export function normalizeStoredPhotos(value: unknown): StoredPhoto[] {
       const provider = coerceUrl(entry, "provider") ?? undefined;
       const mime = coerceUrl(entry, "mime") ?? undefined;
       const deleteUrl = coerceUrl(entry, "delete_url") ?? undefined;
+      const storageKey = coerceUrl(entry, "storage_key") ?? coerceUrl(entry, "key") ?? undefined;
       normalized.push({
         url,
         display_url: displayUrl,
         provider,
         mime,
         delete_url: deleteUrl,
+        storage_key: storageKey,
       });
       continue;
     }
@@ -58,12 +60,17 @@ export function normalizeStoredPhotos(value: unknown): StoredPhoto[] {
         coerceUrl(maybeRecord, "direct") ??
         coerceUrl(maybeRecord, "src");
       if (urlCandidate) {
+        const storageKey =
+          coerceUrl(maybeRecord, "storage_key") ??
+          coerceUrl(maybeRecord, "key") ??
+          undefined;
         normalized.push({
           url: urlCandidate,
           display_url: coerceUrl(maybeRecord, "display_url") ?? urlCandidate,
           provider: coerceUrl(maybeRecord, "provider") ?? undefined,
           mime: coerceUrl(maybeRecord, "mime") ?? undefined,
           delete_url: coerceUrl(maybeRecord, "delete_url") ?? undefined,
+          storage_key: storageKey,
         });
       }
     }

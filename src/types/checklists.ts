@@ -2,7 +2,7 @@ export type NonConformityStatus = "open" | "in_progress" | "resolved";
 
 import type { SeverityState } from "./severity";
 
-export type PhotoProvider = "imgbb" | "postimages" | string;
+export type PhotoProvider = "imgbb" | "postimages" | "cloudflare-r2" | string;
 
 export interface ChecklistPhoto {
   url: string;
@@ -10,6 +10,7 @@ export interface ChecklistPhoto {
   provider?: PhotoProvider;
   mime?: string | null;
   delete_url?: string | null;
+  storage_key?: string | null;
 }
 
 export interface ChecklistAnswer {

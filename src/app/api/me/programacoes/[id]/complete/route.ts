@@ -200,7 +200,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "";
-    if (message.includes("IMGBB_UPLOAD_FAILED")) {
+    if (message.includes("R2_UPLOAD_FAILED") || message.includes("IMGBB_UPLOAD_FAILED")) {
       return NextResponse.json(
         { error: "Falha ao enviar as fotos. Tente novamente em instantes." },
         { status: 429 },
