@@ -1,3 +1,4 @@
+import type { RouteContext } from "next";
 import { NextRequest, NextResponse } from "next/server";
 import { Timestamp } from "firebase-admin/firestore";
 
@@ -13,16 +14,13 @@ function resolveId(value: string | string[] | null | undefined) {
   return value ?? null;
 }
 
-export async function PATCH(
-  req: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function PATCH(req: NextRequest, context: RouteContext<{ id: string }>) {
   const authorized = await requireAdminFromRequest(req);
   if (!authorized) {
     return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 });
   }
 
-  const id = resolveId(params?.id ?? null);
+  const id = resolveId(context?.params?.id ?? null);
   if (!id) {
     return NextResponse.json({ error: "MISSING_ID" }, { status: 400 });
   }
