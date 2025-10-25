@@ -15,9 +15,8 @@ function resolveId(value: string | string[] | null | undefined) {
 
 export async function PATCH(
   req: NextRequest,
-  context: { params: { id: string } }
+  { params }: { params: { id: string } }
 ) {
-  const params = context?.params ?? null;
   const authorized = await requireAdminFromRequest(req);
   if (!authorized) {
     return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 });
