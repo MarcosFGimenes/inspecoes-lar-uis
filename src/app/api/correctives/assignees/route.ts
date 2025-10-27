@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { adminDb } from "@/lib/firebase-admin";
-import { requireMaint } from "@/lib/guards";
+import { requireMaintOrAdmin } from "@/lib/guards";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -79,7 +79,7 @@ function extractRecord(docId: string, data: FirebaseFirestore.DocumentData): Mai
 }
 
 export async function GET(req: NextRequest) {
-  const auth = await requireMaint();
+  const auth = await requireMaintOrAdmin(req);
   if (!auth.ok) {
     return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: auth.status });
   }

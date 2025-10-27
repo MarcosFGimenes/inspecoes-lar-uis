@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 import { createOrUpdateCorrectiveWO } from "@/lib/adapters/correctiveAdapter";
-import { requireMaint } from "@/lib/guards";
+import { requireMaintOrAdmin } from "@/lib/guards";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -53,7 +53,7 @@ const scheduleSchema = z
   });
 
 export async function POST(req: NextRequest) {
-  const auth = await requireMaint();
+  const auth = await requireMaintOrAdmin(req);
   if (!auth.ok) {
     return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: auth.status });
   }
