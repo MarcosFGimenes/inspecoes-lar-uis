@@ -79,6 +79,7 @@ export default function NCsAbertasList() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasLoaded, setHasLoaded] = useState(false);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const [scheduleOpen, setScheduleOpen] = useState(false);
@@ -110,6 +111,16 @@ export default function NCsAbertasList() {
     setScheduleOpen(false);
     setSelectedNc(null);
   }, []);
+
+  useEffect(() => {
+    if (!successMessage) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      setSuccessMessage(null);
+    }, 6000);
+    return () => clearTimeout(timer);
+  }, [successMessage]);
 
   const fetchPage = useCallback(
     async ({ cursor, replace }: { cursor?: string | null; replace?: boolean } = {}) => {
@@ -205,6 +216,16 @@ export default function NCsAbertasList() {
     []
   );
 
+  const handleScheduledSuccess = useCallback(
+    (result: { osId: string; ncId: string | null }) => {
+      if (result.ncId) {
+        setItems(prev => prev.filter(item => item.ncId !== result.ncId && item.id !== result.ncId));
+      }
+      setSuccessMessage("Corretiva programada com sucesso.");
+    },
+    []
+  );
+
   const isEmpty = hasLoaded && items.length === 0 && !loadingInitial && !loadingMore && !error;
 
   return (
@@ -254,6 +275,11 @@ export default function NCsAbertasList() {
         </div>
 
         <div className="relative overflow-hidden rounded-[28px] border border-[color-mix(in_srgb,var(--border)_70%,transparent_30%)]">
+          {successMessage ? (
+            <div className="border-b border-[color-mix(in_srgb,var(--border)_60%,transparent_40%)] bg-[color-mix(in_srgb,var(--primary)_8%,transparent_92%)] px-6 py-3 text-sm text-[color-mix(in_srgb,var(--primary)_80%,var(--primary-700)_20%)]">
+              {successMessage}
+            </div>
+          ) : null}
           {loadingInitial ? (
             <div className="space-y-3 p-6">
               {Array.from({ length: 5 }).map((_, index) => (
@@ -342,6 +368,7 @@ export default function NCsAbertasList() {
         onClose={closeSchedule}
         context={toScheduleContext(selectedNc)}
         mode={scheduleMode}
+        onScheduled={handleScheduledSuccess}
       />
     </div>
   );
