@@ -24,8 +24,14 @@ export interface CorrectiveWorkOrderRecord {
   updatedAt?: string | null;
   ncId?: string | null;
   ncDescription?: string | null;
+  description?: string | null;
   area?: string | null;
   severity?: CorrectiveSeverity | null;
+  assignees?: {
+    owner?: string | null;
+    maintainer1?: string | null;
+    maintainer2?: string | null;
+  } | null;
 }
 
 function normalizeIsoTimestamp(value: string | null | undefined): string {
@@ -95,15 +101,24 @@ export async function syncCorrectiveWorkOrderView(osId: string, record: Correcti
     return;
   }
 
+  const assignees = record.assignees ?? null;
+  const owner = typeof assignees?.owner === "string" ? assignees.owner : null;
+  const maintainer1 = typeof assignees?.maintainer1 === "string" ? assignees.maintainer1 : null;
+  const maintainer2 = typeof assignees?.maintainer2 === "string" ? assignees.maintainer2 : null;
+
   const payload = {
     osId,
     ncId: record.ncId ?? null,
     ncDescription: record.ncDescription ?? null,
+    description: record.description ?? record.ncDescription ?? null,
     area: normalizeArea(record.area),
     effectiveSeverity: resolveSeverity(record.severity),
     scheduledDate: record.scheduledDate ?? null,
     status: record.status ?? null,
     updatedAt: normalizeIsoTimestamp(record.updatedAt ?? null),
+    owner,
+    maintainer1,
+    maintainer2,
   } satisfies Record<string, unknown>;
 
   await docRef.set(payload, { merge: true });

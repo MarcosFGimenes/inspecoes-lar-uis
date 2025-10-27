@@ -15,7 +15,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-import type { CorrectiveScheduleContext } from "./schedule-corrective-placeholder";
+import type {
+  CorrectiveScheduleContext,
+  ScheduleResultPayload,
+} from "./schedule-corrective-placeholder";
 import { ScheduleCorrectivePlaceholder } from "./schedule-corrective-placeholder";
 
 interface CorrectiveOpenNcItem {
@@ -217,7 +220,7 @@ export default function NCsAbertasList() {
   );
 
   const handleScheduledSuccess = useCallback(
-    (result: { osId: string; ncId: string | null }) => {
+    (result: ScheduleResultPayload) => {
       if (result.ncId) {
         setItems(prev => prev.filter(item => item.ncId !== result.ncId && item.id !== result.ncId));
       }

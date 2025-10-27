@@ -33,11 +33,15 @@ export interface CorrectiveWorkOrderView {
   osId: string;
   ncId: string | null;
   ncDescription: string | null;
+  description: string | null;
   area: string | null;
   effectiveSeverity: Severity | null;
   scheduledDate: string | null;
   status: string | null;
   updatedAt: string | null;
+  owner: string | null;
+  maintainer1: string | null;
+  maintainer2: string | null;
 }
 
 function clampLimit(value: number | null | undefined, fallback: number) {
@@ -256,6 +260,7 @@ export async function listCorrectiveWOView(params: {
   to?: string;
   area?: string;
   status?: string;
+  responsible?: string;
   limit: number;
   cursor?: string;
 }): Promise<PaginatedResult<CorrectiveWorkOrderView>> {
@@ -271,6 +276,10 @@ export async function listCorrectiveWOView(params: {
 
   if (params.status) {
     query = query.where("status", "==", params.status);
+  }
+
+  if (params.responsible) {
+    query = query.where("owner", "==", params.responsible);
   }
 
   if (params.from) {
@@ -295,16 +304,24 @@ export async function listCorrectiveWOView(params: {
     const scheduledDate = typeof data.scheduledDate === "string" ? data.scheduledDate : null;
     const updatedAt = typeof data.updatedAt === "string" ? data.updatedAt : null;
     const ncDescription = typeof data.ncDescription === "string" ? data.ncDescription : null;
+    const description = typeof data.description === "string" ? data.description : ncDescription;
+    const owner = typeof data.owner === "string" ? data.owner : null;
+    const maintainer1 = typeof data.maintainer1 === "string" ? data.maintainer1 : null;
+    const maintainer2 = typeof data.maintainer2 === "string" ? data.maintainer2 : null;
     return {
       id: doc.id,
       osId: typeof data.osId === "string" ? data.osId : doc.id,
       ncId: typeof data.ncId === "string" ? data.ncId : null,
       ncDescription,
+      description,
       area,
       effectiveSeverity: severity,
       scheduledDate,
       status,
       updatedAt,
+      owner,
+      maintainer1,
+      maintainer2,
     };
   });
 

@@ -30,12 +30,18 @@ interface AssigneeOption {
   rawArea: string | null;
 }
 
-interface ScheduleResultPayload {
+export interface ScheduleResultPayload {
   osId: string;
   ncId: string | null;
   area: "mechanical" | "electrical";
   scheduledDate: string;
   description: string | null;
+  effectiveSeverity: number | null;
+  assignees: {
+    owner: string;
+    maintainer1: string | null;
+    maintainer2: string | null;
+  };
 }
 
 interface ScheduleCorrectiveProps {
@@ -361,13 +367,29 @@ export function ScheduleCorrectivePlaceholder({
           throw new Error("Resposta inesperada do servidor.");
         }
 
-        onScheduled({
+        const resultPayload: ScheduleResultPayload = {
           osId: body.osId,
           ncId: mode === "existing" ? context?.ncId ?? null : null,
           area,
           scheduledDate: scheduledIso,
           description: trimmedDescription || context?.description || null,
-        });
+          effectiveSeverity: context?.effectiveSeverity ?? null,
+          assignees: {
+            owner,
+            maintainer1: maintainer1 || null,
+            maintainer2: maintainer2 || null,
+          },
+        };
+
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(
+            new CustomEvent<ScheduleResultPayload>("correctives:schedule-success", {
+              detail: resultPayload,
+            })
+          );
+        }
+
+        onScheduled(resultPayload);
         onClose();
       } catch (err) {
         console.error("[correctives] failed to schedule", err);

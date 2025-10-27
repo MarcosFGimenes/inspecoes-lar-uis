@@ -33,6 +33,7 @@ export async function GET(req: NextRequest) {
     const params = url.searchParams;
     const area = params.get("area")?.trim() || undefined;
     const status = params.get("status")?.trim() || undefined;
+    const responsible = params.get("responsible")?.trim() || undefined;
     const fromRaw = params.get("from");
     const toRaw = params.get("to");
     const from = normalizeIso(fromRaw);
@@ -55,6 +56,7 @@ export async function GET(req: NextRequest) {
       status,
       limit: limitValue,
       cursor,
+      responsible,
     });
 
     return NextResponse.json(result);
