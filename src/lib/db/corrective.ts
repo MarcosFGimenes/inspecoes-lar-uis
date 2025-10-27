@@ -16,7 +16,10 @@ export async function saveCorrectiveNonConformity(
 ) {
   const docRef = correctiveNonConformities.doc(ncId);
   await docRef.set(record, { merge: options.merge ?? true });
-  await syncOpenNonConformityView(ncId, record);
+  const snapshot = await docRef.get();
+  if (snapshot.exists) {
+    await syncOpenNonConformityView(ncId, snapshot.data() as CorrectiveNonConformityRecord);
+  }
   return docRef;
 }
 
@@ -27,7 +30,10 @@ export async function saveCorrectiveWorkOrder(
 ) {
   const docRef = correctiveWorkOrders.doc(osId);
   await docRef.set(record, { merge: options.merge ?? true });
-  await syncCorrectiveWorkOrderView(osId, record);
+  const snapshot = await docRef.get();
+  if (snapshot.exists) {
+    await syncCorrectiveWorkOrderView(osId, snapshot.data() as CorrectiveWorkOrderRecord);
+  }
   return docRef;
 }
 
