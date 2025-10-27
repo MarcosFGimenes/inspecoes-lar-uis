@@ -38,6 +38,11 @@ interface CorrectiveOsItem {
   owner: string | null;
   maintainer1: string | null;
   maintainer2: string | null;
+  assignees: {
+    owner: string | null;
+    maintainer1: string | null;
+    maintainer2: string | null;
+  } | null;
 }
 
 interface PaginatedResponse {
@@ -388,6 +393,11 @@ export default function CorrectivesPlannedList() {
           owner: detail.assignees.owner,
           maintainer1: detail.assignees.maintainer1,
           maintainer2: detail.assignees.maintainer2,
+          assignees: {
+            owner: detail.assignees.owner,
+            maintainer1: detail.assignees.maintainer1,
+            maintainer2: detail.assignees.maintainer2,
+          },
         };
 
         return [newItem, ...nextItems];

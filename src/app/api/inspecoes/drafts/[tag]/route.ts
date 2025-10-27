@@ -24,12 +24,22 @@ const itemSchema = z.object({
   osNumero: z.string().trim().max(120).optional(),
 });
 
+const severity6Schema = z.union([
+  z.literal(1),
+  z.literal(2),
+  z.literal(3),
+  z.literal(4),
+  z.literal(5),
+  z.literal(6),
+]);
+
 const payloadSchema = z.object({
   osNumero: z.string().trim().max(120).optional(),
   observacoes: z.string().trim().max(4000).optional(),
   assinaturaDataUrl: z.string().trim().max(200_000).nullable().optional(),
   itens: z.array(itemSchema).optional(),
   resolveIssues: z.array(z.string().trim().min(1)).optional(),
+  inspectionSeverity: severity6Schema.nullable().optional(),
 });
 
 function ensureDataUrl(value: string | null | undefined) {
@@ -222,6 +232,7 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       progressPercent: percent,
       updatedAt: coerceString(data.updatedAt),
       resolveIssues,
+      inspectionSeverity: typeof data.inspectionSeverity === "number" ? data.inspectionSeverity : null,
     },
   });
 }
@@ -303,6 +314,7 @@ export async function PUT(req: NextRequest, context: RouteContext) {
     updatedAt: nowIso,
     createdAt,
     resolveIssues: resolveIssuesIds,
+    inspectionSeverity: payload.inspectionSeverity ?? null,
   };
 
   await draftRef.set(payloadToSave, { merge: false });
@@ -324,6 +336,7 @@ export async function PUT(req: NextRequest, context: RouteContext) {
       progressPercent: percent,
       updatedAt: nowIso,
       resolveIssues: resolveIssuesIds,
+      inspectionSeverity: payload.inspectionSeverity ?? null,
     },
   });
 }

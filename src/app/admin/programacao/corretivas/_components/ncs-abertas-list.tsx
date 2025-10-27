@@ -29,6 +29,8 @@ interface CorrectiveOpenNcItem {
   effectiveSeverity: number | null;
   updatedAt: string | null;
   status: string | null;
+  inspectionId: string | null;
+  source: string | null;
 }
 
 interface PaginatedResponse {
@@ -70,6 +72,8 @@ function toScheduleContext(item: CorrectiveOpenNcItem | null): CorrectiveSchedul
     description: item.description,
     area: item.area,
     effectiveSeverity: item.effectiveSeverity,
+    inspectionId: item.inspectionId,
+    source: item.source,
   };
 }
 
@@ -97,6 +101,7 @@ export default function NCsAbertasList() {
       { value: "3", label: "Severidade 3" },
       { value: "4", label: "Severidade 4" },
       { value: "5", label: "Severidade 5" },
+      { value: "6", label: "Severidade 6" },
     ],
     []
   );
@@ -150,6 +155,7 @@ export default function NCsAbertasList() {
       if (severityFilter) {
         params.set("severity", severityFilter);
       }
+      params.set("source", "inspection");
       if (cursor) {
         params.set("cursor", cursor);
       }

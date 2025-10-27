@@ -7,6 +7,8 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import type { SignatureCanvasInstance } from "@/components/signature-canvas-client";
 import type { StoredImage } from "@/types";
 import { normalizeStoredImages } from "@/lib/storage/images";
+import type { Severity6 } from "@/types/severity";
+import { SeveritySelector6 } from "./_components/severity-selector-6";
 
 type SignatureCanvasComponent = typeof import("@/components/signature-canvas-client").default;
 const SignatureCanvas = dynamic(() => import("@/components/signature-canvas-client"), { ssr: false }) as unknown as SignatureCanvasComponent;
@@ -63,6 +65,7 @@ type DraftDataState = {
   itens: DraftItemState[];
   resolveIssues: string[];
   updatedAt?: string | null;
+  inspectionSeverity?: Severity6 | null;
 };
 
 const RESULT_OPTIONS: Array<{ value: "C" | "NC" | "NA"; label: string; tone: "ok" | "nc" | "na" }> = [
@@ -221,6 +224,7 @@ export default function InspectionPage() {
   const [osNumero, setOsNumero] = useState("");
   const [observacoes, setObservacoes] = useState("");
   const [resolveIssues, setResolveIssues] = useState<Record<string, boolean>>({});
+  const [inspectionSeverity, setInspectionSeverity] = useState<Severity6 | null>(null);
   const [feedback, setFeedback] = useState<FeedbackState | null>(null);
   const [saving, setSaving] = useState(false);
   const [savingAction, setSavingAction] = useState<"save" | "save-new" | null>(null);
@@ -405,6 +409,7 @@ export default function InspectionPage() {
     setOsNumero(osBloqueado ?? "");
     setObservacoes("");
     setResolveIssues({});
+    setInspectionSeverity(null);
     setDraftFeedback(null);
     setLastDraftUpdatedAt(null);
     lastDraftPayloadRef.current = null;
@@ -472,6 +477,7 @@ export default function InspectionPage() {
         resolveMap[id] = true;
       });
       setResolveIssues(resolveMap);
+      setInspectionSeverity(draft.inspectionSeverity ?? null);
       setDraftFeedback(null);
       const updatedAt = draft.updatedAt ?? null;
       setLastDraftUpdatedAt(updatedAt);
@@ -518,6 +524,7 @@ export default function InspectionPage() {
         itens: normalizedItems,
         resolveIssues: validResolveIds,
         updatedAt,
+        inspectionSeverity: draft.inspectionSeverity ?? null,
       };
       lastDraftPayloadRef.current = JSON.stringify(normalizedPayload);
       if (draftTimerRef.current) {
@@ -570,6 +577,7 @@ export default function InspectionPage() {
               : [],
             resolveIssues: Array.isArray(draft.resolveIssues) ? draft.resolveIssues : [],
             updatedAt: draft.updatedAt ?? null,
+            inspectionSeverity: draft.inspectionSeverity ?? null,
           });
         } else {
           lastDraftPayloadRef.current = null;
@@ -629,8 +637,17 @@ export default function InspectionPage() {
       assinaturaDataUrl: signatureDataUrl ?? null,
       itens,
       resolveIssues: resolveIds,
+      inspectionSeverity: inspectionSeverity ?? null,
     };
-  }, [itemsState, observacoes, osNumero, resolveIssues, signatureDataUrl, sortedItems]);
+  }, [
+    itemsState,
+    observacoes,
+    osNumero,
+    resolveIssues,
+    signatureDataUrl,
+    sortedItems,
+    inspectionSeverity,
+  ]);
 
   const saveDraft = useCallback(
     async (mode: "manual" | "auto") => {
@@ -651,6 +668,7 @@ export default function InspectionPage() {
         assinaturaDataUrl: draftState.assinaturaDataUrl,
         itens: draftState.itens,
         resolveIssues: draftState.resolveIssues,
+        inspectionSeverity: draftState.inspectionSeverity ?? undefined,
       };
 
       try {
@@ -1040,6 +1058,7 @@ export default function InspectionPage() {
             programacaoId: programacaoId ?? undefined,
             programacaoBatchId: programacaoBatchId ?? undefined,
             prazoProgramado: programacaoPrazo ?? undefined,
+            inspectionSeverity: inspectionSeverity ?? undefined,
           }),
         });
         if (response.status === 401) { window.location.href = "/login"; return; }
@@ -1098,6 +1117,7 @@ export default function InspectionPage() {
       signatureMode,
       sortedItems,
       osBloqueado,
+      inspectionSeverity,
       programacaoId,
       programacaoBatchId,
       programacaoPrazo,
@@ -1321,6 +1341,10 @@ export default function InspectionPage() {
               className="rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
             />
           </label>
+        </div>
+
+        <div className="mt-6 rounded-xl border border-red-200/60 bg-gradient-to-br from-red-950/70 via-red-900/60 to-red-800/40 p-4 shadow-inner">
+          <SeveritySelector6 value={inspectionSeverity} onChange={setInspectionSeverity} />
         </div>
 
         {hasNC && !osNumero.trim() && (

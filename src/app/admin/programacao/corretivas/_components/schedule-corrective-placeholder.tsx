@@ -20,6 +20,8 @@ export interface CorrectiveScheduleContext {
   description: string | null;
   area: string | null;
   effectiveSeverity: number | null;
+  inspectionId: string | null;
+  source: string | null;
 }
 
 interface AssigneeOption {
@@ -37,6 +39,8 @@ export interface ScheduleResultPayload {
   scheduledDate: string;
   description: string | null;
   effectiveSeverity: number | null;
+  inspectionId: string | null;
+  source: string | null;
   assignees: {
     owner: string;
     maintainer1: string | null;
@@ -347,6 +351,20 @@ export function ScheduleCorrectivePlaceholder({
         },
         scheduledDate: scheduledIso,
         dueDate: dueDate ? toIsoString(dueDate) ?? undefined : undefined,
+        ncContext:
+          mode === "existing"
+            ? {
+                description: context?.description ?? null,
+                area,
+                effectiveSeverity: context?.effectiveSeverity ?? null,
+                severity:
+                  context?.effectiveSeverity && context.effectiveSeverity >= 1
+                    ? { maintainer: context.effectiveSeverity }
+                    : null,
+                inspectionId: context?.inspectionId ?? undefined,
+                source: context?.source ?? undefined,
+              }
+            : undefined,
       };
 
       try {
@@ -374,6 +392,8 @@ export function ScheduleCorrectivePlaceholder({
           scheduledDate: scheduledIso,
           description: trimmedDescription || context?.description || null,
           effectiveSeverity: context?.effectiveSeverity ?? null,
+          inspectionId: context?.inspectionId ?? null,
+          source: context?.source ?? null,
           assignees: {
             owner,
             maintainer1: maintainer1 || null,
@@ -407,6 +427,9 @@ export function ScheduleCorrectivePlaceholder({
       mode,
       context?.ncId,
       context?.description,
+      context?.effectiveSeverity,
+      context?.inspectionId,
+      context?.source,
       owner,
       maintainer1,
       maintainer2,

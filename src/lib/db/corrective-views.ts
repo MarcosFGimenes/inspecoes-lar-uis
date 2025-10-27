@@ -15,6 +15,10 @@ export interface CorrectiveNonConformityRecord {
   severity?: CorrectiveSeverity | null;
   status?: string | null;
   updatedAt?: string | null;
+  inspectionId?: string | null;
+  source?: string | null;
+  scheduledDate?: string | null;
+  linkedCorrectiveOsId?: string | null;
 }
 
 export interface CorrectiveWorkOrderRecord {
@@ -46,7 +50,7 @@ function normalizeIsoTimestamp(value: string | null | undefined): string {
 }
 
 function normalizeSeverityValue(value: unknown): Severity | null {
-  if (value === 1 || value === 2 || value === 3 || value === 4 || value === 5) {
+  if (value === 1 || value === 2 || value === 3 || value === 4 || value === 5 || value === 6) {
     return value;
   }
   return null;
@@ -77,6 +81,8 @@ export async function syncOpenNonConformityView(ncId: string, record: Corrective
   const docRef = openNonConformitiesView.doc(ncId);
 
   if (status === "open") {
+    const source = typeof record.source === "string" ? record.source.trim().toLowerCase() : null;
+    const inspectionId = typeof record.inspectionId === "string" ? record.inspectionId : null;
     const payload = {
       ncId,
       description: record.description ?? null,
@@ -84,6 +90,8 @@ export async function syncOpenNonConformityView(ncId: string, record: Corrective
       effectiveSeverity: resolveSeverity(record.severity),
       updatedAt: normalizeIsoTimestamp(record.updatedAt ?? null),
       status: "open",
+      source: source ?? (inspectionId ? "inspection" : null),
+      inspectionId,
     } satisfies Record<string, unknown>;
     await docRef.set(payload, { merge: true });
     return;
@@ -119,6 +127,13 @@ export async function syncCorrectiveWorkOrderView(osId: string, record: Correcti
     owner,
     maintainer1,
     maintainer2,
+    assignees: assignees
+      ? {
+          owner,
+          maintainer1,
+          maintainer2,
+        }
+      : null,
   } satisfies Record<string, unknown>;
 
   await docRef.set(payload, { merge: true });

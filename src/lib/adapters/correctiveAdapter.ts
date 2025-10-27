@@ -1,4 +1,5 @@
 import { adminDb } from "@/lib/firebase-admin";
+import type { Severity6 } from "@/types/severity";
 import {
   syncCorrectiveWorkOrderView,
   syncOpenNonConformityView,
@@ -26,6 +27,8 @@ export interface CorrectiveOpenNcView {
   effectiveSeverity: Severity | null;
   updatedAt: string | null;
   status: string | null;
+  inspectionId: string | null;
+  source: string | null;
 }
 
 export interface CorrectiveWorkOrderView {
@@ -42,6 +45,11 @@ export interface CorrectiveWorkOrderView {
   owner: string | null;
   maintainer1: string | null;
   maintainer2: string | null;
+  assignees: {
+    owner: string | null;
+    maintainer1: string | null;
+    maintainer2: string | null;
+  } | null;
 }
 
 function clampLimit(value: number | null | undefined, fallback: number) {
@@ -64,7 +72,7 @@ async function resolveCursor(
 }
 
 function extractSeverity(value: unknown): Severity | null {
-  if (value === 1 || value === 2 || value === 3 || value === 4 || value === 5) {
+  if (value === 1 || value === 2 || value === 3 || value === 4 || value === 5 || value === 6) {
     return value;
   }
   return null;
@@ -83,7 +91,7 @@ function normalizeIsoInput(value: string | null | undefined): string | null {
   return parsed.toISOString();
 }
 
-export type Severity = 1 | 2 | 3 | 4 | 5;
+export type Severity = Severity6;
 
 export interface CorrectiveAssignees {
   owner: string;
@@ -91,9 +99,22 @@ export interface CorrectiveAssignees {
   maintainer2?: string;
 }
 
+export interface ScheduleNcContext {
+  description?: string | null;
+  area?: string | null;
+  effectiveSeverity?: Severity | null;
+  severity?: {
+    signer?: Severity | null;
+    maintainer?: Severity | null;
+  } | null;
+  inspectionId?: string | null;
+  source?: string | null;
+}
+
 export async function listOpenNCsView(params: {
   area?: string;
   severity?: Severity;
+  source?: string;
   limit: number;
   cursor?: string;
 }): Promise<PaginatedResult<CorrectiveOpenNcView>> {
@@ -111,6 +132,10 @@ export async function listOpenNCsView(params: {
     query = query.where("effectiveSeverity", "==", params.severity);
   }
 
+  if (params.source) {
+    query = query.where("source", "==", params.source);
+  }
+
   const cursorSnapshot = await resolveCursor(correctiveNcOpenViewCollection, params.cursor);
   if (cursorSnapshot) {
     query = query.startAfter(cursorSnapshot);
@@ -124,6 +149,8 @@ export async function listOpenNCsView(params: {
     const area = typeof data.area === "string" ? data.area : null;
     const status = typeof data.status === "string" ? data.status : null;
     const updatedAt = typeof data.updatedAt === "string" ? data.updatedAt : null;
+    const inspectionId = typeof data.inspectionId === "string" ? data.inspectionId : null;
+    const source = typeof data.source === "string" ? data.source : null;
     return {
       id: doc.id,
       ncId: typeof data.ncId === "string" ? data.ncId : doc.id,
@@ -132,6 +159,8 @@ export async function listOpenNCsView(params: {
       effectiveSeverity: severity,
       updatedAt,
       status,
+      inspectionId,
+      source,
     };
   });
 
@@ -148,18 +177,23 @@ export async function createOrUpdateCorrectiveWO(input: {
   assignees: CorrectiveAssignees;
   scheduledDate: string;
   dueDate?: string;
+  ncContext?: ScheduleNcContext | null;
 }): Promise<{ osId: string }> {
   const now = nowIso();
+  const scheduledDate = normalizeIsoInput(input.scheduledDate);
+  const dueDate = normalizeIsoInput(input.dueDate);
 
   const result = await adminDb.runTransaction(async tx => {
     const ncId = input.ncId?.trim() || null;
-    let ncSnapshot: FirebaseFirestore.DocumentSnapshot | null = null;
+    const ncContext = input.ncContext ?? null;
 
-    if (ncId) {
-      const ncRef = correctiveNonConformitiesCollection.doc(ncId);
+    let fetchedNc: CorrectiveNonConformityRecord | undefined;
+    const ncRef = ncId ? correctiveNonConformitiesCollection.doc(ncId) : null;
+
+    if (ncId && !ncContext && ncRef) {
       const snapshot = await tx.get(ncRef);
       if (snapshot.exists) {
-        ncSnapshot = snapshot;
+        fetchedNc = snapshot.data() as CorrectiveNonConformityRecord;
       }
     }
 
@@ -179,19 +213,21 @@ export async function createOrUpdateCorrectiveWO(input: {
       osRef = correctiveWorkOrdersCollection.doc();
     }
 
-    const ncData = ncSnapshot?.data() as CorrectiveNonConformityRecord | undefined;
-    const severityValue = ncData ? getEffectiveSeverity(ncData) : null;
-    const normalizedSeverity = ncData?.severity ?? (severityValue ? { maintainer: severityValue } : null);
+    const baseStatus = (osSnapshot?.get("status") as string | undefined) ?? "scheduled";
+    const baseCreatedAt = (osSnapshot?.get("createdAt") as string | undefined) ?? now;
+
+    const contextSeverityValue = extractSeverity(ncContext?.effectiveSeverity ?? null);
+    const contextSeverity =
+      ncContext?.severity ??
+      (contextSeverityValue ? { maintainer: contextSeverityValue } : null);
+    const fetchedSeverity = fetchedNc?.severity ?? null;
+    const normalizedSeverity = contextSeverity ?? fetchedSeverity ?? null;
     const descriptionFromNc =
-      typeof ncData?.description === "string" && ncData.description.trim().length > 0
-        ? ncData.description
+      typeof (ncContext?.description ?? fetchedNc?.description) === "string"
+        ? (ncContext?.description ?? fetchedNc?.description)
         : null;
 
-    const baseStatus = (osSnapshot?.get("status") as string | undefined) ?? "scheduled";
-    const baseCreatedAt =
-      (osSnapshot?.get("createdAt") as string | undefined) ?? now;
-
-    const payload: CorrectiveWorkOrderRecord & {
+    const osPayload: CorrectiveWorkOrderRecord & {
       assignees: CorrectiveAssignees;
       createdAt: string;
       dueDate: string | null;
@@ -199,56 +235,55 @@ export async function createOrUpdateCorrectiveWO(input: {
     } = {
       type: "corrective",
       status: baseStatus,
-      scheduledDate: normalizeIsoInput(input.scheduledDate),
+      scheduledDate,
       updatedAt: now,
       ncId,
       ncDescription: descriptionFromNc ?? input.description ?? null,
       area: input.area,
       severity: normalizedSeverity,
       assignees: input.assignees,
-      dueDate: normalizeIsoInput(input.dueDate),
+      dueDate,
       description: input.description ?? descriptionFromNc ?? null,
       createdAt: baseCreatedAt,
     };
 
-    tx.set(osRef, payload, { merge: true });
+    tx.set(osRef, osPayload, { merge: true });
 
-    if (ncId) {
-      const ncRef = correctiveNonConformitiesCollection.doc(ncId);
-      const ncUpdate: CorrectiveNonConformityRecord & {
-        linkedCorrectiveOsId: string;
-        updatedAt: string;
-      } = {
-        status: "scheduled",
-        severity: ncData?.severity ?? normalizedSeverity,
-        description: ncData?.description ?? descriptionFromNc ?? input.description ?? null,
-        area: ncData?.area ?? input.area,
+    let ncUpdate:
+      | (CorrectiveNonConformityRecord & { linkedCorrectiveOsId: string; updatedAt: string })
+      | null = null;
+
+    if (ncId && ncRef) {
+      const baseArea = ncContext?.area ?? fetchedNc?.area ?? input.area;
+      const baseDescription = descriptionFromNc ?? input.description ?? fetchedNc?.description ?? null;
+      const baseInspectionId = ncContext?.inspectionId ?? fetchedNc?.inspectionId ?? null;
+      const baseSource = ncContext?.source ?? fetchedNc?.source ?? (baseInspectionId ? "inspection" : null);
+
+      ncUpdate = {
+        status: "PROGRAMADA",
+        severity: normalizedSeverity,
+        description: baseDescription,
+        area: baseArea,
         updatedAt: now,
         linkedCorrectiveOsId: osRef.id,
+        scheduledDate,
+        inspectionId: baseInspectionId,
+        source: baseSource,
       };
 
       tx.set(ncRef, ncUpdate, { merge: true });
     }
 
-    return { osId: osRef.id, ncId };
+    return { osId: osRef.id, ncId, osPayload, ncUpdate };
   });
 
-  const osSnapshot = await correctiveWorkOrdersCollection.doc(result.osId).get();
-  if (osSnapshot.exists) {
-    await syncCorrectiveWorkOrderView(
-      result.osId,
-      osSnapshot.data() as CorrectiveWorkOrderRecord
-    );
+  await syncCorrectiveWorkOrderView(result.osId, result.osPayload);
+
+  if (result.ncId && result.ncUpdate) {
+    await syncOpenNonConformityView(result.ncId, result.ncUpdate);
   }
 
   if (result.ncId) {
-    const ncSnapshot = await correctiveNonConformitiesCollection.doc(result.ncId).get();
-    if (ncSnapshot.exists) {
-      await syncOpenNonConformityView(
-        result.ncId,
-        ncSnapshot.data() as CorrectiveNonConformityRecord
-      );
-    }
     await linkNcToOs(result.ncId, result.osId);
   }
 
@@ -308,6 +343,7 @@ export async function listCorrectiveWOView(params: {
     const owner = typeof data.owner === "string" ? data.owner : null;
     const maintainer1 = typeof data.maintainer1 === "string" ? data.maintainer1 : null;
     const maintainer2 = typeof data.maintainer2 === "string" ? data.maintainer2 : null;
+    const hasAssignee = Boolean(owner || maintainer1 || maintainer2);
     return {
       id: doc.id,
       osId: typeof data.osId === "string" ? data.osId : doc.id,
@@ -322,6 +358,13 @@ export async function listCorrectiveWOView(params: {
       owner,
       maintainer1,
       maintainer2,
+      assignees: hasAssignee
+        ? {
+            owner,
+            maintainer1,
+            maintainer2,
+          }
+        : null,
     };
   });
 
