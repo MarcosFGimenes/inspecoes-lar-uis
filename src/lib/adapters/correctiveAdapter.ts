@@ -176,7 +176,7 @@ export async function createOrUpdateCorrectiveWO(input: {
     }
 
     const ncData = ncSnapshot?.data() as CorrectiveNonConformityRecord | undefined;
-    const severityValue = ncData ? extractSeverity(getEffectiveSeverity(ncData) as Severity) : null;
+    const severityValue = ncData ? getEffectiveSeverity(ncData) : null;
     const normalizedSeverity = ncData?.severity ?? (severityValue ? { maintainer: severityValue } : null);
     const descriptionFromNc =
       typeof ncData?.description === "string" && ncData.description.trim().length > 0
@@ -320,14 +320,14 @@ type NcWithSeverity =
   | {
       severity?:
         | {
-            signer?: Severity;
-            maintainer?: Severity;
+            signer?: Severity | null;
+            maintainer?: Severity | null;
           }
         | null;
     };
 
-export function getEffectiveSeverity(nc: NcWithSeverity): Severity {
-  return (nc?.severity?.signer ?? nc?.severity?.maintainer) as Severity;
+export function getEffectiveSeverity(nc: NcWithSeverity): Severity | null {
+  return extractSeverity(nc?.severity?.signer ?? nc?.severity?.maintainer ?? null);
 }
 
 export async function linkNcToOs(ncId: string, osId: string) {
