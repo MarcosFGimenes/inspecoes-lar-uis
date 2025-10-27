@@ -55,7 +55,17 @@ export async function listCorrectiveWOView(params: {
   throw new Error("TODO: implement listCorrectiveWOView");
 }
 
-export function getEffectiveSeverity(nc: any): Severity {
+type NcWithSeverity =
+  | undefined
+  | null
+  | {
+      severity?: {
+        signer?: Severity;
+        maintainer?: Severity;
+      };
+    };
+
+export function getEffectiveSeverity(nc: NcWithSeverity): Severity {
   return (nc?.severity?.signer ?? nc?.severity?.maintainer) as Severity;
 }
 
