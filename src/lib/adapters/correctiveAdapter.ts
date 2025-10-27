@@ -318,10 +318,12 @@ type NcWithSeverity =
   | undefined
   | null
   | {
-      severity?: {
-        signer?: Severity;
-        maintainer?: Severity;
-      };
+      severity?:
+        | {
+            signer?: Severity;
+            maintainer?: Severity;
+          }
+        | null;
     };
 
 export function getEffectiveSeverity(nc: NcWithSeverity): Severity {
