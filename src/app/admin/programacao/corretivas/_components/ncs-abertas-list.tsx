@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -15,30 +15,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-import type {
-  CorrectiveScheduleContext,
-  ScheduleResultPayload,
-} from "./schedule-corrective-placeholder";
+import { useCorrectiveNcOpenQuery } from "../_hooks/useCorrectiveNcOpenQuery";
+import type { CorrectiveOpenNcItem, CorrectiveScheduleContext, ScheduleResultPayload } from "../_types";
 import { ScheduleCorrectivePlaceholder } from "./schedule-corrective-placeholder";
-
-interface CorrectiveOpenNcItem {
-  id: string;
-  ncId: string;
-  description: string | null;
-  area: string | null;
-  effectiveSeverity: number | null;
-  updatedAt: string | null;
-  status: string | null;
-  inspectionId: string | null;
-  source: string | null;
-}
-
-interface PaginatedResponse {
-  items: CorrectiveOpenNcItem[];
-  nextCursor: string | null;
-}
-
-const PAGE_SIZE = 20;
 
 function formatDateTime(value: string | null): string {
   if (!value) return "-";
@@ -80,18 +59,63 @@ function toScheduleContext(item: CorrectiveOpenNcItem | null): CorrectiveSchedul
 export default function NCsAbertasList() {
   const [areaFilter, setAreaFilter] = useState<string>("");
   const [severityFilter, setSeverityFilter] = useState<string>("");
-  const [items, setItems] = useState<CorrectiveOpenNcItem[]>([]);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [loadingInitial, setLoadingInitial] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [hasLoaded, setHasLoaded] = useState(false);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
-
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [scheduleMode, setScheduleMode] = useState<"existing" | "new">("existing");
   const [selectedNc, setSelectedNc] = useState<CorrectiveOpenNcItem | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  const severityValue = useMemo(() => {
+    const parsed = Number(severityFilter);
+    return parsed >= 1 && parsed <= 6 ? parsed : undefined;
+  }, [severityFilter]);
+
+  const query = useCorrectiveNcOpenQuery({
+    area: areaFilter || undefined,
+    severity: severityValue,
+    source: "inspection",
+  });
+
+  const items = useMemo(() => query.data?.pages.flatMap(page => page.items) ?? [], [query.data]);
+  const loadingInitial = query.isLoading && !query.data;
+  const loadingMore = query.isFetchingNextPage;
+  const errorMessage = query.error?.message ?? null;
+  const hasLoaded = query.status === "success";
+  const hasMore = Boolean(query.hasNextPage);
+
+  useEffect(() => {
+    if (!successMessage) return;
+    const timer = setTimeout(() => setSuccessMessage(null), 6000);
+    return () => clearTimeout(timer);
+  }, [successMessage]);
+
+  const handleLoadMore = useCallback(() => {
+    if (!query.hasNextPage || query.isFetchingNextPage) {
+      return;
+    }
+    void query.fetchNextPage();
+  }, [query]);
+
+  const handleProgram = useCallback((item: CorrectiveOpenNcItem | null) => {
+    if (item) {
+      setSelectedNc(item);
+      setScheduleMode("existing");
+    } else {
+      setSelectedNc(null);
+      setScheduleMode("new");
+    }
+    setScheduleOpen(true);
+  }, []);
+
+  const handleCloseSchedule = useCallback(() => {
+    setScheduleOpen(false);
+    setSelectedNc(null);
+  }, []);
+
+  const handleScheduledSuccess = useCallback((result: ScheduleResultPayload) => {
+    setSuccessMessage(
+      result.ncId ? "Corretiva programada a partir da NC." : "Serviço corretivo programado com sucesso."
+    );
+  }, []);
 
   const severityOptions = useMemo(
     () => [
@@ -115,127 +139,7 @@ export default function NCsAbertasList() {
     []
   );
 
-  const closeSchedule = useCallback(() => {
-    setScheduleOpen(false);
-    setSelectedNc(null);
-  }, []);
-
-  useEffect(() => {
-    if (!successMessage) {
-      return;
-    }
-    const timer = setTimeout(() => {
-      setSuccessMessage(null);
-    }, 6000);
-    return () => clearTimeout(timer);
-  }, [successMessage]);
-
-  const fetchPage = useCallback(
-    async ({ cursor, replace }: { cursor?: string | null; replace?: boolean } = {}) => {
-      abortRef.current?.abort();
-      const controller = new AbortController();
-      abortRef.current = controller;
-
-      const isReplace = replace ?? false;
-      setError(null);
-      if (isReplace) {
-        setLoadingInitial(true);
-        setHasLoaded(false);
-        setItems([]);
-        setNextCursor(null);
-      } else {
-        setLoadingMore(true);
-      }
-
-      const params = new URLSearchParams();
-      params.set("limit", String(PAGE_SIZE));
-      if (areaFilter) {
-        params.set("area", areaFilter);
-      }
-      if (severityFilter) {
-        params.set("severity", severityFilter);
-      }
-      params.set("source", "inspection");
-      if (cursor) {
-        params.set("cursor", cursor);
-      }
-
-      let aborted = false;
-
-      try {
-        const response = await fetch(`/api/correctives/nc-open?${params.toString()}`, {
-          method: "GET",
-          signal: controller.signal,
-          cache: "no-store",
-        });
-
-        if (!response.ok) {
-          const errorBody = await response.json().catch(() => ({}));
-          const message = typeof errorBody.error === "string" ? errorBody.error : "Erro ao carregar NCs";
-          throw new Error(message);
-        }
-
-        const data = (await response.json()) as PaginatedResponse;
-        setItems(prev => (isReplace ? data.items : [...prev, ...data.items]));
-        setNextCursor(data.nextCursor ?? null);
-        setHasLoaded(true);
-      } catch (err) {
-        const error = err as Error;
-        if (error.name === "AbortError") {
-          aborted = true;
-        } else {
-          console.error("Erro ao carregar corretivas abertas", error);
-          setError(error.message || "Erro ao carregar NCs");
-        }
-      } finally {
-        if (!aborted) {
-          setLoadingInitial(false);
-          setLoadingMore(false);
-        }
-      }
-    },
-    [areaFilter, severityFilter]
-  );
-
-  useEffect(() => {
-    fetchPage({ replace: true });
-    return () => {
-      abortRef.current?.abort();
-    };
-  }, [fetchPage]);
-
-  const handleLoadMore = useCallback(() => {
-    if (!nextCursor || loadingMore) {
-      return;
-    }
-    fetchPage({ cursor: nextCursor });
-  }, [fetchPage, nextCursor, loadingMore]);
-
-  const handleProgram = useCallback(
-    (item: CorrectiveOpenNcItem | null) => {
-      if (item) {
-        setSelectedNc(item);
-        setScheduleMode("existing");
-      } else {
-        setSelectedNc(null);
-        setScheduleMode("new");
-      }
-      setScheduleOpen(true);
-    },
-    []
-  );
-
-  const handleScheduledSuccess = useCallback(
-    (result: ScheduleResultPayload) => {
-      if (result.ncId) {
-        setItems(prev => prev.filter(item => item.ncId !== result.ncId && item.id !== result.ncId));
-      }
-      setSuccessMessage("Corretiva programada com sucesso.");
-    },
-    []
-  );
-
-  const isEmpty = hasLoaded && items.length === 0 && !loadingInitial && !loadingMore && !error;
+  const isEmpty = hasLoaded && items.length === 0 && !loadingInitial && !loadingMore && !errorMessage;
 
   return (
     <div className="space-y-5">
@@ -246,9 +150,7 @@ export default function NCsAbertasList() {
               <label className="text-sm font-semibold text-[var(--muted)]">Área</label>
               <Select
                 value={areaFilter}
-                onChange={event => {
-                  setAreaFilter(event.target.value);
-                }}
+                onChange={event => setAreaFilter(event.target.value)}
                 aria-label="Filtrar por área"
               >
                 {areaOptions.map(option => (
@@ -262,9 +164,7 @@ export default function NCsAbertasList() {
               <label className="text-sm font-semibold text-[var(--muted)]">Severidade</label>
               <Select
                 value={severityFilter}
-                onChange={event => {
-                  setSeverityFilter(event.target.value);
-                }}
+                onChange={event => setSeverityFilter(event.target.value)}
                 aria-label="Filtrar por severidade"
               >
                 {severityOptions.map(option => (
@@ -289,6 +189,7 @@ export default function NCsAbertasList() {
               {successMessage}
             </div>
           ) : null}
+
           {loadingInitial ? (
             <div className="space-y-3 p-6">
               {Array.from({ length: 5 }).map((_, index) => (
@@ -347,9 +248,9 @@ export default function NCsAbertasList() {
           )}
         </div>
 
-        {error ? (
+        {errorMessage ? (
           <div className="rounded-2xl border border-[var(--danger)]/30 bg-[color-mix(in_srgb,var(--danger)_8%,transparent_92%)] px-4 py-3 text-sm text-[color-mix(in_srgb,var(--danger)_85%,#991b1b_15%)]">
-            {error}
+            {errorMessage}
           </div>
         ) : null}
 
@@ -363,7 +264,7 @@ export default function NCsAbertasList() {
               variant="outline"
               size="sm"
               onClick={handleLoadMore}
-              disabled={!nextCursor || loadingMore}
+              disabled={!hasMore || loadingMore}
               loading={loadingMore}
             >
               Carregar mais
@@ -374,7 +275,7 @@ export default function NCsAbertasList() {
 
       <ScheduleCorrectivePlaceholder
         open={scheduleOpen}
-        onClose={closeSchedule}
+        onClose={handleCloseSchedule}
         context={toScheduleContext(selectedNc)}
         mode={scheduleMode}
         onScheduled={handleScheduledSuccess}

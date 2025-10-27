@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ScheduleResultPayload } from "@/app/admin/programacao/corretivas/_components/schedule-corrective-placeholder";
+import type { ScheduleResultPayload } from "@/app/admin/programacao/corretivas/_types";
 import { useRouter } from "next/navigation";
 
 import { Badge } from "@/components/ui/badge";
@@ -428,8 +428,8 @@ export default function MaintHomeStartPage() {
           area: detail.area,
           effectiveSeverity: detail.effectiveSeverity,
           scheduledDate: detail.scheduledDate,
-          status: "scheduled",
-          updatedAt: nowIso,
+          status: detail.status,
+          updatedAt: detail.updatedAt || nowIso,
           assignees: {
             owner: detail.assignees.owner,
             maintainer1: detail.assignees.maintainer1,

@@ -15,40 +15,15 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 
-export interface CorrectiveScheduleContext {
-  ncId: string | null;
-  description: string | null;
-  area: string | null;
-  effectiveSeverity: number | null;
-  inspectionId: string | null;
-  source: string | null;
-}
+import { useCorrectiveAssignees } from "../_hooks/useCorrectiveAssignees";
+import { useScheduleCorrectiveMutation } from "../_hooks/useScheduleCorrectiveMutation";
+import type {
+  CorrectiveAssigneeOption,
+  CorrectiveScheduleContext,
+  ScheduleResultPayload,
+} from "../_types";
 
-interface AssigneeOption {
-  id: string;
-  nome: string | null;
-  matricula: string | null;
-  area: "mechanical" | "electrical" | null;
-  rawArea: string | null;
-}
-
-export interface ScheduleResultPayload {
-  osId: string;
-  ncId: string | null;
-  area: "mechanical" | "electrical";
-  scheduledDate: string;
-  description: string | null;
-  effectiveSeverity: number | null;
-  inspectionId: string | null;
-  source: string | null;
-  assignees: {
-    owner: string;
-    maintainer1: string | null;
-    maintainer2: string | null;
-  };
-}
-
-interface ScheduleCorrectiveProps {
+export interface ScheduleCorrectiveProps {
   open: boolean;
   onClose: () => void;
   context: CorrectiveScheduleContext | null;
@@ -77,7 +52,7 @@ function normalizeArea(area: string | null | undefined): "mechanical" | "electri
   return "";
 }
 
-function formatAssigneeLabel(option: AssigneeOption): string {
+function formatAssigneeLabel(option: CorrectiveAssigneeOption): string {
   const pieces: string[] = [];
   if (option.matricula) {
     pieces.push(option.matricula);
@@ -129,14 +104,20 @@ export function ScheduleCorrectivePlaceholder({
   const [owner, setOwner] = useState<string>("");
   const [maintainer1, setMaintainer1] = useState<string>("");
   const [maintainer2, setMaintainer2] = useState<string>("");
-  const [assignees, setAssignees] = useState<AssigneeOption[]>([]);
-  const [assigneesLoading, setAssigneesLoading] = useState(false);
-  const [assigneesError, setAssigneesError] = useState<string | null>(null);
   const [maintSession, setMaintSession] = useState<MaintSessionInfo | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-  const loadedAssigneesRef = useRef(false);
   const descriptionRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const scheduleMutation = useScheduleCorrectiveMutation();
+  const submitting = scheduleMutation.isPending;
+
+  const {
+    data: assigneesData = [],
+    isLoading: assigneesLoading,
+    error: assigneesError,
+  } = useCorrectiveAssignees(open);
+
+  const assignees = assigneesData;
 
   useEffect(() => {
     setMounted(true);
@@ -166,55 +147,6 @@ export function ScheduleCorrectivePlaceholder({
     loadSession();
   }, []);
 
-  const fetchAssignees = useCallback(async () => {
-    if (loadedAssigneesRef.current) {
-      return;
-    }
-    setAssigneesLoading(true);
-    setAssigneesError(null);
-    try {
-      const response = await fetch("/api/correctives/assignees", { cache: "no-store" });
-      if (!response.ok) {
-        const payload = await response.json().catch(() => null);
-        const message = typeof payload?.error === "string" ? payload.error : "Falha ao carregar responsáveis";
-        throw new Error(message);
-      }
-      const payload = (await response.json()) as { items?: Array<Record<string, unknown>> };
-      const items = Array.isArray(payload?.items) ? payload.items : [];
-      const mapped: AssigneeOption[] = items
-        .map(item => {
-          const id = typeof item.id === "string" ? item.id : null;
-          if (!id) return null;
-          const nome = typeof item.nome === "string" ? item.nome : null;
-          const matricula = typeof item.matricula === "string" ? item.matricula : null;
-          const areaValue = typeof item.area === "string" ? (item.area === "mechanical" || item.area === "electrical" ? item.area : null) : null;
-          const rawArea = typeof item.rawArea === "string" ? item.rawArea : null;
-          return {
-            id,
-            nome,
-            matricula,
-            area: areaValue,
-            rawArea,
-          } satisfies AssigneeOption;
-        })
-        .filter((item): item is AssigneeOption => Boolean(item));
-      setAssignees(mapped);
-      loadedAssigneesRef.current = true;
-    } catch (err) {
-      console.error("[correctives] failed to load assignees", err);
-      const message = err instanceof Error && err.message ? err.message : "Falha ao carregar responsáveis";
-      setAssigneesError(message);
-    } finally {
-      setAssigneesLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (open) {
-      void fetchAssignees();
-    }
-  }, [open, fetchAssignees]);
-
   useEffect(() => {
     if (!open) {
       return;
@@ -227,8 +159,6 @@ export function ScheduleCorrectivePlaceholder({
     setMaintainer1("");
     setMaintainer2("");
     setSubmitError(null);
-    setSubmitting(false);
-    // owner is refreshed when options load
   }, [open, context, mode]);
 
   const filteredAssignees = useMemo(() => {
@@ -317,30 +247,26 @@ export function ScheduleCorrectivePlaceholder({
       if (!canSubmit) {
         return;
       }
-      setSubmitting(true);
       setSubmitError(null);
 
       const scheduledIso = toIsoString(scheduledDate);
       if (!scheduledIso) {
         setSubmitError("Informe uma data programada válida.");
-        setSubmitting(false);
         return;
       }
 
       if (!area) {
         setSubmitError("Selecione a área da corretiva.");
-        setSubmitting(false);
         return;
       }
 
       const trimmedDescription = description.trim();
       if (mode === "new" && !trimmedDescription) {
         setSubmitError("Descreva o serviço corretivo.");
-        setSubmitting(false);
         return;
       }
 
-      const payload = {
+      const requestPayload = {
         ncId: mode === "existing" ? context?.ncId ?? undefined : undefined,
         description: trimmedDescription || undefined,
         area,
@@ -367,56 +293,37 @@ export function ScheduleCorrectivePlaceholder({
             : undefined,
       };
 
+      const resultBase: Omit<ScheduleResultPayload, "osId"> = {
+        ncId: mode === "existing" ? context?.ncId ?? null : null,
+        area,
+        scheduledDate: scheduledIso,
+        description: trimmedDescription || context?.description || null,
+        effectiveSeverity: context?.effectiveSeverity ?? null,
+        inspectionId: context?.inspectionId ?? null,
+        source: context?.source ?? null,
+        status: "scheduled",
+        updatedAt: new Date().toISOString(),
+        assignees: {
+          owner,
+          maintainer1: maintainer1 || null,
+          maintainer2: maintainer2 || null,
+        },
+      };
+
       try {
-        const response = await fetch("/api/correctives/schedule", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-
-        if (!response.ok) {
-          const data = await response.json().catch(() => null);
-          const message = typeof data?.error === "string" ? data.error : "Não foi possível programar a corretiva.";
-          throw new Error(message);
-        }
-
-        const body = (await response.json()) as { osId?: string };
-        if (!body?.osId) {
-          throw new Error("Resposta inesperada do servidor.");
-        }
-
-        const resultPayload: ScheduleResultPayload = {
-          osId: body.osId,
+        await scheduleMutation.mutateAsync({
+          request: requestPayload,
           ncId: mode === "existing" ? context?.ncId ?? null : null,
-          area,
-          scheduledDate: scheduledIso,
-          description: trimmedDescription || context?.description || null,
-          effectiveSeverity: context?.effectiveSeverity ?? null,
-          inspectionId: context?.inspectionId ?? null,
-          source: context?.source ?? null,
-          assignees: {
-            owner,
-            maintainer1: maintainer1 || null,
-            maintainer2: maintainer2 || null,
+          result: resultBase,
+          onSuccess: payload => {
+            onScheduled(payload);
+            onClose();
           },
-        };
-
-        if (typeof window !== "undefined") {
-          window.dispatchEvent(
-            new CustomEvent<ScheduleResultPayload>("correctives:schedule-success", {
-              detail: resultPayload,
-            })
-          );
-        }
-
-        onScheduled(resultPayload);
-        onClose();
+        });
       } catch (err) {
         console.error("[correctives] failed to schedule", err);
         const message = err instanceof Error && err.message ? err.message : "Erro ao programar a corretiva.";
         setSubmitError(message);
-      } finally {
-        setSubmitting(false);
       }
     },
     [
@@ -436,190 +343,199 @@ export function ScheduleCorrectivePlaceholder({
       dueDate,
       onClose,
       onScheduled,
+      scheduleMutation,
     ]
   );
 
-  if (!mounted || !open) {
+  if (!mounted) {
     return null;
   }
 
-  const target = document.body;
-  if (!target) {
+  const portalTarget = typeof document !== "undefined" ? document.body : null;
+  if (!portalTarget) {
     return null;
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(15,23,42,0.55)] p-4 backdrop-blur-sm">
-      <div className="absolute inset-0" onClick={handleBackdropClick} aria-hidden />
-      <div
-        role="dialog"
-        aria-modal="true"
-        className="relative z-10 w-full max-w-3xl overflow-hidden rounded-[32px] border border-[color-mix(in_srgb,var(--border)_75%,transparent_25%)] bg-[color-mix(in_srgb,var(--surface)_96%,rgba(255,255,255,0.85)_4%)] p-8 text-[var(--text)] shadow-[0_28px_60px_-30px_rgb(var(--shadow-color)/45%)]"
-        onClick={event => event.stopPropagation()}
-      >
-        <header className="space-y-1">
-          <h2 className="text-xl font-semibold">Programar corretiva</h2>
-          <p className="text-sm text-[var(--muted)]">
-            Defina os responsáveis e as datas para registrar a ordem de serviço corretiva.
-          </p>
-        </header>
+    open ? (
+      <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/30 backdrop-blur-sm">
+        <button
+          type="button"
+          className="absolute inset-0 cursor-default"
+          aria-label="Fechar programação corretiva"
+          onClick={handleBackdropClick}
+        />
+        <div className="relative z-10 w-full max-w-2xl rounded-[32px] border border-[color-mix(in_srgb,var(--border)_70%,transparent_30%)] bg-[color-mix(in_srgb,var(--surface)_97%,rgba(255,255,255,0.9)_3%)] shadow-[0_28px_80px_-30px_rgb(var(--shadow-color)/45%)]">
+          <div className="flex items-start justify-between rounded-t-[32px] bg-[color-mix(in_srgb,var(--surface)_94%,rgba(255,255,255,0.8)_6%)] px-6 py-5">
+            <div>
+              <h2 className="text-xl font-semibold text-[var(--text)]">Programar corretiva</h2>
+              <p className="text-sm text-[var(--muted)]">
+                {mode === "existing"
+                  ? "Confirme as informações e defina a agenda para tratar a NC selecionada."
+                  : "Defina a programação de um novo serviço corretivo."}
+              </p>
+            </div>
+            <Button type="button" variant="ghost" size="icon" onClick={handleBackdropClick} disabled={submitting}>
+              <i className="fas fa-xmark" aria-hidden />
+              <span className="sr-only">Fechar</span>
+            </Button>
+          </div>
 
-        <form className="mt-6 space-y-5" onSubmit={handleSubmit}>
-          {mode === "existing" ? (
-            <div className="rounded-2xl border border-[color-mix(in_srgb,var(--border)_70%,transparent_30%)] bg-[color-mix(in_srgb,var(--surface)_95%,rgba(255,255,255,0.85)_5%)] p-4">
-              <p className="text-sm text-[var(--muted)]">Corretiva vinculada à NC</p>
-              <div className="mt-2 grid gap-3 text-sm text-[var(--text)] md:grid-cols-2">
-                <div>
-                  <span className="block text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">NC</span>
-                  <span className="mt-1 block text-base font-medium">{context?.ncId ?? "Não informada"}</span>
+          <form className="space-y-6 px-6 pb-6" onSubmit={handleSubmit}>
+            {assigneesError ? (
+              <div className="rounded-2xl border border-[var(--warning)]/40 bg-[color-mix(in_srgb,var(--warning)_8%,transparent_92%)] px-4 py-3 text-sm text-[color-mix(in_srgb,var(--warning)_80%,#92400e_20%)]">
+                {assigneesError instanceof Error ? assigneesError.message : String(assigneesError)}
+              </div>
+            ) : null}
+
+            {mode === "existing" ? (
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-1">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">NC selecionada</span>
+                  <p className="text-sm font-medium text-[var(--text)]">{context?.description || "NC sem descrição"}</p>
+                  <p className="text-xs text-[var(--muted)]">ID: {context?.ncId}</p>
                 </div>
-                <div>
-                  <span className="block text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Severidade</span>
-                  <span className="mt-1 block text-base font-medium">{severityLabel}</span>
-                </div>
-                <div className="md:col-span-2">
-                  <span className="block text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Descrição</span>
-                  <span className="mt-1 block text-base font-medium">
-                    {context?.description?.trim() || "NC sem descrição"}
-                  </span>
+                <div className="space-y-1">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Severidade efetiva</span>
+                  <p className="text-sm font-medium text-[var(--text)]">{severityLabel}</p>
                 </div>
               </div>
-            </div>
-          ) : null}
+            ) : null}
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <label className="text-sm font-semibold text-[var(--muted)]" htmlFor="corrective-area">
-                Área
-              </label>
-              <Select
-                id="corrective-area"
-                value={area}
-                onChange={event => setArea(event.target.value as typeof area)}
-                disabled={mode === "existing" && Boolean(context?.area) && Boolean(area)}
-              >
-                <option value="">Selecione a área</option>
-                <option value="mechanical">Mecânica</option>
-                <option value="electrical">Elétrica</option>
-              </Select>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <label className="text-sm font-semibold text-[var(--muted)]" htmlFor="corrective-area">
+                  Área da corretiva
+                </label>
+                <Select
+                  id="corrective-area"
+                  value={area}
+                  onChange={event => setArea(event.target.value as typeof area)}
+                  disabled={mode === "existing" && Boolean(context?.area)}
+                >
+                  <option value="">Selecione a área</option>
+                  <option value="mechanical">Mecânica</option>
+                  <option value="electrical">Elétrica</option>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-semibold text-[var(--muted)]" htmlFor="corrective-scheduled">
+                  Data programada
+                </label>
+                <Input
+                  id="corrective-scheduled"
+                  type="datetime-local"
+                  value={scheduledDate}
+                  onChange={event => setScheduledDate(event.target.value)}
+                  required
+                />
+              </div>
             </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <label className="text-sm font-semibold text-[var(--muted)]" htmlFor="corrective-due">
+                  Prazo (opcional)
+                </label>
+                <Input
+                  id="corrective-due"
+                  type="datetime-local"
+                  value={dueDate}
+                  onChange={event => setDueDate(event.target.value)}
+                />
+              </div>
+            </div>
+
             <div className="space-y-2">
-              <label className="text-sm font-semibold text-[var(--muted)]" htmlFor="corrective-scheduled">
-                Data programada
+              <label className="text-sm font-semibold text-[var(--muted)]" htmlFor="corrective-description">
+                Descrição do serviço
               </label>
-              <Input
-                id="corrective-scheduled"
-                type="datetime-local"
-                value={scheduledDate}
-                onChange={event => setScheduledDate(event.target.value)}
-                required
+              <Textarea
+                id="corrective-description"
+                ref={descriptionRef}
+                rows={4}
+                value={description}
+                onChange={event => setDescription(event.target.value)}
+                placeholder="Descreva o serviço corretivo a ser executado"
+                disabled={mode === "existing"}
               />
             </div>
-            <div className="space-y-2">
-              <label className="text-sm font-semibold text-[var(--muted)]" htmlFor="corrective-due">
-                Prazo (opcional)
-              </label>
-              <Input
-                id="corrective-due"
-                type="datetime-local"
-                value={dueDate}
-                onChange={event => setDueDate(event.target.value)}
-              />
-            </div>
-          </div>
 
-          <div className="space-y-2">
-            <label className="text-sm font-semibold text-[var(--muted)]" htmlFor="corrective-description">
-              Descrição da corretiva
-            </label>
-            <Textarea
-              id="corrective-description"
-              ref={descriptionRef}
-              placeholder="Descreva o serviço corretivo..."
-              value={description}
-              onChange={event => setDescription(event.target.value)}
-            />
-          </div>
+            <div className="grid gap-4 md:grid-cols-3">
+              <div className="space-y-2">
+                <label className="text-sm font-semibold text-[var(--muted)]" htmlFor="corrective-owner">
+                  Responsável
+                </label>
+                <Select
+                  id="corrective-owner"
+                  value={owner}
+                  onChange={event => setOwner(event.target.value)}
+                  disabled={filteredAssignees.length === 0 || assigneesLoading}
+                >
+                  <option value="">Selecione o responsável</option>
+                  {filteredAssignees.map(option => (
+                    <option key={option.id} value={option.id}>
+                      {formatAssigneeLabel(option)}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-semibold text-[var(--muted)]" htmlFor="corrective-maint1">
+                  Mantenedor 1
+                </label>
+                <Select
+                  id="corrective-maint1"
+                  value={maintainer1}
+                  onChange={event => setMaintainer1(event.target.value)}
+                  disabled={filteredAssignees.length === 0 || assigneesLoading}
+                >
+                  <option value="">Não atribuir</option>
+                  {filteredAssignees.map(option => (
+                    <option key={option.id} value={option.id}>
+                      {formatAssigneeLabel(option)}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-semibold text-[var(--muted)]" htmlFor="corrective-maint2">
+                  Mantenedor 2
+                </label>
+                <Select
+                  id="corrective-maint2"
+                  value={maintainer2}
+                  onChange={event => setMaintainer2(event.target.value)}
+                  disabled={filteredAssignees.length === 0 || assigneesLoading}
+                >
+                  <option value="">Não atribuir</option>
+                  {filteredAssignees.map(option => (
+                    <option key={option.id} value={option.id}>
+                      {formatAssigneeLabel(option)}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            </div>
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <label className="text-sm font-semibold text-[var(--muted)]" htmlFor="corrective-owner">
-                Responsável
-              </label>
-              <Select
-                id="corrective-owner"
-                value={owner}
-                onChange={event => setOwner(event.target.value)}
-                disabled={assigneesLoading || filteredAssignees.length === 0}
-              >
-                <option value="">Selecione o responsável</option>
-                {filteredAssignees.map(option => (
-                  <option key={option.id} value={option.id}>
-                    {formatAssigneeLabel(option)}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-semibold text-[var(--muted)]" htmlFor="corrective-maintainer1">
-                Mantenedor 1
-              </label>
-              <Select
-                id="corrective-maintainer1"
-                value={maintainer1}
-                onChange={event => setMaintainer1(event.target.value)}
-                disabled={assigneesLoading || filteredAssignees.length === 0}
-              >
-                <option value="">Não atribuído</option>
-                {filteredAssignees.map(option => (
-                  <option key={option.id} value={option.id}>
-                    {formatAssigneeLabel(option)}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div className="space-y-2 md:col-span-2">
-              <label className="text-sm font-semibold text-[var(--muted)]" htmlFor="corrective-maintainer2">
-                Mantenedor 2
-              </label>
-              <Select
-                id="corrective-maintainer2"
-                value={maintainer2}
-                onChange={event => setMaintainer2(event.target.value)}
-                disabled={assigneesLoading || filteredAssignees.length === 0}
-              >
-                <option value="">Não atribuído</option>
-                {filteredAssignees.map(option => (
-                  <option key={option.id} value={option.id}>
-                    {formatAssigneeLabel(option)}
-                  </option>
-                ))}
-              </Select>
-              {assigneesLoading ? (
-                <p className="pt-1 text-xs text-[var(--muted)]">Carregando responsáveis disponíveis...</p>) : null}
-              {assigneesError ? (
-                <p className="pt-1 text-xs text-[var(--danger)]">{assigneesError}</p>
-              ) : null}
-            </div>
-          </div>
+            {submitError ? (
+              <div className="rounded-2xl border border-[var(--danger)]/30 bg-[color-mix(in_srgb,var(--danger)_8%,transparent_92%)] px-4 py-3 text-sm text-[color-mix(in_srgb,var(--danger)_85%,#991b1b_15%)]">
+                {submitError}
+              </div>
+            ) : null}
 
-          {submitError ? (
-            <div className="rounded-2xl border border-[var(--danger)]/25 bg-[color-mix(in_srgb,var(--danger)_9%,transparent_91%)] px-4 py-3 text-sm text-[color-mix(in_srgb,var(--danger)_85%,#991b1b_15%)]">
-              {submitError}
+            <div className="flex justify-end gap-3">
+              <Button type="button" variant="outline" onClick={handleBackdropClick} disabled={submitting}>
+                Cancelar
+              </Button>
+              <Button type="submit" loading={submitting} disabled={!canSubmit}>
+                Salvar programação
+              </Button>
             </div>
-          ) : null}
-
-          <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
-            <Button type="button" variant="ghost" onClick={onClose} disabled={submitting}>
-              Cancelar
-            </Button>
-            <Button type="submit" loading={submitting} disabled={!canSubmit}>
-              Salvar programação
-            </Button>
-          </div>
-        </form>
+          </form>
+        </div>
       </div>
-    </div>,
-    target
+    ) : null,
+    portalTarget
   );
 }
