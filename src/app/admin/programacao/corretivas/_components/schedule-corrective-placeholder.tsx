@@ -52,6 +52,16 @@ function normalizeArea(area: string | null | undefined): "mechanical" | "electri
   return "";
 }
 
+function formatArea(area: string | null | undefined): string {
+  if (!area) return "-";
+  if (area === "mechanical") return "Mecânica";
+  if (area === "electrical") return "Elétrica";
+  if (typeof area === "string" && area.trim().length > 0) {
+    return area;
+  }
+  return "-";
+}
+
 function formatAssigneeLabel(option: CorrectiveAssigneeOption): string {
   const pieces: string[] = [];
   if (option.matricula) {
@@ -226,6 +236,18 @@ export function ScheduleCorrectivePlaceholder({
     return `Severidade ${context.effectiveSeverity}`;
   }, [context?.effectiveSeverity]);
 
+  const machineLabel = useMemo(() => {
+    if (!context?.machineName && !context?.machineTag) {
+      return "Máquina não identificada";
+    }
+    if (context.machineName && context.machineTag) {
+      return `${context.machineName} · TAG ${context.machineTag}`;
+    }
+    return context.machineName ?? `TAG ${context.machineTag}`;
+  }, [context?.machineName, context?.machineTag]);
+
+  const photos = context?.photos ?? null;
+
   const canSubmit = useMemo(() => {
     if (submitting) return false;
     if (!owner) return false;
@@ -289,6 +311,15 @@ export function ScheduleCorrectivePlaceholder({
                     : null,
                 inspectionId: context?.inspectionId ?? undefined,
                 source: context?.source ?? undefined,
+                machineId: context?.machineId ?? undefined,
+                machineTag: context?.machineTag ?? undefined,
+                machineName: context?.machineName ?? undefined,
+                osNumero: context?.osNumero ?? undefined,
+                photos: context?.photos ?? undefined,
+                questionId: context?.questionId ?? undefined,
+                questionLabel: context?.questionLabel ?? undefined,
+                inspectionResponseId: context?.inspectionResponseId ?? undefined,
+                templateId: context?.templateId ?? undefined,
               }
             : undefined,
       };
@@ -297,12 +328,22 @@ export function ScheduleCorrectivePlaceholder({
         ncId: mode === "existing" ? context?.ncId ?? null : null,
         area,
         scheduledDate: scheduledIso,
+        dueDate: requestPayload.dueDate ?? null,
         description: trimmedDescription || context?.description || null,
         effectiveSeverity: context?.effectiveSeverity ?? null,
         inspectionId: context?.inspectionId ?? null,
         source: context?.source ?? null,
         status: "scheduled",
         updatedAt: new Date().toISOString(),
+        machineId: context?.machineId ?? null,
+        machineTag: context?.machineTag ?? null,
+        machineName: context?.machineName ?? null,
+        ncPhotos: context?.photos ?? null,
+        osNumero: context?.osNumero ?? null,
+        inspectionResponseId: context?.inspectionResponseId ?? null,
+        templateId: context?.templateId ?? null,
+        questionId: context?.questionId ?? null,
+        questionLabel: context?.questionLabel ?? null,
         assignees: {
           owner,
           maintainer1: maintainer1 || null,
@@ -390,14 +431,50 @@ export function ScheduleCorrectivePlaceholder({
 
             {mode === "existing" ? (
               <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-1">
-                  <span className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">NC selecionada</span>
-                  <p className="text-sm font-medium text-[var(--text)]">{context?.description || "NC sem descrição"}</p>
-                  <p className="text-xs text-[var(--muted)]">ID: {context?.ncId}</p>
+                <div className="space-y-3 rounded-2xl border border-[color-mix(in_srgb,var(--border)_70%,transparent_30%)] bg-[color-mix(in_srgb,var(--surface)_96%,rgba(255,255,255,0.85)_4%)] p-4">
+                  <div>
+                    <span className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Máquina</span>
+                    <p className="text-sm font-medium text-[var(--text)]">{machineLabel}</p>
+                    <p className="text-xs text-[var(--muted)]">NC #{context?.ncId ?? "—"}</p>
+                  </div>
+                  <div>
+                    <span className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Item do checklist</span>
+                    <p className="text-sm text-[var(--text)]">
+                      {context?.questionLabel || context?.description || "Item não identificado"}
+                    </p>
+                    {context?.area ? (
+                      <p className="text-xs text-[var(--muted)]">Área sugerida: {formatArea(context.area)}</p>
+                    ) : null}
+                    {context?.osNumero ? (
+                      <p className="text-xs text-[var(--muted)]">O.S. vinculada: {context.osNumero}</p>
+                    ) : null}
+                  </div>
                 </div>
-                <div className="space-y-1">
-                  <span className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Severidade efetiva</span>
-                  <p className="text-sm font-medium text-[var(--text)]">{severityLabel}</p>
+                <div className="space-y-3 rounded-2xl border border-[color-mix(in_srgb,var(--border)_70%,transparent_30%)] bg-[color-mix(in_srgb,var(--surface)_96%,rgba(255,255,255,0.85)_4%)] p-4">
+                  <div>
+                    <span className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Severidade efetiva</span>
+                    <p className="text-sm font-medium text-[var(--text)]">{severityLabel}</p>
+                  </div>
+                  {photos?.length ? (
+                    <div>
+                      <span className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Anexos</span>
+                      <ul className="mt-1 space-y-1 text-xs text-[var(--primary-700)]">
+                        {photos.map((photo, index) => (
+                          <li key={photo.key ?? photo.url ?? `photo-${index}`}>
+                            <a
+                              href={photo.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-1 text-[color-mix(in_srgb,var(--primary)_85%,var(--text)_15%)] underline-offset-2 hover:underline"
+                            >
+                              <i className="fas fa-paperclip text-[0.75rem]" aria-hidden />
+                              Ver anexo
+                            </a>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
                 </div>
               </div>
             ) : null}

@@ -53,6 +53,15 @@ function toScheduleContext(item: CorrectiveOpenNcItem | null): CorrectiveSchedul
     effectiveSeverity: item.effectiveSeverity,
     inspectionId: item.inspectionId,
     source: item.source,
+    machineId: item.machineId,
+    machineTag: item.machineTag,
+    machineName: item.machineName,
+    osNumero: item.osNumero,
+    photos: item.photos,
+    questionId: item.questionId,
+    questionLabel: item.questionLabel,
+    inspectionResponseId: item.inspectionResponseId,
+    templateId: item.templateId,
   };
 }
 
@@ -72,7 +81,6 @@ export default function NCsAbertasList() {
   const query = useCorrectiveNcOpenQuery({
     area: areaFilter || undefined,
     severity: severityValue,
-    source: "inspection",
   });
 
   const items = useMemo(() => query.data?.pages.flatMap(page => page.items) ?? [], [query.data]);
@@ -193,7 +201,8 @@ export default function NCsAbertasList() {
           {loadingInitial ? (
             <div className="space-y-3 p-6">
               {Array.from({ length: 5 }).map((_, index) => (
-                <div key={index} className="grid grid-cols-5 gap-4">
+                <div key={index} className="grid grid-cols-6 gap-4">
+                  <Skeleton className="h-6 rounded-xl" />
                   <Skeleton className="h-6 rounded-xl" />
                   <Skeleton className="h-6 rounded-xl" />
                   <Skeleton className="h-6 rounded-xl" />
@@ -214,26 +223,71 @@ export default function NCsAbertasList() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[30%]">Descrição</TableHead>
-                  <TableHead className="w-[15%]">Área</TableHead>
-                  <TableHead className="w-[15%]">Severidade</TableHead>
-                  <TableHead className="w-[20%]">Atualizada em</TableHead>
-                  <TableHead className="w-[20%] text-right">Ação</TableHead>
+                  <TableHead className="w-[18%]">Máquina</TableHead>
+                  <TableHead className="w-[24%]">Descrição</TableHead>
+                  <TableHead className="w-[20%]">Item</TableHead>
+                  <TableHead className="w-[10%]">Severidade</TableHead>
+                  <TableHead className="w-[10%]">O.S.</TableHead>
+                  <TableHead className="w-[10%]">Atualizada em</TableHead>
+                  <TableHead className="w-[8%] text-right">Ação</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {items.map(item => (
                   <TableRow key={item.id}>
                     <TableCell>
-                      <div>
+                      <div className="space-y-1">
                         <p className="font-medium text-[var(--text)]">
-                          {item.description?.trim() || "NC sem descrição"}
+                          {item.machineName?.trim() || "Máquina não identificada"}
                         </p>
-                        <p className="text-xs text-[var(--muted)]">ID: {item.ncId}</p>
+                        <p className="text-xs text-[var(--muted)]">
+                          {item.machineTag ? `TAG ${item.machineTag}` : "TAG não disponível"}
+                        </p>
                       </div>
                     </TableCell>
-                    <TableCell>{formatArea(item.area)}</TableCell>
-                    <TableCell>{item.effectiveSeverity ?? "-"}</TableCell>
+                    <TableCell>
+                      <div className="space-y-1">
+                        <p className="font-medium text-[var(--text)]">
+                          {item.description?.trim() || item.questionLabel?.trim() || "NC sem descrição"}
+                        </p>
+                        <p className="text-xs text-[var(--muted)]">ID: {item.ncId}</p>
+                        {item.photos?.length ? (
+                          <div className="space-y-1">
+                            <p className="text-xs text-[color-mix(in_srgb,var(--primary)_70%,var(--text)_30%)]">
+                              {item.photos.length === 1
+                                ? "1 foto anexada"
+                                : `${item.photos.length} fotos anexadas`}
+                            </p>
+                            <div className="flex flex-wrap gap-2">
+                              {item.photos.slice(0, 3).map((photo, index) => (
+                                <a
+                                  key={photo.key ?? photo.url ?? `photo-${index}`}
+                                  href={photo.url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="inline-flex items-center gap-1 rounded-full border border-[color-mix(in_srgb,var(--primary)_70%,transparent_30%)] px-3 py-1 text-xs font-semibold text-[color-mix(in_srgb,var(--primary)_85%,var(--text)_15%)] transition hover:bg-[color-mix(in_srgb,var(--primary)_10%,transparent_90%)]"
+                                >
+                                  <i className="fas fa-paperclip" aria-hidden />
+                                  Foto {index + 1}
+                                </a>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="space-y-1">
+                        <p className="text-sm text-[var(--text)]">{item.questionLabel ?? "Item do checklist"}</p>
+                        <p className="text-xs text-[var(--muted)]">Área: {formatArea(item.area)}</p>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <span className="inline-flex min-w-[2.5rem] items-center justify-center rounded-full bg-[color-mix(in_srgb,var(--danger)_15%,transparent_85%)] px-2 py-1 text-sm font-semibold text-[color-mix(in_srgb,var(--danger)_80%,var(--text)_20%)]">
+                        {item.effectiveSeverity ?? "-"}
+                      </span>
+                    </TableCell>
+                    <TableCell>{item.osNumero?.trim() || "-"}</TableCell>
                     <TableCell>{formatDateTime(item.updatedAt)}</TableCell>
                     <TableCell className="text-right">
                       <Button type="button" variant="secondary" size="sm" onClick={() => handleProgram(item)}>

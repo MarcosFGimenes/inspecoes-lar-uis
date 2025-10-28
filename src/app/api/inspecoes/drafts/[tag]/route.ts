@@ -22,6 +22,7 @@ const itemSchema = z.object({
   observacao: z.string().trim().max(4000).optional(),
   fotos: z.array(itemPhotoSchema).max(3).optional(),
   osNumero: z.string().trim().max(120).optional(),
+  severity: severity6Schema.nullable().optional(),
 });
 
 const severity6Schema = z.union([
@@ -39,7 +40,6 @@ const payloadSchema = z.object({
   assinaturaDataUrl: z.string().trim().max(200_000).nullable().optional(),
   itens: z.array(itemSchema).optional(),
   resolveIssues: z.array(z.string().trim().min(1)).optional(),
-  inspectionSeverity: severity6Schema.nullable().optional(),
 });
 
 function ensureDataUrl(value: string | null | undefined) {
@@ -208,12 +208,18 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       const observacao = coerceString(entry?.observacao) ?? "";
       const fotos = extractFotosFromData(entry?.fotos);
       const osNumero = coerceString(entry?.osNumero) ?? "";
+      const severityRaw = (entry as Record<string, unknown> | undefined)?.severity;
+      const severity =
+        typeof severityRaw === "number" && [1, 2, 3, 4, 5, 6].includes(severityRaw)
+          ? (severityRaw as 1 | 2 | 3 | 4 | 5 | 6)
+          : null;
       return {
         templateItemId: item.id as string,
         resultado,
         observacao,
         osNumero,
         fotos,
+        severity,
       };
     });
 
@@ -232,7 +238,6 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       progressPercent: percent,
       updatedAt: coerceString(data.updatedAt),
       resolveIssues,
-      inspectionSeverity: typeof data.inspectionSeverity === "number" ? data.inspectionSeverity : null,
     },
   });
 }
@@ -266,11 +271,19 @@ export async function PUT(req: NextRequest, context: RouteContext) {
     return NextResponse.json({ error: "INVALID_SIGNATURE" }, { status: 422 });
   }
 
-  const itens = (payload.itens ?? []).filter(item => resolved.templateItems.some(templateItem => templateItem?.id === item.templateItemId));
+  const itens = (payload.itens ?? []).filter(item =>
+    resolved.templateItems.some(templateItem => templateItem?.id === item.templateItemId)
+  );
   const resolveIssuesIds = Array.isArray(payload.resolveIssues)
     ? payload.resolveIssues.filter(id => typeof id === "string" && id.trim().length > 0)
     : [];
-  const itensMap: Record<string, { resultado: string; observacao: string | null; osNumero: string | null; fotos: DraftFoto[] }> = {};
+  const itensMap: Record<string, {
+    resultado: string;
+    observacao: string | null;
+    osNumero: string | null;
+    fotos: DraftFoto[];
+    severity: (1 | 2 | 3 | 4 | 5 | 6) | null;
+  }> = {};
 
   let answered = 0;
   for (const item of itens) {
@@ -278,7 +291,10 @@ export async function PUT(req: NextRequest, context: RouteContext) {
     const observacao = item.observacao?.trim() ? item.observacao.trim() : null;
     const fotos = normalizeFotosPayload(item.fotos);
     const osNumero = item.osNumero?.trim() ? item.osNumero.trim().toUpperCase() : null;
-    itensMap[item.templateItemId] = { resultado, observacao, osNumero, fotos };
+    const severity = typeof item.severity === "number" && [1, 2, 3, 4, 5, 6].includes(item.severity)
+      ? (item.severity as 1 | 2 | 3 | 4 | 5 | 6)
+      : null;
+    itensMap[item.templateItemId] = { resultado, observacao, osNumero, fotos, severity };
     if (resultado === "C" || resultado === "NC" || resultado === "NA") {
       answered += 1;
     }
@@ -314,7 +330,6 @@ export async function PUT(req: NextRequest, context: RouteContext) {
     updatedAt: nowIso,
     createdAt,
     resolveIssues: resolveIssuesIds,
-    inspectionSeverity: payload.inspectionSeverity ?? null,
   };
 
   await draftRef.set(payloadToSave, { merge: false });
@@ -330,13 +345,13 @@ export async function PUT(req: NextRequest, context: RouteContext) {
         observacao: value.observacao ?? "",
         osNumero: value.osNumero ?? undefined,
         fotos: value.fotos,
+        severity: value.severity ?? undefined,
       })),
       totalItens: total,
       answeredItens: answered,
       progressPercent: percent,
       updatedAt: nowIso,
       resolveIssues: resolveIssuesIds,
-      inspectionSeverity: payload.inspectionSeverity ?? null,
     },
   });
 }

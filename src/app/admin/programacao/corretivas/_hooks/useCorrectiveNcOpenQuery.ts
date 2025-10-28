@@ -6,7 +6,6 @@ import { CORRECTIVE_NC_OPEN_KEY } from "./cache-utils";
 interface FetchParams {
   area?: string;
   severity?: number;
-  source?: string;
 }
 
 interface NcOpenPage {
@@ -26,9 +25,6 @@ async function fetchNcOpenPage(
   }
   if (params.severity) {
     search.set("severity", String(params.severity));
-  }
-  if (params.source) {
-    search.set("source", params.source);
   }
   if (cursor) {
     search.set("cursor", cursor);
@@ -53,7 +49,7 @@ async function fetchNcOpenPage(
   };
 }
 
-export function useCorrectiveNcOpenQuery(filters: FetchParams & { source?: string }) {
+export function useCorrectiveNcOpenQuery(filters: FetchParams) {
   return useInfiniteQuery<NcOpenPage, Error>({
     queryKey: [...CORRECTIVE_NC_OPEN_KEY, filters],
     initialPageParam: null as string | null,

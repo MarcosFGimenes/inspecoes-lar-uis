@@ -278,6 +278,7 @@ export default function CorrectivesPlannedList() {
                   <TableHead className="w-[18%]">NC vinculada</TableHead>
                   <TableHead className="w-[14%]">Área</TableHead>
                   <TableHead className="w-[14%]">Programada para</TableHead>
+                  <TableHead className="w-[12%]">Prazo</TableHead>
                   <TableHead className="w-[10%]">Severidade</TableHead>
                   <TableHead className="w-[16%]">Responsável</TableHead>
                 </TableRow>
@@ -306,6 +307,7 @@ export default function CorrectivesPlannedList() {
                     </TableCell>
                     <TableCell>{formatArea(item.area)}</TableCell>
                     <TableCell>{formatDateTime(item.scheduledDate)}</TableCell>
+                    <TableCell>{formatDateTime(item.dueDate)}</TableCell>
                     <TableCell>{item.effectiveSeverity ?? "-"}</TableCell>
                     <TableCell>{resolveResponsible(item)}</TableCell>
                   </TableRow>

@@ -2,7 +2,8 @@
 
 import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ScheduleResultPayload } from "@/app/admin/programacao/corretivas/_types";
+import type { CorrectiveOsItem, ScheduleResultPayload } from "@/app/admin/programacao/corretivas/_types";
+import type { StoredImage } from "@/types";
 import { useRouter } from "next/navigation";
 
 import { Badge } from "@/components/ui/badge";
@@ -59,6 +60,7 @@ type CorrectiveAgendaItem = {
   area: string | null;
   effectiveSeverity: number | null;
   scheduledDate: string | null;
+  dueDate: string | null;
   status: string | null;
   updatedAt: string | null;
   assignees: {
@@ -66,6 +68,21 @@ type CorrectiveAgendaItem = {
     maintainer1: string | null;
     maintainer2: string | null;
   } | null;
+  completedAt: string | null;
+  completedBy: string | null;
+  completedByName: string | null;
+  completedByMatricula: string | null;
+  completionNotes: string | null;
+  machineId: string | null;
+  machineTag: string | null;
+  machineName: string | null;
+  ncPhotos: StoredImage[] | null;
+  inspectionId: string | null;
+  inspectionResponseId: string | null;
+  templateId: string | null;
+  questionId: string | null;
+  questionLabel: string | null;
+  osNumero: string | null;
 };
 
 export default function MaintHomeStartPage() {
@@ -98,6 +115,12 @@ export default function MaintHomeStartPage() {
     to: "",
     responsible: "",
   });
+  const [correctiveDetailOpen, setCorrectiveDetailOpen] = useState(false);
+  const [selectedCorrective, setSelectedCorrective] = useState<CorrectiveAgendaItem | null>(null);
+  const [completeNotes, setCompleteNotes] = useState("");
+  const [completeLoading, setCompleteLoading] = useState(false);
+  const [completeError, setCompleteError] = useState<string | null>(null);
+  const [completeSuccess, setCompleteSuccess] = useState<string | null>(null);
 
   const toIsoBoundary = useCallback((value: string, boundary: "start" | "end") => {
     if (!value) return null;
@@ -428,6 +451,7 @@ export default function MaintHomeStartPage() {
           area: detail.area,
           effectiveSeverity: detail.effectiveSeverity,
           scheduledDate: detail.scheduledDate,
+          dueDate: detail.dueDate ?? null,
           status: detail.status,
           updatedAt: detail.updatedAt || nowIso,
           assignees: {
@@ -435,6 +459,21 @@ export default function MaintHomeStartPage() {
             maintainer1: detail.assignees.maintainer1,
             maintainer2: detail.assignees.maintainer2,
           },
+          completedAt: null,
+          completedBy: null,
+          completedByName: null,
+          completedByMatricula: null,
+          completionNotes: null,
+          machineId: detail.machineId ?? null,
+          machineTag: detail.machineTag ?? null,
+          machineName: detail.machineName ?? null,
+          ncPhotos: detail.ncPhotos ?? null,
+          inspectionId: detail.inspectionId ?? null,
+          inspectionResponseId: detail.inspectionResponseId ?? null,
+          templateId: detail.templateId ?? null,
+          questionId: detail.questionId ?? null,
+          questionLabel: detail.questionLabel ?? null,
+          osNumero: detail.osNumero ?? null,
         };
         return [newItem, ...next];
       });
@@ -593,6 +632,88 @@ export default function MaintHomeStartPage() {
     }
     fetchCorrectives({ cursor: correctivesNextCursor, replace: false }).catch(() => undefined);
   }, [correctivesNextCursor, correctivesLoadingMore, fetchCorrectives]);
+
+  const handleCloseCorrectiveDetail = useCallback(() => {
+    setCorrectiveDetailOpen(false);
+    setSelectedCorrective(null);
+    setCompleteNotes("");
+    setCompleteError(null);
+    setCompleteSuccess(null);
+  }, []);
+
+  const handleCompleteCorrective = useCallback(async () => {
+    if (!selectedCorrective) return;
+    setCompleteLoading(true);
+    setCompleteError(null);
+    try {
+      const response = await fetch(`/api/correctives/os/${selectedCorrective.osId}/complete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notes: completeNotes.trim() || undefined }),
+      });
+      if (response.status === 401) {
+        window.location.href = "/login";
+        return;
+      }
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        const message = typeof payload?.error === "string" ? payload.error : "Falha ao concluir a corretiva.";
+        throw new Error(message);
+      }
+
+      const data = (await response.json()) as {
+        osId: string;
+        ncId: string | null;
+        workOrder: CorrectiveOsItem | null;
+      };
+
+      const workOrder = data.workOrder as (CorrectiveAgendaItem | null);
+      setCorrectives(prev =>
+        prev.map(item => {
+          if (item.osId !== data.osId) {
+            return item;
+          }
+          const updated: CorrectiveAgendaItem = {
+            ...item,
+            status: workOrder?.status ?? "done",
+            updatedAt: workOrder?.updatedAt ?? new Date().toISOString(),
+            completedAt: workOrder?.completedAt ?? new Date().toISOString(),
+            completedBy: workOrder?.completedBy ?? session?.id ?? null,
+            completedByName: workOrder?.completedByName ?? session?.nome ?? null,
+            completedByMatricula: workOrder?.completedByMatricula ?? session?.matricula ?? null,
+            completionNotes: workOrder?.completionNotes ?? (completeNotes.trim() || null),
+          };
+          return updated;
+        })
+      );
+
+      if (workOrder) {
+        setSelectedCorrective(prev => (prev && prev.osId === workOrder.osId ? { ...prev, ...workOrder } : prev));
+      } else {
+        setSelectedCorrective(prev =>
+          prev && prev.osId === data.osId
+            ? {
+                ...prev,
+                status: "done",
+                updatedAt: new Date().toISOString(),
+                completedAt: new Date().toISOString(),
+                completedBy: session?.id ?? null,
+                completedByName: session?.nome ?? null,
+                completedByMatricula: session?.matricula ?? null,
+                completionNotes: completeNotes.trim() || null,
+              }
+            : prev
+        );
+      }
+
+      setCompleteSuccess("Corretiva marcada como concluída.");
+    } catch (error) {
+      const message = error instanceof Error && error.message ? error.message : "Falha ao concluir a corretiva.";
+      setCompleteError(message);
+    } finally {
+      setCompleteLoading(false);
+    }
+  }, [selectedCorrective, completeNotes, session?.id, session?.nome, session?.matricula]);
 
   const handleResetCorrectivesFilters = useCallback(() => {
     setCorrectivesFilters({
@@ -893,9 +1014,11 @@ export default function MaintHomeStartPage() {
                         <th className="px-4 py-3 text-left font-semibold">NC relacionada</th>
                         <th className="px-4 py-3 text-left font-semibold">Área</th>
                         <th className="px-4 py-3 text-left font-semibold">Programada para</th>
+                        <th className="px-4 py-3 text-left font-semibold">Prazo</th>
                         <th className="px-4 py-3 text-left font-semibold">Severidade</th>
                         <th className="px-4 py-3 text-left font-semibold">Responsáveis</th>
                         <th className="px-4 py-3 text-left font-semibold">Status</th>
+                        <th className="px-4 py-3 text-left font-semibold">Ações</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-slate-700">
@@ -908,13 +1031,35 @@ export default function MaintHomeStartPage() {
                                 {item.description?.trim() || item.ncDescription?.trim() || "-"}
                               </span>
                               {item.ncId ? <span className="text-[11px] text-slate-400">NC: {item.ncId}</span> : null}
+                              {item.machineName || item.machineTag ? (
+                                <span className="text-[11px] text-slate-400">
+                                  {item.machineName?.trim() ?? "Máquina"}
+                                  {item.machineTag ? ` · TAG ${item.machineTag}` : ""}
+                                </span>
+                              ) : null}
                             </div>
                           </td>
                           <td className="px-4 py-3">{formatAreaLabel(item.area)}</td>
                           <td className="px-4 py-3">{formatDateTime(item.scheduledDate)}</td>
+                          <td className="px-4 py-3">{formatDateTime(item.dueDate)}</td>
                           <td className="px-4 py-3">{item.effectiveSeverity ?? "-"}</td>
                           <td className="px-4 py-3">{formatAssignees(item.assignees)}</td>
                           <td className="px-4 py-3 capitalize">{item.status ?? "-"}</td>
+                          <td className="px-4 py-3">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedCorrective(item);
+                                setCompleteNotes("");
+                                setCompleteError(null);
+                                setCompleteSuccess(null);
+                                setCorrectiveDetailOpen(true);
+                              }}
+                              className="inline-flex items-center justify-center rounded-lg border border-slate-300 px-3 py-1 text-xs font-medium text-slate-600 transition hover:border-slate-400 hover:text-slate-900"
+                            >
+                              Ver detalhes
+                            </button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -967,6 +1112,142 @@ export default function MaintHomeStartPage() {
           </button>
         </div>
       </section>
+
+      {correctiveDetailOpen && selectedCorrective ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-8">
+          <div className="absolute inset-0" onClick={handleCloseCorrectiveDetail} aria-hidden />
+          <div className="relative z-10 w-full max-w-2xl rounded-2xl bg-white shadow-xl">
+            <div className="flex items-start justify-between border-b border-slate-200 px-6 py-4">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900">Corretiva #{selectedCorrective.osId}</h3>
+                <p className="text-sm text-slate-500">
+                  {selectedCorrective.description?.trim() || selectedCorrective.ncDescription?.trim() || "Sem descrição"}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleCloseCorrectiveDetail}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:border-slate-300 hover:text-slate-800"
+              >
+                <i className="fas fa-xmark" aria-hidden />
+                <span className="sr-only">Fechar</span>
+              </button>
+            </div>
+
+            <div className="space-y-4 px-6 py-5 text-sm text-slate-700">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-xl border border-slate-200 p-3">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Status</span>
+                  <p className="text-sm font-medium capitalize text-slate-900">{selectedCorrective.status ?? "-"}</p>
+                  <p className="text-xs text-slate-400">Última atualização: {formatDateTime(selectedCorrective.updatedAt)}</p>
+                </div>
+                <div className="rounded-xl border border-slate-200 p-3">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Severidade</span>
+                  <p className="text-sm font-medium text-slate-900">{selectedCorrective.effectiveSeverity ?? "-"}</p>
+                  <p className="text-xs text-slate-400">Área: {formatAreaLabel(selectedCorrective.area)}</p>
+                </div>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-xl border border-slate-200 p-3">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Programada para</span>
+                  <p className="text-sm font-medium text-slate-900">{formatDateTime(selectedCorrective.scheduledDate)}</p>
+                </div>
+                <div className="rounded-xl border border-slate-200 p-3">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Prazo</span>
+                  <p className="text-sm font-medium text-slate-900">{formatDateTime(selectedCorrective.dueDate)}</p>
+                </div>
+              </div>
+
+              {selectedCorrective.machineName || selectedCorrective.machineTag ? (
+                <div className="rounded-xl border border-slate-200 p-3">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Máquina</span>
+                  <p className="text-sm font-medium text-slate-900">
+                    {selectedCorrective.machineName?.trim() ?? "Máquina"}
+                    {selectedCorrective.machineTag ? ` · TAG ${selectedCorrective.machineTag}` : ""}
+                  </p>
+                </div>
+              ) : null}
+
+              {selectedCorrective.ncPhotos?.length ? (
+                <div className="rounded-xl border border-slate-200 p-3">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Anexos da inspeção</span>
+                  <ul className="mt-2 flex flex-wrap gap-2 text-xs">
+                    {selectedCorrective.ncPhotos.map((photo, index) => (
+                      <li key={photo.key ?? photo.url ?? `photo-${index}`}>
+                        <a
+                          href={photo.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-2 rounded-full border border-slate-300 px-3 py-1 text-slate-600 transition hover:border-slate-400 hover:text-slate-900"
+                        >
+                          <i className="fas fa-paperclip" aria-hidden />
+                          Ver anexo {index + 1}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+
+              <div className="rounded-xl border border-slate-200 p-3">
+                <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Responsáveis</span>
+                <p className="text-sm text-slate-900">{formatAssignees(selectedCorrective.assignees)}</p>
+              </div>
+
+              {selectedCorrective.completedAt ? (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-700">
+                  Concluída em {formatDateTime(selectedCorrective.completedAt)}.
+                  {selectedCorrective.completedByName ? ` Responsável: ${selectedCorrective.completedByName}.` : ""}
+                </div>
+              ) : null}
+
+              {completeError ? (
+                <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">{completeError}</div>
+              ) : null}
+              {completeSuccess ? (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-700">
+                  {completeSuccess}
+                </div>
+              ) : null}
+
+              {!selectedCorrective.completedAt ? (
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold text-slate-600" htmlFor="complete-notes">
+                    Observações (opcional)
+                  </label>
+                  <textarea
+                    id="complete-notes"
+                    value={completeNotes}
+                    onChange={event => setCompleteNotes(event.target.value)}
+                    rows={3}
+                    className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    placeholder="Detalhe as evidências da conclusão"
+                  />
+                </div>
+              ) : null}
+            </div>
+
+            <div className="flex items-center justify-between gap-3 border-t border-slate-200 px-6 py-4">
+              <button
+                type="button"
+                onClick={handleCloseCorrectiveDetail}
+                className="inline-flex items-center justify-center rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-400 hover:text-slate-900"
+              >
+                Fechar
+              </button>
+              <button
+                type="button"
+                onClick={handleCompleteCorrective}
+                disabled={completeLoading || Boolean(selectedCorrective.completedAt)}
+                className="inline-flex items-center justify-center rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-emerald-400"
+              >
+                {selectedCorrective.completedAt ? "Já concluída" : completeLoading ? "Salvando..." : "Marcar como concluída"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <section className="space-y-4">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
