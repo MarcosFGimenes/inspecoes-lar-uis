@@ -66,7 +66,12 @@ export function useCorrectiveOsQuery(filters: FetchParams, options?: { enabled?:
     queryKey: [...CORRECTIVE_OS_KEY, filters],
     initialPageParam: null as string | null,
     getNextPageParam: lastPage => lastPage.nextCursor ?? undefined,
-    queryFn: ({ pageParam, signal }) => fetchCorrectiveOs(filters, pageParam ?? null, signal),
+    queryFn: ({ pageParam, signal }) =>
+      fetchCorrectiveOs(
+        filters,
+        typeof pageParam === "string" ? pageParam : null,
+        signal
+      ),
     enabled: options?.enabled ?? true,
   });
 }
