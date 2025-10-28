@@ -58,6 +58,7 @@ export function useCorrectiveNcOpenQuery(filters: FetchParams & { source?: strin
     queryKey: [...CORRECTIVE_NC_OPEN_KEY, filters],
     initialPageParam: null as string | null,
     getNextPageParam: lastPage => lastPage.nextCursor ?? undefined,
-    queryFn: ({ pageParam, signal }) => fetchNcOpenPage(filters, pageParam ?? null, signal),
+    queryFn: ({ pageParam, signal }) =>
+      fetchNcOpenPage(filters, typeof pageParam === "string" ? pageParam : null, signal),
   });
 }

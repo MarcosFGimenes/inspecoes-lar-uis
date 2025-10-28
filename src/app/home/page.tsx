@@ -891,6 +891,7 @@ export default function MaintHomeStartPage() {
                       <tr>
                         <th className="px-4 py-3 text-left font-semibold">OS</th>
                         <th className="px-4 py-3 text-left font-semibold">NC relacionada</th>
+                        <th className="px-4 py-3 text-left font-semibold">Área</th>
                         <th className="px-4 py-3 text-left font-semibold">Programada para</th>
                         <th className="px-4 py-3 text-left font-semibold">Severidade</th>
                         <th className="px-4 py-3 text-left font-semibold">Responsáveis</th>
@@ -909,6 +910,7 @@ export default function MaintHomeStartPage() {
                               {item.ncId ? <span className="text-[11px] text-slate-400">NC: {item.ncId}</span> : null}
                             </div>
                           </td>
+                          <td className="px-4 py-3">{formatAreaLabel(item.area)}</td>
                           <td className="px-4 py-3">{formatDateTime(item.scheduledDate)}</td>
                           <td className="px-4 py-3">{item.effectiveSeverity ?? "-"}</td>
                           <td className="px-4 py-3">{formatAssignees(item.assignees)}</td>
