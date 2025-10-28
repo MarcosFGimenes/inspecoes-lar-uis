@@ -7,18 +7,31 @@ import { requireMaintOrAdmin } from "@/lib/guards";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+type RouteContext = {
+  params: Promise<Record<string, string | string[] | undefined>>;
+};
+
 const payloadSchema = z.object({
   completedAt: z.string().trim().optional(),
   notes: z.string().trim().max(2000).optional(),
 });
 
-export async function POST(req: NextRequest, { params }: { params: { osId: string } }) {
+function resolveOsId(params: Record<string, string | string[] | undefined>) {
+  const value = params.osId;
+  if (Array.isArray(value)) {
+    return value[0] ?? null;
+  }
+  return value ?? null;
+}
+
+export async function POST(req: NextRequest, context: RouteContext) {
   const auth = await requireMaintOrAdmin(req);
   if (!auth.ok) {
     return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: auth.status });
   }
 
-  const osId = params.osId?.trim();
+  const params = (await context.params) ?? {};
+  const osId = resolveOsId(params)?.trim();
   if (!osId) {
     return NextResponse.json({ error: "OS_ID_REQUIRED" }, { status: 400 });
   }
