@@ -415,7 +415,7 @@ export async function listOpenNCsView(params: {
   }
 
   const snapshot = await query.limit(limit).get();
-  let items: CorrectiveOpenNcView[] = snapshot.docs.map(doc => {
+  const items: CorrectiveOpenNcView[] = snapshot.docs.map(doc => {
     const data = doc.data();
     const severity = extractSeverity(data.effectiveSeverity);
     const description = typeof data.description === "string" ? data.description : null;

@@ -385,6 +385,15 @@ export function ScheduleCorrectivePlaceholder({
       onClose,
       onScheduled,
       scheduleMutation,
+      context?.inspectionResponseId,
+      context?.machineId,
+      context?.machineName,
+      context?.machineTag,
+      context?.osNumero,
+      context?.photos,
+      context?.questionId,
+      context?.questionLabel,
+      context?.templateId,
     ]
   );
 
