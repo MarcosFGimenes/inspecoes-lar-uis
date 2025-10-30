@@ -1,6 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
 
-import type { CorrectiveAssigneeOption } from "../_types";
 import { CORRECTIVE_ASSIGNEES_KEY } from "./cache-utils";
 import { fetchCorrectiveAssignees } from "@/lib/correctives/assignees";
 

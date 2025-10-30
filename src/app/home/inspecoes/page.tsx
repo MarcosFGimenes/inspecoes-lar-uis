@@ -345,13 +345,17 @@ export default function MaintCompletedInspectionsPage() {
         }
 
         const data = await response.json();
-        const rawItems = Array.isArray(data?.items) ? data.items : [];
+        const rawItems = Array.isArray(data?.items) ? (data.items as unknown[]) : [];
         const normalized = rawItems
-          .map(item => {
-            const osId = typeof item?.osId === "string" ? item.osId : "";
+          .map(raw => {
+            if (!raw || typeof raw !== "object") {
+              return null;
+            }
+            const item = raw as Record<string, unknown>;
+            const osId = typeof item.osId === "string" ? item.osId : "";
             if (!osId) return null;
             const assigneePayload =
-              item?.assignees && typeof item.assignees === "object"
+              item.assignees && typeof item.assignees === "object"
                 ? {
                     owner: typeof (item.assignees as Record<string, unknown>).owner === "string"
                       ? (item.assignees as Record<string, unknown>).owner
@@ -366,24 +370,24 @@ export default function MaintCompletedInspectionsPage() {
                 : null;
             return {
               osId,
-              osNumero: typeof item?.osNumero === "string" ? item.osNumero : null,
-              ncId: typeof item?.ncId === "string" ? item.ncId : null,
-              description: typeof item?.description === "string" ? item.description : null,
-              ncDescription: typeof item?.ncDescription === "string" ? item.ncDescription : null,
-              area: typeof item?.area === "string" ? item.area : null,
-              effectiveSeverity: Number.isFinite(item?.effectiveSeverity)
+              osNumero: typeof item.osNumero === "string" ? item.osNumero : null,
+              ncId: typeof item.ncId === "string" ? item.ncId : null,
+              description: typeof item.description === "string" ? item.description : null,
+              ncDescription: typeof item.ncDescription === "string" ? item.ncDescription : null,
+              area: typeof item.area === "string" ? item.area : null,
+              effectiveSeverity: Number.isFinite(item.effectiveSeverity)
                 ? Number(item.effectiveSeverity)
                 : null,
-              scheduledDate: typeof item?.scheduledDate === "string" ? item.scheduledDate : null,
-              completedAt: typeof item?.completedAt === "string" ? item.completedAt : null,
-              dueDate: typeof item?.dueDate === "string" ? item.dueDate : null,
-              machineName: typeof item?.machineName === "string" ? item.machineName : null,
-              machineTag: typeof item?.machineTag === "string" ? item.machineTag : null,
+              scheduledDate: typeof item.scheduledDate === "string" ? item.scheduledDate : null,
+              completedAt: typeof item.completedAt === "string" ? item.completedAt : null,
+              dueDate: typeof item.dueDate === "string" ? item.dueDate : null,
+              machineName: typeof item.machineName === "string" ? item.machineName : null,
+              machineTag: typeof item.machineTag === "string" ? item.machineTag : null,
               assignees: assigneePayload,
-              completionNotes: typeof item?.completionNotes === "string" ? item.completionNotes : null,
-              ncPhotos: Array.isArray(item?.ncPhotos) ? (item.ncPhotos as StoredImage[]) : null,
-              updatedAt: typeof item?.updatedAt === "string" ? item.updatedAt : null,
-              status: typeof item?.status === "string" ? item.status : null,
+              completionNotes: typeof item.completionNotes === "string" ? item.completionNotes : null,
+              ncPhotos: Array.isArray(item.ncPhotos) ? (item.ncPhotos as StoredImage[]) : null,
+              updatedAt: typeof item.updatedAt === "string" ? item.updatedAt : null,
+              status: typeof item.status === "string" ? item.status : null,
             } satisfies CorrectiveHistoryItem;
           })
           .filter((entry): entry is CorrectiveHistoryItem => Boolean(entry && entry.osId));
