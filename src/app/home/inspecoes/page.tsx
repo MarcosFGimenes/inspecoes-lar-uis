@@ -354,18 +354,18 @@ export default function MaintCompletedInspectionsPage() {
             const item = raw as Record<string, unknown>;
             const osId = typeof item.osId === "string" ? item.osId : "";
             if (!osId) return null;
-            const assigneePayload =
+            const assigneeRecord =
               item.assignees && typeof item.assignees === "object"
+                ? (item.assignees as Record<string, unknown>)
+                : null;
+            const assigneePayload: { owner: string | null; maintainer1: string | null; maintainer2: string | null } | null =
+              assigneeRecord
                 ? {
-                    owner: typeof (item.assignees as Record<string, unknown>).owner === "string"
-                      ? (item.assignees as Record<string, unknown>).owner
-                      : null,
-                    maintainer1: typeof (item.assignees as Record<string, unknown>).maintainer1 === "string"
-                      ? (item.assignees as Record<string, unknown>).maintainer1
-                      : null,
-                    maintainer2: typeof (item.assignees as Record<string, unknown>).maintainer2 === "string"
-                      ? (item.assignees as Record<string, unknown>).maintainer2
-                      : null,
+                    owner: typeof assigneeRecord.owner === "string" ? assigneeRecord.owner : null,
+                    maintainer1:
+                      typeof assigneeRecord.maintainer1 === "string" ? assigneeRecord.maintainer1 : null,
+                    maintainer2:
+                      typeof assigneeRecord.maintainer2 === "string" ? assigneeRecord.maintainer2 : null,
                   }
                 : null;
             return {
