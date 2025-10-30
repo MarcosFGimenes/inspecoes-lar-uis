@@ -320,14 +320,17 @@ export default function AdminNonConformitiesPage() {
         const responsible = item.responsible.trim();
         const dueDateIso = item.dueDate ? new Date(`${item.dueDate}T00:00:00`).toISOString() : null;
 
+        const previousTreatment = existing.find(t => t.questionId === item.questionId);
+
         const updatedTreatment: ChecklistNonConformityTreatment = {
           questionId: item.questionId,
           summary: summary || undefined,
           responsible: responsible || undefined,
           dueDate: dueDateIso,
           status: item.status,
-          createdAt: existing.find(t => t.questionId === item.questionId)?.createdAt ?? nowIso,
+          createdAt: previousTreatment?.createdAt ?? nowIso,
           updatedAt: nowIso,
+          severity: previousTreatment?.severity ?? undefined,
         };
 
         const nextTreatments = [

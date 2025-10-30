@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+
+import { AppProviders } from "./providers";
 import { cn } from "@/lib/cn";
 import "./globals.css";
 
@@ -22,10 +24,12 @@ export default function RootLayout({
           href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
         />
       </head>
-      <body className={cn("app-body antialiased")}> 
-        <div className="app-shell">
-          <div className="page-wrapper">{children}</div>
-        </div>
+      <body className={cn("app-body antialiased")}>
+        <AppProviders>
+          <div className="app-shell">
+            <div className="page-wrapper">{children}</div>
+          </div>
+        </AppProviders>
       </body>
     </html>
   );
