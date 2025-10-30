@@ -370,7 +370,7 @@ export default function CorrectivesPlannedList() {
                     </TableCell>
                     <TableCell>
                       {item.status ? (
-                        <Badge variant="outline" className="uppercase tracking-wide">
+                        <Badge className="uppercase tracking-wide">
                           {formatStatus(item.status)}
                         </Badge>
                       ) : (
