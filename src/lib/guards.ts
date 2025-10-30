@@ -13,6 +13,20 @@ export async function requireMaint() {
   return { ok: true as const, store };
 }
 
+export async function requireMaintOrAdmin(req: NextRequest) {
+  const maintAuth = await requireMaint();
+  if (maintAuth.ok) {
+    return { ok: true as const, role: "maint" as const, store: maintAuth.store };
+  }
+
+  const adminOk = await requireAdminFromRequest(req);
+  if (adminOk) {
+    return { ok: true as const, role: "admin" as const };
+  }
+
+  return { ok: false as const, status: maintAuth.status, error: maintAuth.error };
+}
+
 export async function requireAdmin() {
   const cookieStore = getCookieStore();
   const cookie = cookieStore.get("adminSess")?.value;

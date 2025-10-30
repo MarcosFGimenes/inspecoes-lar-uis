@@ -7,6 +7,8 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import type { SignatureCanvasInstance } from "@/components/signature-canvas-client";
 import type { StoredImage } from "@/types";
 import { normalizeStoredImages } from "@/lib/storage/images";
+import type { Severity6 } from "@/types/severity";
+import { SeveritySelector6 } from "./_components/severity-selector-6";
 
 type SignatureCanvasComponent = typeof import("@/components/signature-canvas-client").default;
 const SignatureCanvas = dynamic(() => import("@/components/signature-canvas-client"), { ssr: false }) as unknown as SignatureCanvasComponent;
@@ -46,6 +48,7 @@ type ItemFormState = {
   osNumero: string;
   fotos: ItemPhotoState[];
   fileKey: number;
+  severity: Severity6 | null;
 };
 type FeedbackState = { type: "success" | "error"; message: string };
 type DraftItemPhotoState = { dataUrl: string; name?: string | null };
@@ -55,6 +58,7 @@ type DraftItemState = {
   observacao: string;
   osNumero: string;
   fotos: DraftItemPhotoState[];
+  severity: Severity6 | null;
 };
 type DraftDataState = {
   osNumero: string;
@@ -289,6 +293,7 @@ export default function InspectionPage() {
       osNumero: osBloqueado ?? "",
       fotos: [],
       fileKey: Date.now(),
+      severity: null,
     }),
     [osBloqueado],
   );
@@ -457,6 +462,7 @@ export default function InspectionPage() {
           osNumero: lockedOsValue ?? saved?.osNumero?.trim().toUpperCase() ?? "",
           fotos,
           fileKey: now + idx,
+          severity: saved?.severity ?? null,
         };
       });
       setItemsState(base);
@@ -509,6 +515,7 @@ export default function InspectionPage() {
               dataUrl: String(foto.dataUrl),
               name: foto?.name?.trim() ? foto.name.trim() : null,
             })),
+            severity: saved?.severity ?? null,
           };
         });
       const normalizedPayload: DraftDataState = {
@@ -566,6 +573,7 @@ export default function InspectionPage() {
                   fotos: Array.isArray(item.fotos)
                     ? item.fotos.filter(photo => typeof photo?.dataUrl === "string" && photo.dataUrl.trim())
                     : [],
+                  severity: item.severity ?? null,
                 }))
               : [],
             resolveIssues: Array.isArray(draft.resolveIssues) ? draft.resolveIssues : [],
@@ -611,12 +619,16 @@ export default function InspectionPage() {
               name: foto.name ?? null,
             }))
         : [];
+      const severityValue = st?.severity && [1, 2, 3, 4, 5, 6].includes(st.severity)
+        ? (st.severity as Severity6)
+        : null;
       itens.push({
         templateItemId: item.id,
         resultado,
         observacao,
         osNumero: osNumeroItem,
         fotos,
+        severity: severityValue,
       });
     });
     const resolveIds = Object.entries(resolveIssues)
@@ -831,6 +843,23 @@ export default function InspectionPage() {
           [itemId]: {
             ...previous,
             resultado: value,
+            severity: value === "NC" ? previous.severity ?? null : null,
+          },
+        };
+      });
+    },
+    [createEmptyItemState]
+  );
+
+  const handleItemSeverityChange = useCallback(
+    (itemId: string, value: Severity6 | null) => {
+      setItemsState(prev => {
+        const previous = prev[itemId] ?? createEmptyItemState();
+        return {
+          ...prev,
+          [itemId]: {
+            ...previous,
+            severity: value,
           },
         };
       });
@@ -963,6 +992,7 @@ export default function InspectionPage() {
           observacaoItem?: string;
           fotos?: string[];
           osNumeroItem?: string;
+          severity?: Severity6;
         }> = [];
         const lockedOsNumero = osBloqueado ?? null;
         for (const item of sortedItems) {
@@ -997,12 +1027,22 @@ export default function InspectionPage() {
             const normalized = fotosValues.filter((value): value is string => typeof value === "string" && value.trim().length > 0);
             fotosBase64 = normalized.length ? normalized : undefined;
           }
+          const severityValue = st.severity && [1, 2, 3, 4, 5, 6].includes(st.severity)
+            ? (st.severity as Severity6)
+            : null;
+          if (st.resultado === "NC" && !severityValue) {
+            setFeedback({ type: "error", message: "Defina a severidade para todos os itens marcados como NC." });
+            setSaving(false);
+            setSavingAction(null);
+            return;
+          }
           payloadItems.push({
             templateItemId: item.id,
             resultado: st.resultado,
             observacaoItem: st.observacao.trim() || undefined,
             fotos: fotosBase64,
             osNumeroItem,
+            severity: severityValue ?? undefined,
           });
         }
         if (!payloadItems.length) { setFeedback({ type: "error", message: "Template sem itens configurados." }); setSaving(false); setSavingAction(null); return; }
@@ -1531,24 +1571,36 @@ export default function InspectionPage() {
                   </div>
 
                   {st?.resultado === "NC" && (
-                    <div className="mt-3 space-y-1">
-                      <label className="text-sm font-medium text-gray-700" htmlFor={`os-item-${item.id}`}>
-                        Nº da O.S. deste item
-                      </label>
-                      <input
-                        id={`os-item-${item.id}`}
-                        value={st?.osNumero ?? ""}
-                        onChange={event => handleItemOsNumeroChange(item.id!, event.target.value)}
-                        readOnly={Boolean(osBloqueado)}
-                        placeholder="Informe o número da O.S."
-                        className={`w-full rounded-md border border-gray-300 px-3 py-2 text-sm uppercase text-gray-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 ${osBloqueado ? "cursor-not-allowed bg-gray-100 text-gray-500" : "bg-white"}`}
-                      />
-                      <p className="text-xs text-gray-500">
-                        {osBloqueado
-                          ? "Número preenchido automaticamente a partir da programação."
-                          : "Obrigatório para itens marcados como não conformes."}
-                      </p>
-                    </div>
+                    <>
+                      <div className="mt-3 space-y-2">
+                        <label className="text-sm font-medium text-gray-700">Severidade (1–6)</label>
+                        <SeveritySelector6
+                          value={st?.severity ?? null}
+                          onChange={value => handleItemSeverityChange(item.id!, value)}
+                        />
+                        {!st?.severity && (
+                          <p className="text-xs text-red-500">Selecione a severidade para registrar a não conformidade.</p>
+                        )}
+                      </div>
+                      <div className="mt-3 space-y-1">
+                        <label className="text-sm font-medium text-gray-700" htmlFor={`os-item-${item.id}`}>
+                          Nº da O.S. deste item
+                        </label>
+                        <input
+                          id={`os-item-${item.id}`}
+                          value={st?.osNumero ?? ""}
+                          onChange={event => handleItemOsNumeroChange(item.id!, event.target.value)}
+                          readOnly={Boolean(osBloqueado)}
+                          placeholder="Informe o número da O.S."
+                          className={`w-full rounded-md border border-gray-300 px-3 py-2 text-sm uppercase text-gray-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 ${osBloqueado ? "cursor-not-allowed bg-gray-100 text-gray-500" : "bg-white"}`}
+                        />
+                        <p className="text-xs text-gray-500">
+                          {osBloqueado
+                            ? "Número preenchido automaticamente a partir da programação."
+                            : "Obrigatório para itens marcados como não conformes."}
+                        </p>
+                      </div>
+                    </>
                   )}
 
                   {/* Fotos – área tracejada (mantendo seu handler) */}

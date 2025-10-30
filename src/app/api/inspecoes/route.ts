@@ -3,10 +3,12 @@ import { z } from "zod";
 import { FieldPath, FieldValue, Timestamp } from "firebase-admin/firestore";
 import type { QueryDocumentSnapshot, DocumentData, DocumentSnapshot } from "firebase-admin/firestore";
 import { adminDb } from "@/lib/firebase-admin";
+import { saveCorrectiveNonConformity } from "@/lib/db/corrective";
 import { findMachineByTag } from "@/lib/db/machines";
 import { requireMaint } from "@/lib/guards";
 import { randomUUID } from "crypto";
 import type { ChecklistAnswer, ChecklistNonConformityTreatment } from "@/types";
+import type { Severity6 } from "@/types/severity";
 import { isMaintainerProfileId } from "@/lib/signature-profiles";
 import { fromDataUrl } from "@/lib/storage/dataUrl";
 import { r2Provider } from "@/lib/storage/r2Provider";
@@ -14,6 +16,15 @@ import type { StoredImage } from "@/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const severity6Schema = z.union([
+  z.literal(1),
+  z.literal(2),
+  z.literal(3),
+  z.literal(4),
+  z.literal(5),
+  z.literal(6),
+]);
 
 const payloadSchema = z.object({
   tag: z.string().trim().min(1),
@@ -32,6 +43,7 @@ const payloadSchema = z.object({
         observacaoItem: z.string().trim().optional(),
         fotos: z.array(z.string().trim().min(1)).max(3).optional(),
         osNumeroItem: z.string().trim().min(1).optional(),
+        severity: severity6Schema.nullable().optional(),
       })
     )
     .min(1),
@@ -250,11 +262,29 @@ export async function POST(req: NextRequest) {
       observacaoItem: string | null;
       fotos: StoredImage[];
       osNumeroItem: string | null;
+      severity: Severity6 | null;
     }> = [];
     const answersPayload: ChecklistAnswer[] = [];
     const treatmentsPayload: ChecklistNonConformityTreatment[] = [];
 
     const fallbackOsNumero = osNumeroFinal;
+    const machineAreaRaw =
+      typeof (machineRecord as Record<string, unknown>)?.area === "string"
+        ? String((machineRecord as Record<string, unknown>).area)
+        : null;
+    const machineArea = (() => {
+      if (!machineAreaRaw) return null;
+      const trimmed = machineAreaRaw.trim();
+      if (!trimmed) return null;
+      const lowered = trimmed.toLowerCase();
+      if (["mechanical", "mecanico", "mecânico", "mecanica", "mecânica", "mec"].some(term => lowered.includes(term))) {
+        return "mechanical";
+      }
+      if (["electrical", "eletrico", "elétrico", "eletrica", "elétrica", "eletr"].some(term => lowered.includes(term))) {
+        return "electrical";
+      }
+      return trimmed;
+    })();
 
     for (const item of payload.itens) {
       const osNumeroItem = item.osNumeroItem?.trim()
@@ -262,6 +292,13 @@ export async function POST(req: NextRequest) {
         : fallbackOsNumero;
       if (item.resultado === "NC" && !osNumeroItem) {
         return NextResponse.json({ error: "ITEM_OS_REQUIRED" }, { status: 422 });
+      }
+      const severityValue =
+        typeof item.severity === "number" && [1, 2, 3, 4, 5, 6].includes(item.severity)
+          ? (item.severity as Severity6)
+          : null;
+      if (item.resultado === "NC" && !severityValue) {
+        return NextResponse.json({ error: "ITEM_SEVERITY_REQUIRED" }, { status: 422 });
       }
       const fotosBase64 = item.fotos ? item.fotos.slice(0, 3) : [];
       const fotoAttachments: StoredImage[] = [];
@@ -288,6 +325,7 @@ export async function POST(req: NextRequest) {
         observacaoItem: item.observacaoItem?.trim() ? item.observacaoItem.trim() : null,
         fotos: fotoAttachments,
         osNumeroItem,
+        severity: severityValue,
       });
 
       const templateItem = templateMap.get(item.templateItemId) ?? {};
@@ -299,6 +337,7 @@ export async function POST(req: NextRequest) {
         observation: item.observacaoItem?.trim() ? item.observacaoItem.trim() : null,
         photoUrls: fotoAttachments,
         itemOsNumero: osNumeroItem,
+        severity: severityValue,
       });
 
       if (response === "nc") {
@@ -306,6 +345,7 @@ export async function POST(req: NextRequest) {
           questionId: item.templateItemId,
           status: "open",
           createdAt: nowIso,
+          severity: severityValue,
         });
       }
     }
@@ -335,6 +375,7 @@ export async function POST(req: NextRequest) {
       if (item.resultado !== "NC") {
         continue;
       }
+      const templateItem = templateMap.get(item.templateItemId) ?? {};
       const existingIssue = openIssuesByTemplate.get(item.templateItemId);
       if (existingIssue) {
         const issueUpdates: Record<string, unknown> = {};
@@ -348,13 +389,40 @@ export async function POST(req: NextRequest) {
         if (novaDescricao && existingIssue.data()?.descricao !== novaDescricao) {
           issueUpdates.descricao = novaDescricao;
         }
+        if (item.severity && existingIssue.data()?.severity !== item.severity) {
+          issueUpdates.severity = item.severity;
+        }
         if (Object.keys(issueUpdates).length > 0) {
           await existingIssue.ref.update(issueUpdates);
         }
+        const issueDescricao =
+          (issueUpdates.descricao as string | undefined) ??
+          (existingIssue.data()?.descricao as string | undefined) ??
+          item.observacaoItem ?? null;
+        await saveCorrectiveNonConformity(existingIssue.id, {
+          description: issueDescricao,
+          area: machineArea,
+          severity: item.severity ? { maintainer: item.severity } : null,
+          status: "open",
+          updatedAt: nowIso,
+          inspectionId: inspectionId,
+          source: "inspection",
+          scheduledDate: null,
+          linkedCorrectiveOsId: null,
+          machineId: machineRecord.id,
+          machineTag: machineRecord.tag ?? null,
+          machineName: machineRecord.nome ?? null,
+          photos: item.fotos,
+          osNumero: item.osNumeroItem ?? null,
+          questionId: item.templateItemId,
+          questionLabel:
+            templateItem.oQueChecar ?? templateItem.criterio ?? templateItem.componente ?? null,
+          inspectionResponseId: inspectionId,
+          templateId,
+        });
         continue;
       }
 
-      const templateItem = templateMap.get(item.templateItemId) ?? {};
       const descricao = item.observacaoItem || buildIssueDescription(templateItem, "NC identificada na inspeção");
       const issueRef = adminDb.collection("issues").doc();
       await issueRef.set({
@@ -367,8 +435,30 @@ export async function POST(req: NextRequest) {
         status: "aberta",
         abertaEmInspecaoId: inspectionId,
         createdAt: nowIso,
+        severity: item.severity ?? null,
       });
       issuesCriadas.push(issueRef.id);
+      await saveCorrectiveNonConformity(issueRef.id, {
+        description: descricao,
+        area: machineArea,
+        severity: item.severity ? { maintainer: item.severity } : null,
+        status: "open",
+        updatedAt: nowIso,
+        inspectionId: inspectionId,
+        source: "inspection",
+        scheduledDate: null,
+        linkedCorrectiveOsId: null,
+        machineId: machineRecord.id,
+        machineTag: machineRecord.tag ?? null,
+        machineName: machineRecord.nome ?? null,
+        photos: item.fotos,
+        osNumero: item.osNumeroItem ?? null,
+        questionId: item.templateItemId,
+        questionLabel:
+          templateItem.oQueChecar ?? templateItem.criterio ?? templateItem.componente ?? null,
+        inspectionResponseId: inspectionId,
+        templateId,
+      });
     }
 
     const resolveIssuesIds = payload.resolveIssues ?? [];
@@ -393,6 +483,10 @@ export async function POST(req: NextRequest) {
             resolvidaEmInspecaoId: inspectionId,
           });
           issuesResolvidas.push(doc.id);
+          await saveCorrectiveNonConformity(doc.id, {
+            status: "closed",
+            updatedAt: nowIso,
+          });
         }
       }
     }

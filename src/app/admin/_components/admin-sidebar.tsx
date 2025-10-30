@@ -77,6 +77,11 @@ const programacaoSubnav: AdminNavItem[] = [
     label: "KPIs",
     icon: "fas fa-chart-line",
   },
+  {
+    href: "/admin/programacao/corretivas",
+    label: "Corretivas",
+    icon: "fas fa-screwdriver-wrench",
+  },
 ];
 
 interface AdminSidebarProps {
