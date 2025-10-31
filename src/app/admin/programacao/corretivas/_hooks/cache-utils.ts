@@ -52,8 +52,15 @@ function matchesFilters(filters: Record<string, unknown>, payload: ScheduleResul
   }
 
   const responsible = typeof filters.responsible === "string" ? filters.responsible : "";
-  if (responsible && payload.assignees.owner !== responsible) {
-    return false;
+  if (responsible) {
+    const assigneeIds = [
+      payload.assignees.owner,
+      payload.assignees.maintainer1 ?? undefined,
+      payload.assignees.maintainer2 ?? undefined,
+    ].filter((value): value is string => Boolean(value));
+    if (!assigneeIds.includes(responsible)) {
+      return false;
+    }
   }
 
   const from = typeof filters.from === "string" ? filters.from : "";

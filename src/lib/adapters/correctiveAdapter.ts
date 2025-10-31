@@ -59,6 +59,7 @@ export interface CorrectiveWorkOrderView {
   owner: string | null;
   maintainer1: string | null;
   maintainer2: string | null;
+  mantenedoresIds: string[] | null;
   assignees: {
     owner: string | null;
     maintainer1: string | null;
@@ -118,6 +119,17 @@ function normalizeIsoInput(value: string | null | undefined): string | null {
     return value;
   }
   return parsed.toISOString();
+}
+
+function normalizeOsNumero(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  return trimmed.toUpperCase();
 }
 
 async function fetchLegacyOpenNcPage(params: {
@@ -312,6 +324,17 @@ function mapWorkOrderSnapshot(
   const maintainer1 = typeof data.maintainer1 === "string" ? data.maintainer1 : null;
   const maintainer2 = typeof data.maintainer2 === "string" ? data.maintainer2 : null;
   const hasAssignee = Boolean(owner || maintainer1 || maintainer2);
+  const mantenedoresIds = Array.isArray(data.mantenedoresIds)
+    ? (data.mantenedoresIds as unknown[])
+        .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    : [];
+  const uniqueMantenedores = Array.from(
+    new Set(
+      [owner, maintainer1, maintainer2, ...mantenedoresIds].filter(
+        (value): value is string => typeof value === "string" && value.trim().length > 0,
+      ),
+    ),
+  );
 
   return {
     id: doc.id,
@@ -328,6 +351,7 @@ function mapWorkOrderSnapshot(
     owner,
     maintainer1,
     maintainer2,
+    mantenedoresIds: uniqueMantenedores.length ? uniqueMantenedores : null,
     assignees: hasAssignee
       ? {
           owner,
@@ -482,6 +506,7 @@ export async function createOrUpdateCorrectiveWO(input: {
   scheduledDate: string;
   dueDate?: string;
   ncContext?: ScheduleNcContext | null;
+  osNumero?: string;
 }): Promise<{ osId: string }> {
   const now = nowIso();
   const scheduledDate = normalizeIsoInput(input.scheduledDate);
@@ -532,13 +557,23 @@ export async function createOrUpdateCorrectiveWO(input: {
         : null;
 
     const baseArea = ncContext?.area ?? fetchedNc?.area ?? input.area;
+    const normalizedOsFromInput = normalizeOsNumero(input.osNumero);
+    const normalizedOsFromContext = normalizeOsNumero(ncContext?.osNumero);
+    const normalizedOsFromNc = normalizeOsNumero(fetchedNc?.osNumero);
+    const baseOsNumero = normalizedOsFromInput ?? normalizedOsFromContext ?? normalizedOsFromNc;
+    const assigneeIds = Array.from(
+      new Set(
+        [input.assignees.owner, input.assignees.maintainer1, input.assignees.maintainer2].filter(
+          (value): value is string => typeof value === "string" && value.trim().length > 0,
+        ),
+      ),
+    );
     const baseInspectionId = ncContext?.inspectionId ?? fetchedNc?.inspectionId ?? null;
     const baseSource = ncContext?.source ?? fetchedNc?.source ?? (baseInspectionId ? "inspection" : null);
     const baseMachineId = ncContext?.machineId ?? fetchedNc?.machineId ?? null;
     const baseMachineTag = ncContext?.machineTag ?? fetchedNc?.machineTag ?? null;
     const baseMachineName = ncContext?.machineName ?? fetchedNc?.machineName ?? null;
     const basePhotos = (ncContext?.photos ?? fetchedNc?.photos ?? null) as StoredImage[] | null;
-    const baseOsNumero = ncContext?.osNumero ?? fetchedNc?.osNumero ?? null;
     const baseQuestionId = ncContext?.questionId ?? fetchedNc?.questionId ?? null;
     const baseQuestionLabel = ncContext?.questionLabel ?? fetchedNc?.questionLabel ?? null;
     const baseInspectionResponseId = ncContext?.inspectionResponseId ?? fetchedNc?.inspectionResponseId ?? null;
@@ -567,6 +602,7 @@ export async function createOrUpdateCorrectiveWO(input: {
       machineName: baseMachineName,
       ncPhotos: basePhotos,
       osNumero: baseOsNumero,
+      mantenedoresIds: assigneeIds.length ? assigneeIds : null,
       inspectionId: baseInspectionId,
       inspectionResponseId: baseInspectionResponseId,
       templateId: baseTemplateId,
@@ -647,7 +683,7 @@ export async function listCorrectiveWOView(params: {
   }
 
   if (params.responsible) {
-    query = query.where("owner", "==", params.responsible);
+    query = query.where("mantenedoresIds", "array-contains", params.responsible);
   }
 
   if (params.from) {

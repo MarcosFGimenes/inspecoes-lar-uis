@@ -36,6 +36,7 @@ export interface CorrectiveOsItem {
   owner: string | null;
   maintainer1: string | null;
   maintainer2: string | null;
+  mantenedoresIds: string[] | null;
   assignees: {
     owner: string | null;
     maintainer1: string | null;

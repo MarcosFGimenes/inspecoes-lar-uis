@@ -36,6 +36,15 @@ const ncContextSchema = z
       .optional(),
     inspectionId: z.string().min(1).optional(),
     source: z.string().optional(),
+    machineId: z.string().min(1).optional(),
+    machineTag: z.string().min(1).optional(),
+    machineName: z.string().min(1).optional(),
+    osNumero: z.string().trim().min(1).optional(),
+    photos: z.array(z.unknown()).optional(),
+    questionId: z.string().min(1).optional(),
+    questionLabel: z.string().min(1).optional(),
+    inspectionResponseId: z.string().min(1).optional(),
+    templateId: z.string().min(1).optional(),
   })
   .optional();
 
@@ -48,6 +57,7 @@ const scheduleSchema = z
     scheduledDate: z.string().min(1),
     dueDate: z.string().min(1).optional(),
     ncContext: ncContextSchema,
+    osNumero: z.string().trim().min(1).optional(),
   })
   .superRefine((value, ctx) => {
     if (!value.ncId && !value.description) {

@@ -52,6 +52,7 @@ export interface CorrectiveWorkOrderRecord {
     maintainer1?: string | null;
     maintainer2?: string | null;
   } | null;
+  mantenedoresIds?: string[] | null;
   machineId?: string | null;
   machineTag?: string | null;
   machineName?: string | null;
@@ -191,6 +192,19 @@ export async function syncCorrectiveWorkOrderView(osId: string, record: Correcti
   const owner = typeof assignees?.owner === "string" ? assignees.owner : null;
   const maintainer1 = typeof assignees?.maintainer1 === "string" ? assignees.maintainer1 : null;
   const maintainer2 = typeof assignees?.maintainer2 === "string" ? assignees.maintainer2 : null;
+  const maintainedIdsRaw = Array.isArray(record.mantenedoresIds)
+    ? (record.mantenedoresIds as unknown[])
+    : [];
+  const maintainedIds = maintainedIdsRaw.filter(
+    (value): value is string => typeof value === "string" && value.trim().length > 0,
+  );
+  const mantenedoresIds = Array.from(
+    new Set(
+      [owner, maintainer1, maintainer2, ...maintainedIds].filter(
+        (value): value is string => typeof value === "string" && value.trim().length > 0,
+      ),
+    ),
+  );
 
   const payload = {
     osId,
@@ -206,6 +220,7 @@ export async function syncCorrectiveWorkOrderView(osId: string, record: Correcti
     owner,
     maintainer1,
     maintainer2,
+    mantenedoresIds,
     assignees: assignees
       ? {
           owner,

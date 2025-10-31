@@ -109,6 +109,7 @@ export function ScheduleCorrectivePlaceholder({
   const [mounted, setMounted] = useState(false);
   const [area, setArea] = useState<"" | "mechanical" | "electrical">(normalizeArea(context?.area));
   const [description, setDescription] = useState<string>(resolveDescription(context, mode));
+  const [osNumero, setOsNumero] = useState<string>("");
   const [scheduledDate, setScheduledDate] = useState<string>("");
   const [dueDate, setDueDate] = useState<string>("");
   const [owner, setOwner] = useState<string>("");
@@ -164,6 +165,7 @@ export function ScheduleCorrectivePlaceholder({
     const normalizedArea = normalizeArea(context?.area);
     setArea(mode === "existing" ? normalizedArea : normalizeArea(context?.area));
     setDescription(resolveDescription(context, mode));
+    setOsNumero(mode === "existing" ? context?.osNumero?.trim().toUpperCase() ?? "" : "");
     setScheduledDate("");
     setDueDate("");
     setMaintainer1("");
@@ -254,8 +256,9 @@ export function ScheduleCorrectivePlaceholder({
     if (!area) return false;
     if (!scheduledDate) return false;
     if (mode === "new" && !description.trim()) return false;
+    if (mode === "new" && !osNumero.trim()) return false;
     return true;
-  }, [owner, area, scheduledDate, submitting, mode, description]);
+  }, [owner, area, scheduledDate, submitting, mode, description, osNumero]);
 
   const handleBackdropClick = useCallback(() => {
     if (!submitting) {
@@ -283,73 +286,81 @@ export function ScheduleCorrectivePlaceholder({
       }
 
       const trimmedDescription = description.trim();
-      if (mode === "new" && !trimmedDescription) {
-        setSubmitError("Descreva o serviço corretivo.");
-        return;
-      }
+    const normalizedOsNumero = osNumero.trim().toUpperCase();
 
-      const requestPayload = {
-        ncId: mode === "existing" ? context?.ncId ?? undefined : undefined,
-        description: trimmedDescription || undefined,
-        area,
-        assignees: {
-          owner,
-          maintainer1: maintainer1 || undefined,
-          maintainer2: maintainer2 || undefined,
-        },
-        scheduledDate: scheduledIso,
-        dueDate: dueDate ? toIsoString(dueDate) ?? undefined : undefined,
-        ncContext:
-          mode === "existing"
-            ? {
-                description: context?.description ?? null,
-                area,
-                effectiveSeverity: context?.effectiveSeverity ?? null,
-                severity:
-                  context?.effectiveSeverity && context.effectiveSeverity >= 1
-                    ? { maintainer: context.effectiveSeverity }
-                    : null,
-                inspectionId: context?.inspectionId ?? undefined,
-                source: context?.source ?? undefined,
-                machineId: context?.machineId ?? undefined,
-                machineTag: context?.machineTag ?? undefined,
-                machineName: context?.machineName ?? undefined,
-                osNumero: context?.osNumero ?? undefined,
-                photos: context?.photos ?? undefined,
-                questionId: context?.questionId ?? undefined,
-                questionLabel: context?.questionLabel ?? undefined,
-                inspectionResponseId: context?.inspectionResponseId ?? undefined,
-                templateId: context?.templateId ?? undefined,
-              }
-            : undefined,
-      };
+    if (mode === "new" && !trimmedDescription) {
+      setSubmitError("Descreva o serviço corretivo.");
+      return;
+    }
 
-      const resultBase: Omit<ScheduleResultPayload, "osId"> = {
-        ncId: mode === "existing" ? context?.ncId ?? null : null,
-        area,
-        scheduledDate: scheduledIso,
-        dueDate: requestPayload.dueDate ?? null,
-        description: trimmedDescription || context?.description || null,
-        effectiveSeverity: context?.effectiveSeverity ?? null,
-        inspectionId: context?.inspectionId ?? null,
-        source: context?.source ?? null,
-        status: "scheduled",
-        updatedAt: new Date().toISOString(),
-        machineId: context?.machineId ?? null,
-        machineTag: context?.machineTag ?? null,
-        machineName: context?.machineName ?? null,
-        ncPhotos: context?.photos ?? null,
-        osNumero: context?.osNumero ?? null,
-        inspectionResponseId: context?.inspectionResponseId ?? null,
-        templateId: context?.templateId ?? null,
-        questionId: context?.questionId ?? null,
-        questionLabel: context?.questionLabel ?? null,
-        assignees: {
-          owner,
-          maintainer1: maintainer1 || null,
-          maintainer2: maintainer2 || null,
-        },
-      };
+    if (mode === "new" && !normalizedOsNumero) {
+      setSubmitError("Informe o número da O.S.");
+      return;
+    }
+
+    const requestPayload = {
+      ncId: mode === "existing" ? context?.ncId ?? undefined : undefined,
+      description: trimmedDescription || undefined,
+      area,
+      assignees: {
+        owner,
+        maintainer1: maintainer1 || undefined,
+        maintainer2: maintainer2 || undefined,
+      },
+      scheduledDate: scheduledIso,
+      dueDate: dueDate ? toIsoString(dueDate) ?? undefined : undefined,
+      ncContext:
+        mode === "existing"
+          ? {
+              description: context?.description ?? null,
+              area,
+              effectiveSeverity: context?.effectiveSeverity ?? null,
+              severity:
+                context?.effectiveSeverity && context.effectiveSeverity >= 1
+                  ? { maintainer: context.effectiveSeverity }
+                  : null,
+              inspectionId: context?.inspectionId ?? undefined,
+              source: context?.source ?? undefined,
+              machineId: context?.machineId ?? undefined,
+              machineTag: context?.machineTag ?? undefined,
+              machineName: context?.machineName ?? undefined,
+              osNumero: context?.osNumero ?? undefined,
+              photos: context?.photos ?? undefined,
+              questionId: context?.questionId ?? undefined,
+              questionLabel: context?.questionLabel ?? undefined,
+              inspectionResponseId: context?.inspectionResponseId ?? undefined,
+              templateId: context?.templateId ?? undefined,
+            }
+          : undefined,
+      osNumero: mode === "new" ? normalizedOsNumero : context?.osNumero ?? undefined,
+    };
+
+    const resultBase: Omit<ScheduleResultPayload, "osId"> = {
+      ncId: mode === "existing" ? context?.ncId ?? null : null,
+      area,
+      scheduledDate: scheduledIso,
+      dueDate: requestPayload.dueDate ?? null,
+      description: trimmedDescription || context?.description || null,
+      effectiveSeverity: context?.effectiveSeverity ?? null,
+      inspectionId: context?.inspectionId ?? null,
+      source: context?.source ?? null,
+      status: "scheduled",
+      updatedAt: new Date().toISOString(),
+      machineId: context?.machineId ?? null,
+      machineTag: context?.machineTag ?? null,
+      machineName: context?.machineName ?? null,
+      ncPhotos: context?.photos ?? null,
+      osNumero: mode === "new" ? normalizedOsNumero : context?.osNumero ?? null,
+      inspectionResponseId: context?.inspectionResponseId ?? null,
+      templateId: context?.templateId ?? null,
+      questionId: context?.questionId ?? null,
+      questionLabel: context?.questionLabel ?? null,
+      assignees: {
+        owner,
+        maintainer1: maintainer1 || null,
+        maintainer2: maintainer2 || null,
+      },
+    };
 
       try {
         await scheduleMutation.mutateAsync({
@@ -394,6 +405,7 @@ export function ScheduleCorrectivePlaceholder({
       context?.questionId,
       context?.questionLabel,
       context?.templateId,
+      osNumero,
     ]
   );
 
@@ -531,6 +543,21 @@ export function ScheduleCorrectivePlaceholder({
                 />
               </div>
             </div>
+
+            {mode === "new" ? (
+              <div className="space-y-2">
+                <label className="text-sm font-semibold text-[var(--muted)]" htmlFor="corrective-os-numero">
+                  Número da O.S.
+                </label>
+                <Input
+                  id="corrective-os-numero"
+                  value={osNumero}
+                  onChange={event => setOsNumero(event.target.value.toUpperCase())}
+                  placeholder="Informe o número da ordem de serviço"
+                  required
+                />
+              </div>
+            ) : null}
 
             <div className="space-y-2">
               <label className="text-sm font-semibold text-[var(--muted)]" htmlFor="corrective-description">

@@ -16,6 +16,7 @@ interface ScheduleRequestBody {
   scheduledDate: string;
   dueDate?: string;
   ncContext?: Record<string, unknown> | null;
+  osNumero?: string;
 }
 
 interface ScheduleVariables {
@@ -30,6 +31,14 @@ interface ScheduleResponse {
 }
 
 function makeOsItemFromResult(result: ScheduleResultPayload): CorrectiveOsItem {
+  const mantenedoresIds = Array.from(
+    new Set(
+      [result.assignees.owner, result.assignees.maintainer1, result.assignees.maintainer2].filter(
+        (value): value is string => typeof value === "string" && value.trim().length > 0,
+      ),
+    ),
+  );
+
   return {
     id: result.osId,
     osId: result.osId,
@@ -45,6 +54,7 @@ function makeOsItemFromResult(result: ScheduleResultPayload): CorrectiveOsItem {
     owner: result.assignees.owner,
     maintainer1: result.assignees.maintainer1,
     maintainer2: result.assignees.maintainer2,
+    mantenedoresIds: mantenedoresIds.length ? mantenedoresIds : null,
     assignees: {
       owner: result.assignees.owner,
       maintainer1: result.assignees.maintainer1,
