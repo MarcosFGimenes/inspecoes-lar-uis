@@ -8,7 +8,7 @@ export interface TabItem {
 }
 
 interface TabsProps {
-  items: TabItem[];
+  items: ReadonlyArray<TabItem>;
   activeKey: string;
   onChange: (key: string) => void;
 }

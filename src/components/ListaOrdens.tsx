@@ -62,6 +62,7 @@ export function ListaOrdens({ scheduled, completed }: ListaOrdensProps) {
         setActiveTab("completed");
         setSelectedOrderId(null);
       } catch (err) {
+        console.error("Falha ao concluir ordem de serviço", err);
         // TODO: Integrar com sistema de toast global do projeto.
       }
     },
