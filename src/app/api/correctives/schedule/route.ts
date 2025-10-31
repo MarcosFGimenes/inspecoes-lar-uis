@@ -22,6 +22,13 @@ const severity6Schema = z.union([
   z.literal(6),
 ]);
 
+const storedImageSchema = z.object({
+  url: z.string().min(1),
+  provider: z.enum(["r2", "imgbb"]),
+  mime: z.string().nullable().optional(),
+  key: z.string().nullable().optional(),
+});
+
 const ncContextSchema = z
   .object({
     description: z.string().nullable().optional(),
@@ -40,12 +47,13 @@ const ncContextSchema = z
     machineTag: z.string().min(1).optional(),
     machineName: z.string().min(1).optional(),
     osNumero: z.string().trim().min(1).optional(),
-    photos: z.array(z.unknown()).optional(),
+    photos: z.array(storedImageSchema).nullable().optional(),
     questionId: z.string().min(1).optional(),
     questionLabel: z.string().min(1).optional(),
     inspectionResponseId: z.string().min(1).optional(),
     templateId: z.string().min(1).optional(),
   })
+  .nullable()
   .optional();
 
 const scheduleSchema = z
