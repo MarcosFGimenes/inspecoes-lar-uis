@@ -57,6 +57,11 @@ export interface CorrectiveOsItem {
   questionId: string | null;
   questionLabel: string | null;
   osNumero: string | null;
+  assigneesDetails?: Array<{
+    id: string;
+    nome: string | null;
+    matricula: string | null;
+  }> | null;
 }
 
 export interface CorrectiveAssigneeOption {
@@ -93,6 +98,11 @@ export interface ScheduleResultPayload {
     maintainer1: string | null;
     maintainer2: string | null;
   };
+  assigneesDetails?: Array<{
+    id: string;
+    nome: string | null;
+    matricula: string | null;
+  }> | null;
 }
 
 export interface CorrectiveScheduleContext {

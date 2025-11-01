@@ -335,6 +335,18 @@ export function ScheduleCorrectivePlaceholder({
       osNumero: mode === "new" ? normalizedOsNumero : context?.osNumero ?? undefined,
     };
 
+    const selectedAssigneeIds = [owner, maintainer1 || null, maintainer2 || null].filter(
+      (value): value is string => Boolean(value && value.trim().length > 0)
+    );
+    const assigneesDetails = Array.from(new Set(selectedAssigneeIds)).map(id => {
+      const info = assignees.find(option => option.id === id);
+      return {
+        id,
+        nome: info?.nome ?? null,
+        matricula: info?.matricula ?? null,
+      };
+    });
+
     const resultBase: Omit<ScheduleResultPayload, "osId"> = {
       ncId: mode === "existing" ? context?.ncId ?? null : null,
       area,
@@ -360,6 +372,7 @@ export function ScheduleCorrectivePlaceholder({
         maintainer1: maintainer1 || null,
         maintainer2: maintainer2 || null,
       },
+      assigneesDetails: assigneesDetails.length ? assigneesDetails : null,
     };
 
       try {

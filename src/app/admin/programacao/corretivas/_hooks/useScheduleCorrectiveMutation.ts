@@ -75,6 +75,9 @@ function makeOsItemFromResult(result: ScheduleResultPayload): CorrectiveOsItem {
     questionId: result.questionId,
     questionLabel: result.questionLabel,
     osNumero: result.osNumero,
+    assigneesDetails: Array.isArray(result.assigneesDetails)
+      ? result.assigneesDetails
+      : null,
   } satisfies CorrectiveOsItem;
 }
 

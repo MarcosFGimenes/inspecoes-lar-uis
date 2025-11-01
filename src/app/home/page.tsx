@@ -84,6 +84,7 @@ type CorrectiveAgendaItem = {
   questionId: string | null;
   questionLabel: string | null;
   osNumero: string | null;
+  assigneesDetails?: AssigneeInfo[] | null;
 };
 
 type AssigneeInfo = {
@@ -559,6 +560,9 @@ export default function MaintHomeStartPage() {
           questionId: detail.questionId ?? null,
           questionLabel: detail.questionLabel ?? null,
           osNumero: detail.osNumero ?? null,
+          assigneesDetails: Array.isArray(detail.assigneesDetails)
+            ? (detail.assigneesDetails as AssigneeInfo[])
+            : null,
         };
         return [newItem, ...next];
       });
@@ -608,41 +612,25 @@ export default function MaintHomeStartPage() {
   );
 
   const correctiveResponsibleOptions = useMemo(() => {
-    const options: Array<{ value: string; label: string }> = [
-      { value: "", label: "Todos os responsáveis" },
+    if (!session?.id) {
+      return [{ value: "", label: "Selecione" }];
+    }
+
+    const pieces: string[] = [];
+    if (session.matricula) {
+      pieces.push(session.matricula);
+    }
+    if (session.nome) {
+      pieces.push(session.nome);
+    }
+
+    return [
+      {
+        value: session.id,
+        label: pieces.join(" · ") || "Eu",
+      },
     ];
-    const seen = new Set<string>();
-
-    const pushOption = (value: string | null | undefined, label: string) => {
-      if (!value || seen.has(value)) {
-        return;
-      }
-      options.push({ value, label });
-      seen.add(value);
-    };
-
-    if (session?.id) {
-      const pieces: string[] = [];
-      if (session.matricula) {
-        pieces.push(session.matricula);
-      }
-      if (session.nome) {
-        pieces.push(session.nome);
-      }
-      pushOption(session.id, pieces.join(" · ") || "Eu");
-    }
-
-    assignees.forEach(option => {
-      const labelPieces = [option.matricula, option.nome].filter(part => Boolean(part && part.trim()));
-      pushOption(option.id, labelPieces.join(" — ") || option.id);
-    });
-
-    if (correctivesFilters.responsible && !seen.has(correctivesFilters.responsible)) {
-      pushOption(correctivesFilters.responsible, correctivesFilters.responsible);
-    }
-
-    return options;
-  }, [assignees, session?.id, session?.matricula, session?.nome, correctivesFilters.responsible]);
+  }, [session?.id, session?.matricula, session?.nome]);
 
   const assigneeMap = useMemo(() => {
     const map = new Map<string, AssigneeInfo>();
@@ -857,7 +845,24 @@ export default function MaintHomeStartPage() {
   }, [session?.id]);
 
   const formatAssignees = useCallback(
-    (value: CorrectiveAgendaItem["assignees"]) => {
+    (item: CorrectiveAgendaItem | null | undefined) => {
+      if (!item) {
+        return "-";
+      }
+
+      const details = Array.isArray(item.assigneesDetails)
+        ? item.assigneesDetails.filter(detail => detail && detail.id)
+        : [];
+
+      if (details.length > 0) {
+        const labels = details.map(detail => {
+          const parts = [detail.matricula, detail.nome].filter(part => Boolean(part && part.trim()));
+          return parts.join(" — ") || detail.id;
+        });
+        return labels.join("\n");
+      }
+
+      const value = item.assignees;
       if (!value) {
         return "-";
       }
@@ -1118,6 +1123,7 @@ export default function MaintHomeStartPage() {
                     value={correctivesFilters.responsible}
                     onChange={event => updateCorrectiveFilter("responsible", event.target.value)}
                     className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                    disabled={correctiveResponsibleOptions.length <= 1}
                   >
                     {correctiveResponsibleOptions.map(option => (
                       <option key={option.value} value={option.value}>
@@ -1208,7 +1214,7 @@ export default function MaintHomeStartPage() {
                                 <td className="px-4 py-3">{formatDateTime(item.scheduledDate)}</td>
                                 <td className="px-4 py-3">{formatDateTime(item.dueDate)}</td>
                                 <td className="px-4 py-3">{formatSeverity(item.effectiveSeverity)}</td>
-                                <td className="px-4 py-3 whitespace-pre-line">{formatAssignees(item.assignees)}</td>
+                                <td className="px-4 py-3 whitespace-pre-line">{formatAssignees(item)}</td>
                                 <td className="px-4 py-3">
                                   {item.status ? (
                                     <Badge variant={resolveStatusVariant(item.status)}>
@@ -1305,7 +1311,7 @@ export default function MaintHomeStartPage() {
                                         <div className="rounded-xl border border-slate-200 p-3 text-xs text-slate-600">
                                           <span className="font-semibold uppercase text-slate-500">Responsáveis</span>
                                           <p className="whitespace-pre-line text-sm font-medium text-slate-900">
-                                            {formatAssignees(selectedCorrective.assignees)}
+                                            {formatAssignees(selectedCorrective)}
                                           </p>
                                         </div>
                                       </div>
