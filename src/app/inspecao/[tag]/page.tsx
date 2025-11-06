@@ -78,6 +78,13 @@ const RESULT_OPTIONS: Array<{ value: "C" | "NC" | "NA"; label: string; tone: "ok
 /* ===== Helpers já existentes ===== */
 const MAX_IMAGE_BYTES = 1.5 * 1024 * 1024; // ~1.5MB
 const MAX_IMAGE_DIMENSION = 1600; // pixels
+const PHOTO_PROCESS_DELAY_MS = 60;
+
+function delay(ms: number) {
+  return new Promise<void>(resolve => {
+    setTimeout(resolve, ms);
+  });
+}
 
 async function readBlobAsDataUrl(blob: Blob) {
   return new Promise<string>((resolve, reject) => {
@@ -911,7 +918,8 @@ export default function InspectionPage() {
         try {
           const limitedFiles = files.slice(0, 3);
           const newPhotos: ItemPhotoState[] = [];
-          for (const file of limitedFiles) {
+          for (let index = 0; index < limitedFiles.length; index += 1) {
+            const file = limitedFiles[index]!;
             const dataUrl = await fileToDataUrl(file);
             newPhotos.push({
               id: createPhotoId(),
@@ -920,6 +928,9 @@ export default function InspectionPage() {
               file,
               origin: "local" as const,
             });
+            if (index < limitedFiles.length - 1) {
+              await delay(PHOTO_PROCESS_DELAY_MS);
+            }
           }
 
           setItemsState(prev => {
@@ -1009,21 +1020,26 @@ export default function InspectionPage() {
           const osNumeroItem = osValue || undefined;
           let fotosBase64: string[] | undefined;
           if (st.fotos.length) {
-            const fotosValues = await Promise.all(
-              st.fotos.slice(0, 3).map(async (foto) => {
-                if (typeof foto.dataUrl === "string" && foto.dataUrl.startsWith("data:")) {
-                  return foto.dataUrl;
+            const fotosValues: Array<string | null> = [];
+            const fotosToProcess = st.fotos.slice(0, 3);
+            for (let index = 0; index < fotosToProcess.length; index += 1) {
+              const foto = fotosToProcess[index]!;
+              if (typeof foto.dataUrl === "string" && foto.dataUrl.startsWith("data:")) {
+                fotosValues.push(foto.dataUrl);
+              } else if (foto.file) {
+                try {
+                  const dataUrl = await fileToDataUrl(foto.file);
+                  fotosValues.push(dataUrl);
+                } catch {
+                  fotosValues.push(null);
                 }
-                if (foto.file) {
-                  try {
-                    return await fileToDataUrl(foto.file);
-                  } catch {
-                    return null;
-                  }
-                }
-                return null;
-              })
-            );
+              } else {
+                fotosValues.push(null);
+              }
+              if (index < fotosToProcess.length - 1) {
+                await delay(PHOTO_PROCESS_DELAY_MS);
+              }
+            }
             const normalized = fotosValues.filter((value): value is string => typeof value === "string" && value.trim().length > 0);
             fotosBase64 = normalized.length ? normalized : undefined;
           }

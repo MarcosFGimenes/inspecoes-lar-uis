@@ -17,6 +17,14 @@ import type { StoredImage } from "@/types";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const PHOTO_UPLOAD_DELAY_MS = 60;
+
+function wait(ms: number) {
+  return new Promise<void>(resolve => {
+    setTimeout(resolve, ms);
+  });
+}
+
 const severity6Schema = z.union([
   z.literal(1),
   z.literal(2),
@@ -318,6 +326,9 @@ export async function POST(req: NextRequest) {
           `inspecoes/${inspectionId}/${item.templateItemId}`
         );
         fotoAttachments.push(upload);
+        if (index < fotosBase64.length - 1) {
+          await wait(PHOTO_UPLOAD_DELAY_MS);
+        }
       }
       itensPayload.push({
         templateItemId: item.templateItemId,
