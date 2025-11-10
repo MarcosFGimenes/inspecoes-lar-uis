@@ -324,14 +324,17 @@ export default function AdminNonConformitiesPage() {
 
         const updatedTreatment: ChecklistNonConformityTreatment = {
           questionId: item.questionId,
-          summary: summary || undefined,
-          responsible: responsible || undefined,
+          summary: summary || null,
+          responsible: responsible || null,
           dueDate: dueDateIso,
           status: item.status,
           createdAt: previousTreatment?.createdAt ?? nowIso,
           updatedAt: nowIso,
-          severity: previousTreatment?.severity ?? undefined,
         };
+
+        if (previousTreatment && "severity" in previousTreatment) {
+          updatedTreatment.severity = previousTreatment.severity ?? null;
+        }
 
         const nextTreatments = [
           ...existing.filter(t => t.questionId !== item.questionId),
