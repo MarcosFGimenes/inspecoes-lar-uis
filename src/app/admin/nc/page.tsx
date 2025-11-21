@@ -502,19 +502,23 @@ export default function AdminNonConformitiesPage() {
                         <h3 className="text-sm font-semibold text-[var(--text)]">Fotos</h3>
                         <div className="flex flex-wrap gap-3">
                           {item.photos.map((photo, index) => (
-                            <div
+                            <a
                               key={`${item.id}-photo-${index}`}
-                              className="overflow-hidden rounded-lg border border-[var(--border)] bg-white"
+                              href={photo.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="group block overflow-hidden rounded-lg border border-[var(--border)] bg-white"
+                              title="Clique para abrir em nova aba"
                             >
                               <Image
                                 src={photo.url}
                                 alt={`Foto da não conformidade ${index + 1}`}
                                 width={160}
                                 height={120}
-                                className="h-24 w-40 object-cover"
+                                className="h-24 w-40 object-cover transition-transform duration-200 group-hover:scale-[1.02]"
                                 unoptimized
                               />
-                            </div>
+                            </a>
                           ))}
                         </div>
                       </section>
