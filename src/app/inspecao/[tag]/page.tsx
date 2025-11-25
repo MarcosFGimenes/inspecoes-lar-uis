@@ -1005,7 +1005,7 @@ export default function InspectionPage() {
           }
           const osNumeroItem = osValue || undefined;
           if (st.fotos.length) {
-            const fotosValues = await Promise.all(
+            const fotosValues: ({ dataUrl: string; fileName: string | null } | null)[] = await Promise.all(
               st.fotos.slice(0, 3).map(async (foto) => {
                 if (typeof foto.dataUrl === "string" && foto.dataUrl.startsWith("data:")) {
                   return { dataUrl: foto.dataUrl, fileName: foto.name ?? null };
