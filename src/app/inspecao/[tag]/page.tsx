@@ -47,6 +47,7 @@ type ItemFormState = {
   fotos: ItemPhotoState[];
   fileKey: number;
 };
+type PendingUpload = { templateItemId: string; dataUrl: string; fileName: string | null };
 type FeedbackState = { type: "success" | "error"; message: string };
 type DraftItemPhotoState = { dataUrl: string; name?: string | null };
 type DraftItemState = {
@@ -238,6 +239,7 @@ export default function InspectionPage() {
   const [lastDraftUpdatedAt, setLastDraftUpdatedAt] = useState<string | null>(null);
   const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastDraftPayloadRef = useRef<string | null>(null);
+  const uploadQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   const signatureRef = useRef<SignatureCanvasInstance | null>(null);
   const cancelInputRef = useRef<HTMLInputElement | null>(null);
@@ -951,6 +953,31 @@ export default function InspectionPage() {
     }
   }, []);
 
+  const queueBackgroundUploads = useCallback(
+    (inspectionId: string, uploads: PendingUpload[]) => {
+      if (!inspectionId || uploads.length === 0) return;
+
+      uploadQueueRef.current = uploads.reduce<Promise<void>>((chain, upload) => {
+        return chain.then(async () => {
+          try {
+            await fetch(`/api/inspecoes/${encodeURIComponent(inspectionId)}/fotos`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                templateItemId: upload.templateItemId,
+                dataUrl: upload.dataUrl,
+                fileName: upload.fileName ?? undefined,
+              }),
+            });
+          } catch (err) {
+            console.error("[inspection-upload]", err);
+          }
+        });
+      }, uploadQueueRef.current);
+    },
+    []
+  );
+
   const submitInspection = useCallback(
     async (mode: "save" | "save-new") => {
       if (!context?.machine?.tag) { setFeedback({ type: "error", message: "Máquina sem TAG configurada." }); return; }
@@ -961,9 +988,9 @@ export default function InspectionPage() {
           templateItemId: string;
           resultado: "C" | "NC" | "NA";
           observacaoItem?: string;
-          fotos?: string[];
           osNumeroItem?: string;
         }> = [];
+        const pendingUploads: PendingUpload[] = [];
         const lockedOsNumero = osBloqueado ?? null;
         for (const item of sortedItems) {
           if (!item.id) continue;
@@ -977,16 +1004,16 @@ export default function InspectionPage() {
             return;
           }
           const osNumeroItem = osValue || undefined;
-          let fotosBase64: string[] | undefined;
           if (st.fotos.length) {
-            const fotosValues = await Promise.all(
+            const fotosValues: ({ dataUrl: string; fileName: string | null } | null)[] = await Promise.all(
               st.fotos.slice(0, 3).map(async (foto) => {
                 if (typeof foto.dataUrl === "string" && foto.dataUrl.startsWith("data:")) {
-                  return foto.dataUrl;
+                  return { dataUrl: foto.dataUrl, fileName: foto.name ?? null };
                 }
                 if (foto.file) {
                   try {
-                    return await fileToDataUrl(foto.file);
+                    const dataUrl = await fileToDataUrl(foto.file);
+                    return { dataUrl, fileName: foto.name ?? foto.file.name ?? null };
                   } catch {
                     return null;
                   }
@@ -994,14 +1021,24 @@ export default function InspectionPage() {
                 return null;
               })
             );
-            const normalized = fotosValues.filter((value): value is string => typeof value === "string" && value.trim().length > 0);
-            fotosBase64 = normalized.length ? normalized : undefined;
+            const normalized = fotosValues.filter(
+              (value): value is { dataUrl: string; fileName: string | null } =>
+                Boolean(value?.dataUrl && value.dataUrl.trim())
+            );
+            if (normalized.length) {
+              pendingUploads.push(
+                ...normalized.map(({ dataUrl, fileName }) => ({
+                  templateItemId: item.id!,
+                  dataUrl,
+                  fileName: fileName ?? null,
+                }))
+              );
+            }
           }
           payloadItems.push({
             templateItemId: item.id,
             resultado: st.resultado,
             observacaoItem: st.observacao.trim() || undefined,
-            fotos: fotosBase64,
             osNumeroItem,
           });
         }
@@ -1080,6 +1117,9 @@ export default function InspectionPage() {
         if (inspectionId) {
           params.set("inspecaoId", inspectionId);
         }
+        if (inspectionId) {
+          queueBackgroundUploads(inspectionId, pendingUploads);
+        }
         router.replace(`/home?${params.toString()}`);
       } catch (err: unknown) {
         setFeedback({ type: "error", message: err instanceof Error && err.message ? err.message : "Falha ao salvar inspeção." });
@@ -1103,6 +1143,7 @@ export default function InspectionPage() {
       programacaoPrazo,
       saveMaintSignatureChoice,
       refreshSavedSignature,
+      queueBackgroundUploads,
     ]
   );
 
