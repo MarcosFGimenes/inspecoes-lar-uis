@@ -75,6 +75,20 @@ const RESULT_OPTIONS: Array<{ value: "C" | "NC" | "NA"; label: string; tone: "ok
 const MAX_IMAGE_BYTES = 1.5 * 1024 * 1024; // ~1.5MB
 const MAX_IMAGE_DIMENSION = 1600; // pixels
 
+type PhotoUploadJob = {
+  itemId: string;
+  response: "C" | "NC" | "NA";
+  observation: string;
+  osNumeroItem?: string;
+  photos: ItemPhotoState[];
+};
+
+type UploadProgress = {
+  pending: number;
+  uploaded: number;
+  error?: string;
+};
+
 async function readBlobAsDataUrl(blob: Blob) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -224,6 +238,7 @@ export default function InspectionPage() {
   const [feedback, setFeedback] = useState<FeedbackState | null>(null);
   const [saving, setSaving] = useState(false);
   const [savingAction, setSavingAction] = useState<"save" | "save-new" | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
   const [lastInspectionId, setLastInspectionId] = useState<string | null>(null);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelConfirmText, setCancelConfirmText] = useState("");
@@ -241,6 +256,7 @@ export default function InspectionPage() {
 
   const signatureRef = useRef<SignatureCanvasInstance | null>(null);
   const cancelInputRef = useRef<HTMLInputElement | null>(null);
+  const mountedRef = useRef(false);
   const [signatureTouched, setSignatureTouched] = useState(false);
   const [signatureDataUrl, setSignatureDataUrl] = useState<string | null>(null);
   const [savedSignatureProfile, setSavedSignatureProfile] = useState<{ id: string; assinaturaUrl: string | null } | null>(null);
@@ -269,6 +285,13 @@ export default function InspectionPage() {
     } catch (err) {
       console.error("[maint-signature] failed to load", err);
     }
+  }, []);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -961,9 +984,9 @@ export default function InspectionPage() {
           templateItemId: string;
           resultado: "C" | "NC" | "NA";
           observacaoItem?: string;
-          fotos?: string[];
           osNumeroItem?: string;
         }> = [];
+        const photoQueue: PhotoUploadJob[] = [];
         const lockedOsNumero = osBloqueado ?? null;
         for (const item of sortedItems) {
           if (!item.id) continue;
@@ -977,33 +1000,23 @@ export default function InspectionPage() {
             return;
           }
           const osNumeroItem = osValue || undefined;
-          let fotosBase64: string[] | undefined;
-          if (st.fotos.length) {
-            const fotosValues = await Promise.all(
-              st.fotos.slice(0, 3).map(async (foto) => {
-                if (typeof foto.dataUrl === "string" && foto.dataUrl.startsWith("data:")) {
-                  return foto.dataUrl;
-                }
-                if (foto.file) {
-                  try {
-                    return await fileToDataUrl(foto.file);
-                  } catch {
-                    return null;
-                  }
-                }
-                return null;
-              })
-            );
-            const normalized = fotosValues.filter((value): value is string => typeof value === "string" && value.trim().length > 0);
-            fotosBase64 = normalized.length ? normalized : undefined;
-          }
           payloadItems.push({
             templateItemId: item.id,
             resultado: st.resultado,
             observacaoItem: st.observacao.trim() || undefined,
-            fotos: fotosBase64,
             osNumeroItem,
           });
+
+          const photos = st.fotos.slice(0, 3);
+          if (photos.length) {
+            photoQueue.push({
+              itemId: item.id,
+              response: st.resultado,
+              observation: st.observacao,
+              osNumeroItem,
+              photos,
+            });
+          }
         }
         if (!payloadItems.length) { setFeedback({ type: "error", message: "Template sem itens configurados." }); setSaving(false); setSavingAction(null); return; }
 
@@ -1051,6 +1064,94 @@ export default function InspectionPage() {
         const inspectionId = data?.id ? String(data.id) : null;
         const assinaturaUrlResposta = data?.assinaturaUrl ? String(data.assinaturaUrl) : null;
         if (inspectionId) setLastInspectionId(inspectionId);
+
+        if (inspectionId && photoQueue.length) {
+          const totalPhotos = photoQueue.reduce((acc, item) => acc + item.photos.length, 0);
+          if (mountedRef.current) {
+            setUploadProgress({ pending: totalPhotos, uploaded: 0 });
+          }
+          (async () => {
+            for (const job of photoQueue) {
+              const uploadedPhotos: StoredImage[] = [];
+              for (const photo of job.photos) {
+                try {
+                  const formData = new FormData();
+                  if (photo.file) {
+                    formData.append("file", photo.file, photo.name || "foto");
+                  } else {
+                    formData.append("dataUrl", photo.dataUrl);
+                  }
+                  formData.append("inspectionId", inspectionId);
+                  const uploadResponse = await fetch("/api/uploads/inspecao", { method: "POST", body: formData });
+                  if (!uploadResponse.ok) {
+                    throw new Error("UPLOAD_ERROR");
+                  }
+                  const uploadData = (await uploadResponse.json().catch(() => null)) as StoredImage | null;
+                  if (uploadData?.url) {
+                    uploadedPhotos.push(uploadData);
+                  }
+                  if (mountedRef.current) {
+                    setUploadProgress(prev =>
+                      prev
+                        ? {
+                            ...prev,
+                            uploaded: prev.uploaded + 1,
+                          }
+                        : null
+                    );
+                  }
+                } catch {
+                  if (mountedRef.current) {
+                    setUploadProgress(prev =>
+                      prev
+                        ? {
+                            ...prev,
+                            error: "Algumas fotos não puderam ser enviadas.",
+                          }
+                        : prev
+                    );
+                  }
+                  return;
+                }
+              }
+
+              if (uploadedPhotos.length) {
+                try {
+                  await fetch(`/api/inspecoes/${inspectionId}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      itens: [
+                        {
+                          questionId: job.itemId,
+                          response: job.response.toLowerCase(),
+                          observation: job.observation.trim() || undefined,
+                          photoUrls: uploadedPhotos,
+                          osNumeroItem: job.response === "NC" ? job.osNumeroItem : undefined,
+                        },
+                      ],
+                    }),
+                  });
+                } catch {
+                  if (mountedRef.current) {
+                    setUploadProgress(prev =>
+                      prev
+                        ? {
+                            ...prev,
+                            error: "Não foi possível anexar algumas fotos após o upload.",
+                          }
+                        : prev
+                    );
+                  }
+                  return;
+                }
+              }
+            }
+            if (mountedRef.current) {
+              setUploadProgress(null);
+            }
+          })();
+        }
 
         if (signatureMode === "new" && saveMaintSignatureChoice && assinaturaUrlResposta) {
           try {
@@ -1180,6 +1281,13 @@ export default function InspectionPage() {
         {draftError && !draftFeedback && (
           <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
             {draftError}
+          </div>
+        )}
+        {uploadProgress && (
+          <div className="rounded-md border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+            {uploadProgress.error
+              ? uploadProgress.error
+              : `Enviando fotos em segundo plano (${uploadProgress.uploaded}/${uploadProgress.pending}).`}
           </div>
         )}
       </header>
