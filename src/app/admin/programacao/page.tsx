@@ -167,6 +167,13 @@ export default function ProgramacaoAdminPage() {
               Atualizar status
             </Button>
             <a
+              href="/admin/programacao/curva-s"
+              className={buttonStyles({ variant: "ghost", className: "gap-2" })}
+            >
+              <i className="fas fa-chart-area" aria-hidden />
+              Curva S do serviço
+            </a>
+            <a
               href="/admin/programacao/detalhes"
               className={buttonStyles({ variant: "ghost", className: "gap-2" })}
             >
