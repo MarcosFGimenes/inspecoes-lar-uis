@@ -1022,7 +1022,7 @@ export default function InspectionPage() {
               })
             );
             const normalized = fotosValues.filter(
-              (value): value is { dataUrl: string; fileName?: string | null } =>
+              (value): value is { dataUrl: string; fileName: string | null } =>
                 Boolean(value?.dataUrl && value.dataUrl.trim())
             );
             if (normalized.length) {
