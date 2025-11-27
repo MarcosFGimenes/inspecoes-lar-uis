@@ -2,13 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import {
-  collection,
-  getDocs,
-  limit,
-  orderBy,
-  query,
-} from "firebase/firestore";
+import { collection, getDocs, orderBy, query } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase-client";
 import { Button, buttonStyles } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -74,7 +68,7 @@ export default function AdminInspectionsPage() {
       }
 
       const inspectionsSnap = await getDocs(
-        query(collection(firebaseDb, "inspecoes"), orderBy("createdAt", "desc"), limit(100))
+        query(collection(firebaseDb, "inspecoes"), orderBy("createdAt", "desc"))
       );
 
       const mapped: InspectionListItem[] = inspectionsSnap.docs.map(doc => {
