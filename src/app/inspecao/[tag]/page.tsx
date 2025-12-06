@@ -72,6 +72,9 @@ const RESULT_OPTIONS: Array<{ value: "C" | "NC" | "NA"; label: string; tone: "ok
   { value: "NA", label: "N/A", tone: "na" },
 ];
 
+const DEFAULT_AUTO_SAVE_DELAY = 3500;
+const PHOTO_AUTO_SAVE_DELAY = 1200;
+
 /* ===== Helpers já existentes ===== */
 const MAX_IMAGE_BYTES = 1.5 * 1024 * 1024; // ~1.5MB
 const MAX_IMAGE_DIMENSION = 1600; // pixels
@@ -239,6 +242,7 @@ export default function InspectionPage() {
   const [lastDraftUpdatedAt, setLastDraftUpdatedAt] = useState<string | null>(null);
   const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastDraftPayloadRef = useRef<string | null>(null);
+  const nextDraftAutoSaveReasonRef = useRef<"default" | "photo" | null>(null);
   const uploadQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   const signatureRef = useRef<SignatureCanvasInstance | null>(null);
@@ -769,12 +773,15 @@ export default function InspectionPage() {
     if (fingerprint === lastDraftPayloadRef.current) {
       return;
     }
+    const reason = nextDraftAutoSaveReasonRef.current ?? "default";
+    nextDraftAutoSaveReasonRef.current = null;
+    const delay = reason === "photo" ? PHOTO_AUTO_SAVE_DELAY : DEFAULT_AUTO_SAVE_DELAY;
     if (draftTimerRef.current) {
       clearTimeout(draftTimerRef.current);
     }
     draftTimerRef.current = setTimeout(() => {
       saveDraft("auto").catch(() => undefined);
-    }, 5000);
+    }, delay);
     return () => {
       if (draftTimerRef.current) {
         clearTimeout(draftTimerRef.current);
@@ -836,8 +843,9 @@ export default function InspectionPage() {
           },
         };
       });
+      requestDraftAutoSave();
     },
-    [createEmptyItemState]
+    [createEmptyItemState, requestDraftAutoSave]
   );
 
   const handleObservacaoChange = useCallback(
@@ -852,8 +860,9 @@ export default function InspectionPage() {
           },
         };
       });
+      requestDraftAutoSave();
     },
-    [createEmptyItemState]
+    [createEmptyItemState, requestDraftAutoSave]
   );
 
   const handleItemOsNumeroChange = useCallback(
@@ -869,8 +878,9 @@ export default function InspectionPage() {
           },
         };
       });
+      requestDraftAutoSave();
     },
-    [createEmptyItemState, osBloqueado]
+    [createEmptyItemState, osBloqueado, requestDraftAutoSave]
   );
 
   const handleFotosChange = useCallback(
@@ -908,12 +918,13 @@ export default function InspectionPage() {
               },
             };
           });
+          requestDraftAutoSave("photo");
         } catch {
           setFeedback({ type: "error", message: "Não foi possível processar as imagens selecionadas." });
         }
       })();
     },
-    [createEmptyItemState, setFeedback]
+    [createEmptyItemState, requestDraftAutoSave, setFeedback]
   );
 
   const handleRemoveFoto = useCallback((itemId: string, fotoId: string) => {
@@ -930,28 +941,35 @@ export default function InspectionPage() {
         },
       };
     });
-  }, []);
+    requestDraftAutoSave("photo");
+  }, [requestDraftAutoSave]);
 
-  const handleResolveIssue = useCallback((issueId: string, checked: boolean) => {
-    setResolveIssues((prev) => ({ ...prev, [issueId]: checked }));
-  }, []);
+  const handleResolveIssue = useCallback(
+    (issueId: string, checked: boolean) => {
+      setResolveIssues(prev => ({ ...prev, [issueId]: checked }));
+      requestDraftAutoSave();
+    },
+    [requestDraftAutoSave]
+  );
 
   const handleSignatureEnd = useCallback(() => {
     setSignatureMode("new");
     setSignatureTouched(true);
     if (signatureRef.current?.isEmpty && signatureRef.current.isEmpty()) {
       setSignatureDataUrl(null);
+      requestDraftAutoSave();
       return;
     }
     if (signatureRef.current?.toDataURL) {
       try {
         const dataUrl = signatureRef.current.toDataURL("image/png");
         setSignatureDataUrl(dataUrl);
+        requestDraftAutoSave();
       } catch {
         // ignore export errors
       }
     }
-  }, []);
+  }, [requestDraftAutoSave]);
 
   const queueBackgroundUploads = useCallback(
     (inspectionId: string, uploads: PendingUpload[]) => {
@@ -977,6 +995,12 @@ export default function InspectionPage() {
     },
     []
   );
+
+  const requestDraftAutoSave = useCallback((reason: "default" | "photo" = "default") => {
+    if (reason === "photo" || nextDraftAutoSaveReasonRef.current === null) {
+      nextDraftAutoSaveReasonRef.current = reason;
+    }
+  }, []);
 
   const submitInspection = useCallback(
     async (mode: "save" | "save-new") => {
@@ -1082,6 +1106,11 @@ export default function InspectionPage() {
         if (response.status === 401) { window.location.href = "/login"; return; }
         if (!response.ok) {
           const payload = await response.json().catch(() => null);
+          if (payload?.error === "INSPECTION_ALREADY_EXISTS") {
+            throw new Error(
+              "Já existe uma inspeção salva com este número de O.S. Verifique o histórico antes de tentar novamente."
+            );
+          }
           throw new Error(typeof payload?.error === "string" ? payload.error : "Falha ao salvar inspeção.");
         }
         const data = await response.json();
@@ -1343,6 +1372,7 @@ export default function InspectionPage() {
               onChange={e => {
                 if (osBloqueado) return;
                 setOsNumero(e.target.value.toUpperCase());
+                requestDraftAutoSave();
               }}
               readOnly={Boolean(osBloqueado)}
               placeholder="Opcional"
@@ -1357,7 +1387,12 @@ export default function InspectionPage() {
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-gray-700 font-medium">Observações gerais</span>
             <textarea
-              value={observacoes} onChange={(e) => setObservacoes(e.target.value)} rows={3}
+              value={observacoes}
+              onChange={e => {
+                setObservacoes(e.target.value);
+                requestDraftAutoSave();
+              }}
+              rows={3}
               placeholder="Registre observações relevantes"
               className="rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
             />
@@ -1723,6 +1758,7 @@ export default function InspectionPage() {
                 signatureRef.current?.clear?.();
                 setSignatureTouched(false);
                 setSignatureDataUrl(null);
+                 requestDraftAutoSave();
               }}
               disabled={signatureMode === "saved"}
               className={`inline-flex items-center justify-center rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium transition ${

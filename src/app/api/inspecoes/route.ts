@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { FieldPath, FieldValue, Timestamp } from "firebase-admin/firestore";
-import type { QueryDocumentSnapshot, DocumentData, DocumentSnapshot } from "firebase-admin/firestore";
+import type {
+  QueryDocumentSnapshot,
+  DocumentData,
+  DocumentSnapshot,
+  DocumentReference,
+} from "firebase-admin/firestore";
 import { adminDb } from "@/lib/firebase-admin";
 import { findMachineByTag } from "@/lib/db/machines";
 import { requireMaint } from "@/lib/guards";
@@ -99,6 +104,14 @@ function normalizeIsoDate(value: string | null | undefined) {
   return parsed.toISOString();
 }
 
+function isAlreadyExistsError(err: unknown) {
+  if (!err || typeof err !== "object") {
+    return false;
+  }
+  const code = (err as { code?: number | string }).code;
+  return code === 6 || code === "ALREADY_EXISTS";
+}
+
 export async function POST(req: NextRequest) {
   const auth = await requireMaint();
   if (!auth.ok) {
@@ -114,6 +127,10 @@ export async function POST(req: NextRequest) {
       { status: 422 }
     );
   }
+
+  let duplicateLockRef: DocumentReference | null = null;
+  let duplicateLockAcquired = false;
+  let inspectionCreated = false;
 
   try {
     if (!payload.assinaturaDataUrl && !payload.assinaturaProfileId) {
@@ -205,6 +222,8 @@ export async function POST(req: NextRequest) {
     }
 
     const osNumeroFinal = osNumeroFromProgramacao ?? osNumeroPayload ?? null;
+    const osMachineKey =
+      osNumeroFinal && machineRecord.id ? `${machineRecord.id}__${osNumeroFinal}` : null;
 
     if (payload.programacaoId && !osNumeroFinal) {
       return NextResponse.json({ error: "PROGRAMACAO_OS_REQUIRED" }, { status: 422 });
@@ -215,6 +234,83 @@ export async function POST(req: NextRequest) {
     const nowDate = new Date();
     const nowIso = nowDate.toISOString();
     const nowTimestamp = Timestamp.fromDate(nowDate);
+
+    if (osMachineKey && osNumeroFinal && machineRecord.id) {
+      duplicateLockRef = adminDb.collection("inspectionLocks").doc(osMachineKey);
+      const existingLockSnap = await duplicateLockRef.get();
+      if (existingLockSnap.exists) {
+        const existingData = existingLockSnap.data() ?? {};
+        const existingInspectionId =
+          typeof existingData.inspectionId === "string" ? existingData.inspectionId : null;
+        return NextResponse.json(
+          {
+            error: "INSPECTION_ALREADY_EXISTS",
+            inspectionId: existingInspectionId ?? undefined,
+          },
+          { status: 409 }
+        );
+      }
+
+      const duplicateByOsSnap = await adminDb
+        .collection("inspecoes")
+        .where("osNumero", "==", osNumeroFinal)
+        .limit(10)
+        .get();
+      const conflictingDoc = duplicateByOsSnap.docs.find(doc => {
+        const data = doc.data() ?? {};
+        const machine = (data.machine ?? {}) as { machineId?: string | null };
+        return typeof machine.machineId === "string" && machine.machineId === machineRecord.id;
+      });
+      if (conflictingDoc) {
+        await duplicateLockRef.set(
+          {
+            inspectionId: conflictingDoc.id,
+            machineId: machineRecord.id,
+            osNumero: osNumeroFinal,
+            status: "completed",
+            createdBy:
+              ((conflictingDoc.data()?.maintainer ?? {}) as { maintId?: string | null })?.maintId ??
+              null,
+            createdAt: conflictingDoc.data()?.createdAt ?? nowIso,
+            updatedAt: nowIso,
+            completedAt: nowIso,
+          },
+          { merge: true }
+        );
+        return NextResponse.json(
+          { error: "INSPECTION_ALREADY_EXISTS", inspectionId: conflictingDoc.id },
+          { status: 409 }
+        );
+      }
+
+      try {
+        await duplicateLockRef.create({
+          inspectionId,
+          machineId: machineRecord.id,
+          osNumero: osNumeroFinal,
+          status: "pending",
+          createdBy: auth.store.id!,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+        });
+        duplicateLockAcquired = true;
+      } catch (lockErr) {
+        if (isAlreadyExistsError(lockErr)) {
+          const latestSnap = await duplicateLockRef.get();
+          const existingData = latestSnap.data() ?? {};
+          const existingInspectionId =
+            typeof existingData.inspectionId === "string" ? existingData.inspectionId : null;
+          return NextResponse.json(
+            {
+              error: "INSPECTION_ALREADY_EXISTS",
+              inspectionId: existingInspectionId ?? undefined,
+            },
+            { status: 409 }
+          );
+        }
+        throw lockErr;
+      }
+    }
 
     let assinaturaUrl: string | null = null;
     if (payload.assinaturaProfileId) {
@@ -439,7 +535,22 @@ export async function POST(req: NextRequest) {
       finalizadaEmTimestamp: nowTimestamp,
       issuesCriadas,
       issuesResolvidas,
+      osMachineKey,
     });
+    inspectionCreated = true;
+
+    if (duplicateLockRef && duplicateLockAcquired) {
+      const completedAt = new Date().toISOString();
+      await duplicateLockRef.set(
+        {
+          inspectionId,
+          status: "completed",
+          completedAt,
+          updatedAt: completedAt,
+        },
+        { merge: true }
+      );
+    }
 
     if (programacaoDoc) {
       const prazoDate = programacaoPrazoIso ? new Date(programacaoPrazoIso) : null;
@@ -467,6 +578,9 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ id: inspectionId, assinaturaUrl });
   } catch (err: unknown) {
+    if (duplicateLockRef && duplicateLockAcquired && !inspectionCreated) {
+      await duplicateLockRef.delete().catch(() => undefined);
+    }
     return NextResponse.json(
       { error: extractMessage(err, "INTERNAL_ERROR") },
       { status: 500 }
