@@ -210,6 +210,24 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "PROGRAMACAO_OS_REQUIRED" }, { status: 422 });
     }
 
+    if (osNumeroFinal) {
+      const duplicateSnap = await adminDb
+        .collection("inspecoes")
+        .where("machine.machineId", "==", machineRecord.id)
+        .where("osNumero", "==", osNumeroFinal)
+        .limit(1)
+        .get();
+
+      if (!duplicateSnap.empty) {
+        const existing = duplicateSnap.docs[0];
+        const createdAt = existing.data()?.createdAt ?? null;
+        return NextResponse.json(
+          { error: "INSPECTION_ALREADY_EXISTS", id: existing.id, createdAt },
+          { status: 409 }
+        );
+      }
+    }
+
     const inspectionRef = adminDb.collection("inspecoes").doc();
     const inspectionId = inspectionRef.id;
     const nowDate = new Date();
