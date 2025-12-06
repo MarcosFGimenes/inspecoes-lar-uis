@@ -237,9 +237,11 @@ export default function InspectionPage() {
   const [autoSavingDraft, setAutoSavingDraft] = useState(false);
   const [draftFeedback, setDraftFeedback] = useState<FeedbackState | null>(null);
   const [lastDraftUpdatedAt, setLastDraftUpdatedAt] = useState<string | null>(null);
+  const [currentDraftFingerprint, setCurrentDraftFingerprint] = useState<string | null>(null);
   const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastDraftPayloadRef = useRef<string | null>(null);
   const uploadQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const quickDraftPriorityRef = useRef<"immediate" | null>(null);
 
   const signatureRef = useRef<SignatureCanvasInstance | null>(null);
   const cancelInputRef = useRef<HTMLInputElement | null>(null);
@@ -634,6 +636,24 @@ export default function InspectionPage() {
     };
   }, [itemsState, observacoes, osNumero, resolveIssues, signatureDataUrl, sortedItems]);
 
+  const scheduleDraftSave = useCallback(
+    (priority: "immediate" | "debounced", fingerprint: string) => {
+      if (!context?.machine?.tag || isDraftLoading) return;
+      if (lastDraftPayloadRef.current === fingerprint) return;
+
+      const delay = priority === "immediate" ? 600 : 2000;
+
+      if (draftTimerRef.current) {
+        clearTimeout(draftTimerRef.current);
+      }
+
+      draftTimerRef.current = setTimeout(() => {
+        saveDraft("auto").catch(() => undefined);
+      }, delay);
+    },
+    [context?.machine?.tag, isDraftLoading, saveDraft]
+  );
+
   const saveDraft = useCallback(
     async (mode: "manual" | "auto") => {
       if (!context?.machine?.tag) return;
@@ -757,31 +777,23 @@ export default function InspectionPage() {
   }, [cancelConfirmText, cancelLoading, context?.machine?.tag, router]);
 
   useEffect(() => {
-    if (!context?.machine?.tag || isDraftLoading) {
-      if (draftTimerRef.current) {
-        clearTimeout(draftTimerRef.current);
-        draftTimerRef.current = null;
-      }
-      return;
-    }
     const draftState = buildCurrentDraftPayload();
     const fingerprint = JSON.stringify(draftState);
-    if (fingerprint === lastDraftPayloadRef.current) {
-      return;
-    }
+    setCurrentDraftFingerprint(fingerprint);
+
+    if (!context?.machine?.tag || isDraftLoading) return;
+
+    const priority = quickDraftPriorityRef.current ?? "debounced";
+    quickDraftPriorityRef.current = null;
+    scheduleDraftSave(priority, fingerprint);
+  }, [buildCurrentDraftPayload, context?.machine?.tag, isDraftLoading, scheduleDraftSave]);
+
+  useEffect(() => () => {
     if (draftTimerRef.current) {
       clearTimeout(draftTimerRef.current);
+      draftTimerRef.current = null;
     }
-    draftTimerRef.current = setTimeout(() => {
-      saveDraft("auto").catch(() => undefined);
-    }, 5000);
-    return () => {
-      if (draftTimerRef.current) {
-        clearTimeout(draftTimerRef.current);
-        draftTimerRef.current = null;
-      }
-    };
-  }, [buildCurrentDraftPayload, context?.machine?.tag, isDraftLoading, saveDraft]);
+  }, []);
 
   /* ===== Derivados ===== */
   const hasNC = useMemo(() => Object.values(itemsState).some((i) => i.resultado === "NC"), [itemsState]);
@@ -810,18 +822,22 @@ export default function InspectionPage() {
   const itemsWithOpenIssue = useMemo(() => new Set(openIssuesByItem.keys()), [openIssuesByItem]);
 
   const draftStatusMessage = useMemo(() => {
+    const isDraftSynced =
+      Boolean(currentDraftFingerprint) && lastDraftPayloadRef.current === currentDraftFingerprint;
+
     if (draftSaving) return "Salvando rascunho...";
     if (autoSavingDraft) return "Salvando rascunho automaticamente...";
     if (isDraftLoading) return "Carregando rascunho...";
-    if (lastDraftUpdatedAt) {
+    if (isDraftSynced && lastDraftUpdatedAt) {
       try {
-        return `Rascunho salvo em ${new Date(lastDraftUpdatedAt).toLocaleString("pt-BR")}`;
+        return `Tudo salvo em ${new Date(lastDraftUpdatedAt).toLocaleString("pt-BR")}`;
       } catch {
-        return "Rascunho salvo.";
+        return "Tudo salvo.";
       }
     }
+    if (isDraftSynced) return "Tudo salvo.";
     return "Rascunho automático ativo.";
-  }, [autoSavingDraft, draftSaving, isDraftLoading, lastDraftUpdatedAt]);
+  }, [autoSavingDraft, currentDraftFingerprint, draftSaving, isDraftLoading, lastDraftUpdatedAt]);
 
   /* ===== Handlers (mesmos nomes/contratos) ===== */
   const handleResultadoChange = useCallback(
@@ -836,6 +852,7 @@ export default function InspectionPage() {
           },
         };
       });
+      quickDraftPriorityRef.current = "immediate";
     },
     [createEmptyItemState]
   );
@@ -869,6 +886,7 @@ export default function InspectionPage() {
           },
         };
       });
+      quickDraftPriorityRef.current = "immediate";
     },
     [createEmptyItemState, osBloqueado]
   );
@@ -908,6 +926,7 @@ export default function InspectionPage() {
               },
             };
           });
+          quickDraftPriorityRef.current = "immediate";
         } catch {
           setFeedback({ type: "error", message: "Não foi possível processar as imagens selecionadas." });
         }
@@ -930,10 +949,12 @@ export default function InspectionPage() {
         },
       };
     });
+    quickDraftPriorityRef.current = "immediate";
   }, []);
 
   const handleResolveIssue = useCallback((issueId: string, checked: boolean) => {
     setResolveIssues((prev) => ({ ...prev, [issueId]: checked }));
+    quickDraftPriorityRef.current = "immediate";
   }, []);
 
   const handleSignatureEnd = useCallback(() => {
