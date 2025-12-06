@@ -238,6 +238,7 @@ export default function InspectionPage() {
   const [draftFeedback, setDraftFeedback] = useState<FeedbackState | null>(null);
   const [lastDraftUpdatedAt, setLastDraftUpdatedAt] = useState<string | null>(null);
   const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const draftPriorityRef = useRef(false);
   const lastDraftPayloadRef = useRef<string | null>(null);
   const uploadQueueRef = useRef<Promise<void>>(Promise.resolve());
 
@@ -772,9 +773,11 @@ export default function InspectionPage() {
     if (draftTimerRef.current) {
       clearTimeout(draftTimerRef.current);
     }
+    const delay = draftPriorityRef.current ? 1200 : 4000;
+    draftPriorityRef.current = false;
     draftTimerRef.current = setTimeout(() => {
       saveDraft("auto").catch(() => undefined);
-    }, 5000);
+    }, delay);
     return () => {
       if (draftTimerRef.current) {
         clearTimeout(draftTimerRef.current);
@@ -889,17 +892,18 @@ export default function InspectionPage() {
             newPhotos.push({
               id: createPhotoId(),
               name: file.name || "Imagem",
-              dataUrl,
-              file,
-              origin: "local" as const,
-            });
-          }
+            dataUrl,
+            file,
+            origin: "local" as const,
+          });
+        }
 
-          setItemsState(prev => {
-            const prevItem = prev[itemId] ?? createEmptyItemState();
-            const existingFotos = Array.isArray(prevItem.fotos) ? prevItem.fotos : [];
-            const combined = [...existingFotos, ...newPhotos].slice(0, 3);
-            return {
+        draftPriorityRef.current = true;
+        setItemsState(prev => {
+          const prevItem = prev[itemId] ?? createEmptyItemState();
+          const existingFotos = Array.isArray(prevItem.fotos) ? prevItem.fotos : [];
+          const combined = [...existingFotos, ...newPhotos].slice(0, 3);
+          return {
               ...prev,
               [itemId]: {
                 ...prevItem,
@@ -917,6 +921,7 @@ export default function InspectionPage() {
   );
 
   const handleRemoveFoto = useCallback((itemId: string, fotoId: string) => {
+    draftPriorityRef.current = true;
     setItemsState(prev => {
       const prevItem = prev[itemId];
       if (!prevItem) return prev;
@@ -1082,7 +1087,11 @@ export default function InspectionPage() {
         if (response.status === 401) { window.location.href = "/login"; return; }
         if (!response.ok) {
           const payload = await response.json().catch(() => null);
-          throw new Error(typeof payload?.error === "string" ? payload.error : "Falha ao salvar inspeção.");
+          const errorCode = typeof payload?.error === "string" ? payload.error : null;
+          if (response.status === 409 && errorCode === "INSPECTION_ALREADY_EXISTS") {
+            throw new Error("Já existe uma inspeção registrada para essa O.S. O envio duplicado foi bloqueado.");
+          }
+          throw new Error(errorCode ?? "Falha ao salvar inspeção.");
         }
         const data = await response.json();
         const inspectionId = data?.id ? String(data.id) : null;
