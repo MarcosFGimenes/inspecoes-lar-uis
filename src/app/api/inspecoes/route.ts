@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { FieldPath, FieldValue, Timestamp } from "firebase-admin/firestore";
-import type { QueryDocumentSnapshot, DocumentData, DocumentSnapshot } from "firebase-admin/firestore";
+import type {
+  QueryDocumentSnapshot,
+  DocumentData,
+  DocumentSnapshot,
+  DocumentReference,
+} from "firebase-admin/firestore";
 import { adminDb } from "@/lib/firebase-admin";
 import { findMachineByTag } from "@/lib/db/machines";
 import { requireMaint } from "@/lib/guards";
@@ -105,6 +110,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: auth.status });
   }
 
+  const nowDate = new Date();
+  const nowIso = nowDate.toISOString();
+  const nowTimestamp = Timestamp.fromDate(nowDate);
+
   let payload: Payload;
   try {
     payload = payloadSchema.parse(await req.json());
@@ -114,6 +123,9 @@ export async function POST(req: NextRequest) {
       { status: 422 }
     );
   }
+
+  let osGuardRef: DocumentReference<DocumentData> | null = null;
+  let osGuardCreated = false;
 
   try {
     if (!payload.assinaturaDataUrl && !payload.assinaturaProfileId) {
@@ -210,11 +222,71 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "PROGRAMACAO_OS_REQUIRED" }, { status: 422 });
     }
 
+    if (osNumeroFinal) {
+      const duplicateSnap = await adminDb
+        .collection("inspecoes")
+        .where("machine.machineId", "==", machineRecord.id)
+        .where("osNumero", "==", osNumeroFinal)
+        .limit(1)
+        .get();
+
+      if (!duplicateSnap.empty) {
+        const existing = duplicateSnap.docs[0];
+        const createdAt = existing.data()?.createdAt ?? null;
+        return NextResponse.json(
+          { error: "INSPECTION_ALREADY_EXISTS", id: existing.id, createdAt },
+          { status: 409 }
+        );
+      }
+    }
+
     const inspectionRef = adminDb.collection("inspecoes").doc();
     const inspectionId = inspectionRef.id;
-    const nowDate = new Date();
-    const nowIso = nowDate.toISOString();
-    const nowTimestamp = Timestamp.fromDate(nowDate);
+
+    if (osNumeroFinal) {
+      osGuardRef = adminDb
+        .collection("inspecao_os_guards")
+        .doc(`${machineRecord.id}__${osNumeroFinal}`);
+
+      const guardResult = await adminDb.runTransaction(async txn => {
+        const existingGuard = await txn.get(osGuardRef!);
+        if (existingGuard.exists) {
+          const data = existingGuard.data() ?? {};
+          const existingId = typeof data.inspectionId === "string" ? data.inspectionId : null;
+          const createdAt = typeof data.createdAt === "string" ? data.createdAt : null;
+          return { duplicate: true, existingId, createdAt };
+        }
+
+        txn.set(osGuardRef!, {
+          machineId: machineRecord.id,
+          osNumero: osNumeroFinal,
+          inspectionId,
+          createdAt: nowIso,
+          status: "pending",
+        });
+
+        return { duplicate: false };
+      });
+
+      if (guardResult.duplicate) {
+        let createdAt = guardResult.createdAt ?? null;
+        const existingId = guardResult.existingId ?? null;
+
+        if (existingId) {
+          const existingDoc = await adminDb.collection("inspecoes").doc(existingId).get();
+          if (existingDoc.exists) {
+            createdAt = existingDoc.data()?.createdAt ?? createdAt;
+          }
+        }
+
+        return NextResponse.json(
+          { error: "INSPECTION_ALREADY_EXISTS", id: existingId, createdAt },
+          { status: 409 }
+        );
+      }
+
+      osGuardCreated = true;
+    }
 
     let assinaturaUrl: string | null = null;
     if (payload.assinaturaProfileId) {
@@ -465,8 +537,27 @@ export async function POST(req: NextRequest) {
       await programacaoDoc.ref.set(updates, { merge: true });
     }
 
+    if (osGuardRef && osGuardCreated) {
+      await osGuardRef.set(
+        {
+          status: "completed",
+          finalizedAt: nowIso,
+          inspectionId,
+        },
+        { merge: true }
+      );
+    }
+
     return NextResponse.json({ id: inspectionId, assinaturaUrl });
   } catch (err: unknown) {
+    if (osGuardRef && osGuardCreated) {
+      try {
+        await osGuardRef.delete();
+      } catch (deleteErr) {
+        console.error("Failed to clear OS guard", deleteErr);
+      }
+    }
+
     return NextResponse.json(
       { error: extractMessage(err, "INTERNAL_ERROR") },
       { status: 500 }

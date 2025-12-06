@@ -75,6 +75,7 @@ const RESULT_OPTIONS: Array<{ value: "C" | "NC" | "NA"; label: string; tone: "ok
 /* ===== Helpers já existentes ===== */
 const MAX_IMAGE_BYTES = 1.5 * 1024 * 1024; // ~1.5MB
 const MAX_IMAGE_DIMENSION = 1600; // pixels
+const AUTO_SAVE_DELAY_MS = 1500;
 
 async function readBlobAsDataUrl(blob: Blob) {
   return new Promise<string>((resolve, reject) => {
@@ -774,7 +775,7 @@ export default function InspectionPage() {
     }
     draftTimerRef.current = setTimeout(() => {
       saveDraft("auto").catch(() => undefined);
-    }, 5000);
+    }, AUTO_SAVE_DELAY_MS);
     return () => {
       if (draftTimerRef.current) {
         clearTimeout(draftTimerRef.current);
@@ -1082,6 +1083,11 @@ export default function InspectionPage() {
         if (response.status === 401) { window.location.href = "/login"; return; }
         if (!response.ok) {
           const payload = await response.json().catch(() => null);
+          if (payload?.error === "INSPECTION_ALREADY_EXISTS") {
+            throw new Error(
+              "Já existe uma inspeção salva para essa O.S. nesta máquina. Abra a lista para visualizar o registro existente."
+            );
+          }
           throw new Error(typeof payload?.error === "string" ? payload.error : "Falha ao salvar inspeção.");
         }
         const data = await response.json();
