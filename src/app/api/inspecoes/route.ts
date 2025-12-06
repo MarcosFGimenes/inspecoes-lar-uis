@@ -206,6 +206,18 @@ export async function POST(req: NextRequest) {
 
     const osNumeroFinal = osNumeroFromProgramacao ?? osNumeroPayload ?? null;
 
+    if (osNumeroFinal) {
+      const duplicateSnap = await adminDb
+        .collection("inspecoes")
+        .where("osNumero", "==", osNumeroFinal)
+        .limit(1)
+        .get();
+
+      if (!duplicateSnap.empty) {
+        return NextResponse.json({ error: "INSPECTION_ALREADY_EXISTS" }, { status: 409 });
+      }
+    }
+
     if (payload.programacaoId && !osNumeroFinal) {
       return NextResponse.json({ error: "PROGRAMACAO_OS_REQUIRED" }, { status: 422 });
     }
