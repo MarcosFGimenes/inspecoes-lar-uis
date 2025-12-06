@@ -830,6 +830,12 @@ export default function InspectionPage() {
     return "Rascunho automático ativo.";
   }, [autoSavingDraft, draftSaving, isDraftLoading, lastDraftUpdatedAt]);
 
+  const requestDraftAutoSave = useCallback((reason: "default" | "photo" = "default") => {
+    if (reason === "photo" || nextDraftAutoSaveReasonRef.current === null) {
+      nextDraftAutoSaveReasonRef.current = reason;
+    }
+  }, []);
+
   /* ===== Handlers (mesmos nomes/contratos) ===== */
   const handleResultadoChange = useCallback(
     (itemId: string, value: "C" | "NC" | "NA") => {
@@ -995,12 +1001,6 @@ export default function InspectionPage() {
     },
     []
   );
-
-  const requestDraftAutoSave = useCallback((reason: "default" | "photo" = "default") => {
-    if (reason === "photo" || nextDraftAutoSaveReasonRef.current === null) {
-      nextDraftAutoSaveReasonRef.current = reason;
-    }
-  }, []);
 
   const submitInspection = useCallback(
     async (mode: "save" | "save-new") => {
