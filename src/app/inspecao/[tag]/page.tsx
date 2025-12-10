@@ -224,7 +224,7 @@ export default function InspectionPage() {
   const [resolveIssues, setResolveIssues] = useState<Record<string, boolean>>({});
   const [feedback, setFeedback] = useState<FeedbackState | null>(null);
   const [saving, setSaving] = useState(false);
-  const [savingAction, setSavingAction] = useState<"save" | "save-new" | null>(null);
+  const [savingAction, setSavingAction] = useState<"save" | null>(null);
   const [lastInspectionId, setLastInspectionId] = useState<string | null>(null);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelConfirmText, setCancelConfirmText] = useState("");
@@ -979,10 +979,10 @@ export default function InspectionPage() {
   );
 
   const submitInspection = useCallback(
-    async (mode: "save" | "save-new") => {
+    async () => {
       if (!context?.machine?.tag) { setFeedback({ type: "error", message: "Máquina sem TAG configurada." }); return; }
       if (saving) return;
-      setSaving(true); setSavingAction(mode); setFeedback(null);
+      setSaving(true); setSavingAction("save"); setFeedback(null);
       try {
         const payloadItems: Array<{
           templateItemId: string;
@@ -1796,18 +1796,10 @@ export default function InspectionPage() {
               <button
                 type="button"
                 disabled={saving || cancelLoading}
-                onClick={() => submitInspection("save")}
+                onClick={submitInspection}
                 className="inline-flex items-center justify-center rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {saving && savingAction === "save" ? "Salvando..." : "Salvar"}
-              </button>
-              <button
-                type="button"
-                disabled={saving || cancelLoading}
-                onClick={() => submitInspection("save-new")}
-                className="inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {saving && savingAction === "save-new" ? "Salvando..." : "Salvar & Nova"}
               </button>
             </div>
           </div>
