@@ -348,8 +348,8 @@ export default function AdminNonConformitiesPage() {
 
         const updatedTreatment: ChecklistNonConformityTreatment = {
           questionId: item.questionId,
-          summary: summary || undefined,
-          responsible: responsible || undefined,
+          summary: summary || null,
+          responsible: responsible || null,
           dueDate: dueDateIso,
           status: item.status,
           createdAt: existing.find(t => t.questionId === item.questionId)?.createdAt ?? nowIso,
