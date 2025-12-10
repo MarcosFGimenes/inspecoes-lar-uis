@@ -185,9 +185,15 @@ export default function AdminNonConformitiesPage() {
   const [machines, setMachines] = useState<MachineOption[]>([]);
   const [treatmentsByResponse, setTreatmentsByResponse] = useState<Record<string, ChecklistNonConformityTreatment[]>>({});
   const [machineFilter, setMachineFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("pending");
+  const [statusFilter, setStatusFilter] = useState("all");
   const [savingId, setSavingId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<Record<string, FeedbackState>>({});
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [bulkSaving, setBulkSaving] = useState(false);
+
+  useEffect(() => {
+    setSelectedIds(prev => prev.filter(id => items.some(item => item.id === id)));
+  }, [items]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -377,6 +383,57 @@ export default function AdminNonConformitiesPage() {
     [handleUpdateItem, treatmentsByResponse]
   );
 
+  const handleStatusClick = useCallback(
+    async (item: NonConformityItem, status: NonConformityStatus) => {
+      const updatedItem = { ...item, status };
+      handleUpdateItem(item.id, { status });
+      await handleSave(updatedItem);
+    },
+    [handleSave, handleUpdateItem]
+  );
+
+  const handleBulkStatusChange = useCallback(
+    async (status: NonConformityStatus) => {
+      const targetItems = items.filter(item => selectedIds.includes(item.id));
+      if (targetItems.length === 0) return;
+
+      setBulkSaving(true);
+      try {
+        for (const target of targetItems) {
+          const updatedItem = { ...target, status };
+          handleUpdateItem(target.id, { status });
+          await handleSave(updatedItem);
+        }
+      } finally {
+        setBulkSaving(false);
+      }
+    },
+    [handleSave, handleUpdateItem, items, selectedIds]
+  );
+
+  const handleToggleItemSelection = useCallback((id: string) => {
+    setSelectedIds(prev =>
+      prev.includes(id) ? prev.filter(itemId => itemId !== id) : [...prev, id]
+    );
+  }, []);
+
+  const handleToggleAllVisible = useCallback(() => {
+    const visibleIds = filteredItems.map(item => item.id);
+    const allSelected = visibleIds.length > 0 && visibleIds.every(id => selectedIds.includes(id));
+
+    setSelectedIds(prev => {
+      if (allSelected) {
+        return prev.filter(id => !visibleIds.includes(id));
+      }
+      const merged = new Set([...prev, ...visibleIds]);
+      return Array.from(merged);
+    });
+  }, [filteredItems, selectedIds]);
+
+  const allVisibleSelected =
+    filteredItems.length > 0 && filteredItems.every(item => selectedIds.includes(item.id));
+  const selectedCount = selectedIds.length;
+
   if (loading) {
     return (
       <div className="max-w-7xl mx-auto space-y-6 p-6">
@@ -467,6 +524,53 @@ export default function AdminNonConformitiesPage() {
         </CardContent>
       </Card>
 
+      {filteredItems.length > 0 && (
+        <Card>
+          <CardContent className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <label className="flex items-center gap-3 text-sm text-[var(--text)]">
+              <input
+                type="checkbox"
+                className="h-4 w-4 accent-[var(--primary-500)]"
+                checked={allVisibleSelected && filteredItems.length > 0}
+                onChange={handleToggleAllVisible}
+              />
+              <div className="leading-tight">
+                <div>Selecionar todas as {filteredItems.length} NC exibidas</div>
+                <div className="text-[var(--muted)]">
+                  {selectedCount} selecionada{selectedCount === 1 ? "" : "s"}
+                </div>
+              </div>
+            </label>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={selectedCount === 0 || bulkSaving}
+                onClick={() => handleBulkStatusChange("open")}
+              >
+                Marcar como pendente
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={selectedCount === 0 || bulkSaving}
+                onClick={() => handleBulkStatusChange("in_progress")}
+              >
+                Marcar como em andamento
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={selectedCount === 0 || bulkSaving}
+                onClick={() => handleBulkStatusChange("resolved")}
+              >
+                Marcar como resolvida
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {filteredItems.length === 0 ? (
         <EmptyState
           title="Nenhuma não conformidade encontrada"
@@ -480,27 +584,37 @@ export default function AdminNonConformitiesPage() {
               <article key={item.id}>
                 <Card>
                   <CardHeader className="space-y-3">
-                    <div className="flex flex-wrap items-center gap-3">
-                      {renderStatusBadge(item.status)}
-                      {item.recurrence && <Badge variant="warning">Reincidência</Badge>}
-                      {item.templateVersion && <Badge variant="muted">Versão {item.templateVersion}</Badge>}
-                    </div>
-                    <div className="space-y-1">
-                      <CardTitle className="text-lg text-[var(--text)]">{item.questionText}</CardTitle>
-                      <p className="text-sm text-[var(--muted)]">
-                        Checklist em {formatDateTime(item.checklistDate)} — {item.templateLabel}
-                      </p>
-                    </div>
-                    <div className="grid gap-2 text-sm text-[var(--muted)] md:grid-cols-2">
-                      <div>
-                        <span className="font-medium text-[var(--text)]">Máquina:</span> {item.machineLabel}
-                      </div>
-                      <div>
-                        <span className="font-medium text-[var(--text)]">Operador:</span> {item.operatorNome || "-"}
-                        {item.operatorMatricula ? ` (${item.operatorMatricula})` : ""}
-                      </div>
-                      <div className="md:col-span-2">
-                        <span className="font-medium text-[var(--text)]">Nº da O.S. do item:</span> {item.itemOsNumero ?? "-"}
+                    <div className="flex items-start gap-3">
+                      <input
+                        type="checkbox"
+                        className="mt-1 h-4 w-4 accent-[var(--primary-500)]"
+                        checked={selectedIds.includes(item.id)}
+                        onChange={() => handleToggleItemSelection(item.id)}
+                      />
+                      <div className="flex-1 space-y-3">
+                        <div className="flex flex-wrap items-center gap-3">
+                          {renderStatusBadge(item.status)}
+                          {item.recurrence && <Badge variant="warning">Reincidência</Badge>}
+                          {item.templateVersion && <Badge variant="muted">Versão {item.templateVersion}</Badge>}
+                        </div>
+                        <div className="space-y-1">
+                          <CardTitle className="text-lg text-[var(--text)]">{item.questionText}</CardTitle>
+                          <p className="text-sm text-[var(--muted)]">
+                            Checklist em {formatDateTime(item.checklistDate)} — {item.templateLabel}
+                          </p>
+                        </div>
+                        <div className="grid gap-2 text-sm text-[var(--muted)] md:grid-cols-2">
+                          <div>
+                            <span className="font-medium text-[var(--text)]">Máquina:</span> {item.machineLabel}
+                          </div>
+                          <div>
+                            <span className="font-medium text-[var(--text)]">Operador:</span> {item.operatorNome || "-"}
+                            {item.operatorMatricula ? ` (${item.operatorMatricula})` : ""}
+                          </div>
+                          <div className="md:col-span-2">
+                            <span className="font-medium text-[var(--text)]">Nº da O.S. do item:</span> {item.itemOsNumero ?? "-"}
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </CardHeader>
@@ -572,7 +686,8 @@ export default function AdminNonConformitiesPage() {
                             key={option.value}
                             type="button"
                             variant={item.status === option.value ? "default" : "outline"}
-                            onClick={() => handleUpdateItem(item.id, { status: option.value })}
+                            disabled={savingId === item.id || bulkSaving}
+                            onClick={() => handleStatusClick(item, option.value)}
                           >
                             {option.label}
                           </Button>
@@ -585,7 +700,11 @@ export default function AdminNonConformitiesPage() {
                         {item.updatedAt ? `Atualizado em ${formatDateTime(item.updatedAt)}` : "Tratativa ainda não salva"}
                       </div>
                       <div className="flex items-center gap-3">
-                        <Button onClick={() => handleSave(item)} loading={savingId === item.id}>
+                        <Button
+                          onClick={() => handleSave(item)}
+                          loading={savingId === item.id}
+                          disabled={bulkSaving}
+                        >
                           Salvar tratativa
                         </Button>
                         {itemFeedback?.message && (
