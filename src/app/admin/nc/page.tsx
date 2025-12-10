@@ -93,54 +93,71 @@ function formatDateInput(value: string | null | undefined) {
   return date.toISOString().slice(0, 10);
 }
 
+function dedupeAnswers(answers: ChecklistAnswer[]) {
+  const seen = new Set<string>();
+  const unique: ChecklistAnswer[] = [];
+  answers.forEach(answer => {
+    if (!answer.questionId || seen.has(answer.questionId)) {
+      return;
+    }
+    seen.add(answer.questionId);
+    unique.push(answer);
+  });
+  return unique;
+}
+
 function normalizeAnswers(
   data: Record<string, unknown>,
   templateItems: Map<string, TemplateItemData>
 ): ChecklistAnswer[] {
   const answers = Array.isArray(data.answers) ? (data.answers as ChecklistAnswer[]) : [];
   if (answers.length > 0) {
-    return answers
-      .filter(item => item?.questionId)
-      .map(item => ({
-        questionId: item.questionId,
-        questionText:
-          item.questionText ||
-          templateItems.get(item.questionId)?.oQueChecar ||
-          templateItems.get(item.questionId)?.criterio ||
-          templateItems.get(item.questionId)?.componente ||
-          `Item ${item.questionId}`,
-        response: item.response === "nc" || item.response === "na" ? item.response : "c",
-        observation: item.observation ?? null,
-        photoUrls: normalizeStoredImages(item.photoUrls ?? []),
-        recurrence: item.recurrence === true,
-        itemOsNumero: item.itemOsNumero ?? null,
-      }));
+    return dedupeAnswers(
+      answers
+        .filter(item => item?.questionId)
+        .map(item => ({
+          questionId: item.questionId,
+          questionText:
+            item.questionText ||
+            templateItems.get(item.questionId)?.oQueChecar ||
+            templateItems.get(item.questionId)?.criterio ||
+            templateItems.get(item.questionId)?.componente ||
+            `Item ${item.questionId}`,
+          response: item.response === "nc" || item.response === "na" ? item.response : "c",
+          observation: item.observation ?? null,
+          photoUrls: normalizeStoredImages(item.photoUrls ?? []),
+          recurrence: item.recurrence === true,
+          itemOsNumero: item.itemOsNumero ?? null,
+        }))
+    );
   }
 
   const itens = Array.isArray(data.itens) ? (data.itens as Array<Record<string, unknown>>) : [];
-  return itens
-    .filter(item => item?.templateItemId)
-    .map(item => {
-      const questionId = String(item.templateItemId);
-      const templateItem = templateItems.get(questionId) ?? {};
-      const resultado = String(item.resultado || "C").toLowerCase();
-      const response: "c" | "nc" | "na" = resultado === "nc" ? "nc" : resultado === "na" ? "na" : "c";
-      return {
-        questionId,
-        questionText:
-          templateItem.oQueChecar ||
-          templateItem.criterio ||
-          templateItem.componente ||
-          (typeof item.componente === "string" ? item.componente : `Item ${questionId}`),
-        response,
-        observation: typeof item.observacaoItem === "string" ? item.observacaoItem : null,
-        photoUrls: normalizeStoredImages(item.fotos ?? []),
-        recurrence: false,
-        itemOsNumero: typeof item.osNumeroItem === "string" && item.osNumeroItem.trim()
-          ? item.osNumeroItem.trim().toUpperCase()
-          : null,
-      } satisfies ChecklistAnswer;
-    });
+  return dedupeAnswers(
+    itens
+      .filter(item => item?.templateItemId)
+      .map(item => {
+        const questionId = String(item.templateItemId);
+        const templateItem = templateItems.get(questionId) ?? {};
+        const resultado = String(item.resultado || "C").toLowerCase();
+        const response: "c" | "nc" | "na" = resultado === "nc" ? "nc" : resultado === "na" ? "na" : "c";
+        return {
+          questionId,
+          questionText:
+            templateItem.oQueChecar ||
+            templateItem.criterio ||
+            templateItem.componente ||
+            (typeof item.componente === "string" ? item.componente : `Item ${questionId}`),
+          response,
+          observation: typeof item.observacaoItem === "string" ? item.observacaoItem : null,
+          photoUrls: normalizeStoredImages(item.fotos ?? []),
+          recurrence: false,
+          itemOsNumero: typeof item.osNumeroItem === "string" && item.osNumeroItem.trim()
+            ? item.osNumeroItem.trim().toUpperCase()
+            : null,
+        } satisfies ChecklistAnswer;
+      })
+  );
 }
 
 function buildMachineLabel(machine: Record<string, unknown>) {
