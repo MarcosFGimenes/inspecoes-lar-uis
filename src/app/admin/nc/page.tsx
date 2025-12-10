@@ -321,6 +321,9 @@ export default function AdminNonConformitiesPage() {
       if (statusFilter === "pending") {
         return item.status !== "resolved";
       }
+      if (statusFilter === "planned") {
+        return Boolean(item.summary.trim() || item.responsible.trim() || item.dueDate);
+      }
       if (statusFilter === "all") {
         return true;
       }
@@ -515,6 +518,7 @@ export default function AdminNonConformitiesPage() {
             <span className="text-[var(--muted)]">Status</span>
             <Select value={statusFilter} onChange={event => setStatusFilter(event.target.value)}>
               <option value="pending">Pendentes</option>
+              <option value="planned">Com tratativa planejada</option>
               <option value="all">Todos</option>
               <option value="open">Abertas</option>
               <option value="in_progress">Em andamento</option>
