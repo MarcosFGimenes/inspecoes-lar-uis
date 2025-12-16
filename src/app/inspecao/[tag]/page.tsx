@@ -826,18 +826,26 @@ export default function InspectionPage() {
   /* ===== Handlers (mesmos nomes/contratos) ===== */
   const handleResultadoChange = useCallback(
     (itemId: string, value: "C" | "NC" | "NA") => {
+      const openIssue = openIssuesByItem.get(itemId);
+      const openIssueOs = openIssue?.osNumero ? String(openIssue.osNumero).trim().toUpperCase() : "";
       setItemsState(prev => {
         const previous = prev[itemId] ?? createEmptyItemState();
+        const shouldAutoFillOs =
+          value === "NC" &&
+          !osBloqueado &&
+          openIssueOs &&
+          !(previous.osNumero && previous.osNumero.trim());
         return {
           ...prev,
           [itemId]: {
             ...previous,
             resultado: value,
+            osNumero: shouldAutoFillOs ? openIssueOs : previous.osNumero,
           },
         };
       });
     },
-    [createEmptyItemState]
+    [createEmptyItemState, openIssuesByItem, osBloqueado]
   );
 
   const handleObservacaoChange = useCallback(
