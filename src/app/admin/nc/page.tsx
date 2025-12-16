@@ -241,6 +241,8 @@ export default function AdminNonConformitiesPage() {
       const builtItems: NonConformityItem[] = [];
       const treatmentsRecord: Record<string, ChecklistNonConformityTreatment[]> = {};
 
+      const seenKeys = new Set<string>();
+
       responsesSnap.docs.forEach(docSnap => {
         const data = docSnap.data() ?? {};
         const machine = (data.machine ?? {}) as Record<string, unknown>;
@@ -268,6 +270,17 @@ export default function AdminNonConformitiesPage() {
         answers
           .filter(answer => answer.response === "nc")
           .forEach(answer => {
+            const machineKey =
+              (machine.machineId ? String(machine.machineId) : null) ||
+              (machine.id ? String(machine.id) : null) ||
+              (machine.tag ? String(machine.tag) : null) ||
+              "unknown";
+            const seenKey = `${machineKey}:${templateId ?? "no-template"}:${answer.questionId}`;
+            if (seenKeys.has(seenKey)) {
+              return;
+            }
+            seenKeys.add(seenKey);
+
             const treatment = treatmentMap.get(answer.questionId);
             const dueDateIso = treatment?.dueDate ? String(treatment.dueDate) : null;
             builtItems.push({
