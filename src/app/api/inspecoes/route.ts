@@ -244,6 +244,21 @@ export async function POST(req: NextRequest) {
       assinaturaUrl = upload.url;
     }
 
+    const openIssuesSnap = await adminDb
+      .collection("issues")
+      .where("machineId", "==", machineRecord.id)
+      .where("status", "==", "aberta")
+      .get();
+
+    const openIssuesByTemplate = new Map<string, QueryDocumentSnapshot<DocumentData>>();
+
+    openIssuesSnap.docs.forEach(doc => {
+      const data = doc.data() ?? {};
+      if (data.templateItemId) {
+        openIssuesByTemplate.set(String(data.templateItemId), doc);
+      }
+    });
+
     const itensPayload: Array<{
       templateItemId: string;
       resultado: "C" | "NC" | "NA";
@@ -292,16 +307,18 @@ export async function POST(req: NextRequest) {
 
       const templateItem = templateMap.get(item.templateItemId) ?? {};
       const response = item.resultado === "NC" ? "nc" : item.resultado === "NA" ? "na" : "c";
+      const hasOpenIssue = openIssuesByTemplate.has(item.templateItemId);
       answersPayload.push({
         questionId: item.templateItemId,
         questionText: templateItem.oQueChecar ?? templateItem.criterio ?? templateItem.componente ?? null,
         response,
         observation: item.observacaoItem?.trim() ? item.observacaoItem.trim() : null,
         photoUrls: fotoAttachments,
+        recurrence: hasOpenIssue,
         itemOsNumero: osNumeroItem,
       });
 
-      if (response === "nc") {
+      if (response === "nc" && !hasOpenIssue) {
         treatmentsPayload.push({
           questionId: item.templateItemId,
           status: "open",
@@ -309,21 +326,6 @@ export async function POST(req: NextRequest) {
         });
       }
     }
-
-    const openIssuesSnap = await adminDb
-      .collection("issues")
-      .where("machineId", "==", machineRecord.id)
-      .where("status", "==", "aberta")
-      .get();
-
-    const openIssuesByTemplate = new Map<string, QueryDocumentSnapshot<DocumentData>>();
-
-    openIssuesSnap.docs.forEach(doc => {
-      const data = doc.data() ?? {};
-      if (data.templateItemId) {
-        openIssuesByTemplate.set(String(data.templateItemId), doc);
-      }
-    });
 
     const issuesCriadas: string[] = [];
     const issuesResolvidas: string[] = [];
