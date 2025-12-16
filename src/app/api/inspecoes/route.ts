@@ -272,9 +272,13 @@ export async function POST(req: NextRequest) {
     const fallbackOsNumero = osNumeroFinal;
 
     for (const item of payload.itens) {
+      const existingIssue = openIssuesByTemplate.get(item.templateItemId);
+      const existingIssueOs = existingIssue?.data()?.osNumero
+        ? String(existingIssue.data()!.osNumero).trim().toUpperCase()
+        : null;
       const osNumeroItem = item.osNumeroItem?.trim()
         ? item.osNumeroItem.trim().toUpperCase()
-        : fallbackOsNumero;
+        : existingIssueOs || fallbackOsNumero;
       if (item.resultado === "NC" && !osNumeroItem) {
         return NextResponse.json({ error: "ITEM_OS_REQUIRED" }, { status: 422 });
       }
@@ -307,7 +311,7 @@ export async function POST(req: NextRequest) {
 
       const templateItem = templateMap.get(item.templateItemId) ?? {};
       const response = item.resultado === "NC" ? "nc" : item.resultado === "NA" ? "na" : "c";
-      const hasOpenIssue = openIssuesByTemplate.has(item.templateItemId);
+      const hasOpenIssue = Boolean(existingIssue);
       answersPayload.push({
         questionId: item.templateItemId,
         questionText: templateItem.oQueChecar ?? templateItem.criterio ?? templateItem.componente ?? null,
