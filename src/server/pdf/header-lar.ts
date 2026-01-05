@@ -147,9 +147,17 @@ export function drawLarHeader(doc: jsPDF, data: LarHeaderData): {
   doc.setFont("helvetica", "bold");
   doc.setFontSize(12);
   const title = (data.tituloTemplate || "INSPEÇÃO").toUpperCase();
-  const titleX = M + W_LOGO + W_TITLE / 2;
+  const titleX = M + W_LOGO;
+  const titleWidth = W_TITLE - 4; // Deixa um pequeno padding
+  const titleLines = doc.splitTextToSize(title, titleWidth);
   const titleY = M + H_TOP / 2;
-  doc.text(title, titleX, titleY, { align: "center", baseline: "middle" });
+  const titleLineHeight = 6;
+  const totalTitleHeight = titleLines.length * titleLineHeight;
+  let currentTitleY = titleY - (totalTitleHeight / 2) + titleLineHeight / 2;
+  titleLines.forEach((line: string) => {
+    doc.text(line, titleX + titleWidth / 2, currentTitleY, { align: "center", baseline: "middle" });
+    currentTitleY += titleLineHeight;
+  });
 
   // Box texts
   doc.setFont("helvetica", "bold");
@@ -246,9 +254,18 @@ export function drawLarHeader(doc: jsPDF, data: LarHeaderData): {
   const machineLabelY = Y_PHOTO + H_PHOTO + MACHINE_LABEL_GAP;
   doc.setFont("helvetica", "bold");
   doc.setFontSize(10.5);
-  doc.text(machineLabelText, photoBox.x + photoBox.w / 2, machineLabelY + H_MACHINE_LABEL / 2, {
-    align: "center",
-    baseline: "middle",
+  const machineLabelWidth = photoBox.w - 4; // Deixa um pequeno padding
+  const machineLabelLines = doc.splitTextToSize(machineLabelText, machineLabelWidth);
+  const machineLabelLineHeight = 5;
+  const totalMachineLabelHeight = machineLabelLines.length * machineLabelLineHeight;
+  const machineLabelCenterY = machineLabelY + H_MACHINE_LABEL / 2;
+  let currentMachineLabelY = machineLabelCenterY - (totalMachineLabelHeight / 2) + machineLabelLineHeight / 2;
+  machineLabelLines.forEach((line: string) => {
+    doc.text(line, photoBox.x + photoBox.w / 2, currentMachineLabelY, {
+      align: "center",
+      baseline: "middle",
+    });
+    currentMachineLabelY += machineLabelLineHeight;
   });
 
   // Information panel
@@ -299,7 +316,7 @@ export function drawLarHeader(doc: jsPDF, data: LarHeaderData): {
 
   const measuredFields = panelFields.map((field, index) => {
     const labelWidth = labelMeasurements[index];
-    const valueWidth = Math.max(availableWidth - labelWidth, availableWidth * 0.45);
+    const valueWidth = availableWidth - labelWidth;
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
     const lines = doc.splitTextToSize(field.value || "—", valueWidth);
