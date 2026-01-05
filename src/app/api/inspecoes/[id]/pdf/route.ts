@@ -249,7 +249,7 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       const resultLabelWidth = doc.getTextWidth(`${resultLabel} `);
       doc.setFont("helvetica", "normal");
       doc.setFontSize(10);
-      const resultWidth = Math.max(contentWidth - boxPadding * 2 - resultLabelWidth, contentWidth * 0.3);
+      const resultWidth = contentWidth - boxPadding * 2 - resultLabelWidth;
       let resultLines = doc.splitTextToSize(resultValue, resultWidth);
       if (resultLines.length === 0) {
         resultLines = ["-"];
@@ -262,7 +262,7 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       const obsLabelWidth = doc.getTextWidth(`${obsLabel} `);
       doc.setFont("helvetica", "normal");
       doc.setFontSize(10);
-      const obsWidth = Math.max(contentWidth - boxPadding * 2 - obsLabelWidth, contentWidth * 0.3);
+      const obsWidth = contentWidth - boxPadding * 2 - obsLabelWidth;
       let obsLines = doc.splitTextToSize(obsValue, obsWidth);
       if (obsLines.length === 0) {
         obsLines = ["-"];
@@ -306,7 +306,7 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       doc.text(resultLines[0], resultValueX, textY);
       for (let i = 1; i < resultLines.length; i += 1) {
         textY += lineHeight;
-        doc.text(resultLines[i], margin + boxPadding, textY);
+        doc.text(resultLines[i], resultValueX, textY);
       }
 
       sectionStart = resultBottom;
@@ -320,7 +320,7 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       doc.text(obsLines[0], obsValueX, textY);
       for (let i = 1; i < obsLines.length; i += 1) {
         textY += lineHeight;
-        doc.text(obsLines[i], margin + boxPadding, textY);
+        doc.text(obsLines[i], obsValueX, textY);
       }
 
       cursorY += boxHeight + 6;
