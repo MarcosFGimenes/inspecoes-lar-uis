@@ -78,7 +78,55 @@ export async function GET() {
       })
       .filter(record => record.data.status === "PENDENTE");
 
-    records.sort((a, b) => {
+    // Coletar todos os osNumero das programações pendentes
+    const osNumeros = new Set<string>();
+    records.forEach(record => {
+      const osNumero = typeof record.data.osNumero === "string" ? record.data.osNumero.trim().toUpperCase() : null;
+      if (osNumero) {
+        osNumeros.add(osNumero);
+      }
+    });
+
+    // Verificar quais O.S já foram realizadas (existem na coleção inspecoes)
+    const osNumerosRealizadas = new Set<string>();
+    if (osNumeros.size > 0) {
+      // Firestore tem limite de 10 itens no operador "in", então vamos fazer em chunks
+      const osNumerosArray = Array.from(osNumeros);
+      const chunks: string[][] = [];
+      for (let i = 0; i < osNumerosArray.length; i += 10) {
+        chunks.push(osNumerosArray.slice(i, i + 10));
+      }
+
+      const inspectionSnaps = await Promise.all(
+        chunks.map(chunk =>
+          adminDb
+            .collection("inspecoes")
+            .where("osNumero", "in", chunk)
+            .get()
+        )
+      );
+
+      inspectionSnaps.forEach(snap => {
+        snap.docs.forEach(doc => {
+          const data = doc.data() ?? {};
+          const osNumero = typeof data.osNumero === "string" ? data.osNumero.trim().toUpperCase() : null;
+          if (osNumero) {
+            osNumerosRealizadas.add(osNumero);
+          }
+        });
+      });
+    }
+
+    // Filtrar programações cujas O.S já foram realizadas
+    const recordsFiltrados = records.filter(record => {
+      const osNumero = typeof record.data.osNumero === "string" ? record.data.osNumero.trim().toUpperCase() : null;
+      if (!osNumero) {
+        return true; // Mantém programações sem O.S
+      }
+      return !osNumerosRealizadas.has(osNumero);
+    });
+
+    recordsFiltrados.sort((a, b) => {
       const vencA = toIso(a.data?.datas?.vencimento);
       const vencB = toIso(b.data?.datas?.vencimento);
       if (vencA && vencB) return vencA.localeCompare(vencB);
@@ -87,7 +135,7 @@ export async function GET() {
       return a.id.localeCompare(b.id);
     });
 
-    const results = records.map(record => {
+    const results = recordsFiltrados.map(record => {
       const data = record.data;
       const vencimentoIso = toIso(data?.datas?.vencimento);
       const vencimentoDate = vencimentoIso ? new Date(vencimentoIso) : null;
