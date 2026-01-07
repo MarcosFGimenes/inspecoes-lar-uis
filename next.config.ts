@@ -32,7 +32,18 @@ const nextConfig: NextConfig = {
         hostname: "*.firebasestorage.app",
         pathname: "/**",
       },
+      {
+        protocol: "https",
+        hostname: "*.r2.dev",
+        pathname: "/**",
+      },
+      {
+        protocol: "https",
+        hostname: "*.r2.cloudflarestorage.com",
+        pathname: "/**",
+      },
     ],
+    unoptimized: false,
   },
   webpack(config) {
     const alias = config.resolve?.alias ?? (config.resolve = { ...config.resolve, alias: {} }).alias;

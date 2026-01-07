@@ -597,6 +597,10 @@ export default function InspectionPage() {
   const buildCurrentDraftPayload = useCallback((): DraftDataState => {
     const normalizedOs = osNumero.trim().toUpperCase();
     const normalizedObs = observacoes.trim();
+    // Limite de tamanho por imagem em base64 (aproximadamente 500KB)
+    const MAX_IMAGE_SIZE_BYTES = 500 * 1024;
+    const MAX_IMAGE_SIZE_BASE64 = Math.floor((MAX_IMAGE_SIZE_BYTES * 4) / 3);
+    
     const itens: DraftItemState[] = [];
     sortedItems.forEach(item => {
       if (!item?.id) return;
@@ -608,10 +612,23 @@ export default function InspectionPage() {
         ? (st?.fotos as ItemPhotoState[])
             .filter(foto => typeof foto?.dataUrl === "string" && foto.dataUrl.trim())
             .slice(0, 3)
-            .map(foto => ({
-              dataUrl: foto.dataUrl,
-              name: foto.name ?? null,
-            }))
+            .map(foto => {
+              // Limita o tamanho da imagem em base64 para evitar payloads muito grandes no mobile
+              const dataUrl = foto.dataUrl;
+              if (dataUrl.length > MAX_IMAGE_SIZE_BASE64) {
+                // Se a imagem for muito grande, retorna apenas uma referência vazia
+                // A imagem será recarregada quando o rascunho for restaurado
+                return {
+                  dataUrl: "",
+                  name: foto.name ?? null,
+                };
+              }
+              return {
+                dataUrl,
+                name: foto.name ?? null,
+              };
+            })
+            .filter(foto => foto.dataUrl.length > 0) // Remove imagens vazias
         : [];
       itens.push({
         templateItemId: item.id,
@@ -625,10 +642,17 @@ export default function InspectionPage() {
       .filter(([, checked]) => checked)
       .map(([id]) => id)
       .sort();
+    
+    // Limita o tamanho da assinatura também
+    let limitedSignature = signatureDataUrl ?? null;
+    if (limitedSignature && limitedSignature.length > MAX_IMAGE_SIZE_BASE64) {
+      limitedSignature = null; // Remove assinatura muito grande do rascunho
+    }
+    
     return {
       osNumero: normalizedOs,
       observacoes: normalizedObs,
-      assinaturaDataUrl: signatureDataUrl ?? null,
+      assinaturaDataUrl: limitedSignature,
       itens,
       resolveIssues: resolveIds,
     };
@@ -1326,7 +1350,7 @@ export default function InspectionPage() {
             </div>
             {context.machine.fotoUrl && (
               <div className="relative h-40 w-full overflow-hidden rounded-md border bg-gray-50 md:h-44 md:w-44">
-                <Image src={context.machine.fotoUrl} alt={`Foto da máquina ${context.machine.nome ?? context.machine.tag ?? ""}`} fill className="object-cover" sizes="176px" />
+                <Image src={context.machine.fotoUrl} alt={`Foto da máquina ${context.machine.nome ?? context.machine.tag ?? ""}`} fill className="object-cover" sizes="176px" unoptimized />
               </div>
             )}
           </div>
