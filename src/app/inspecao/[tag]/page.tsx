@@ -225,6 +225,7 @@ export default function InspectionPage() {
   const [feedback, setFeedback] = useState<FeedbackState | null>(null);
   const [saving, setSaving] = useState(false);
   const [savingAction, setSavingAction] = useState<"save" | null>(null);
+  const [saveLocked, setSaveLocked] = useState(false);
   const [lastInspectionId, setLastInspectionId] = useState<string | null>(null);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelConfirmText, setCancelConfirmText] = useState("");
@@ -1005,7 +1006,8 @@ export default function InspectionPage() {
   const submitInspection = useCallback(
     async () => {
       if (!context?.machine?.tag) { setFeedback({ type: "error", message: "Máquina sem TAG configurada." }); return; }
-      if (saving) return;
+      if (saving || saveLocked) return;
+      setSaveLocked(true);
       setSaving(true); setSavingAction("save"); setFeedback(null);
       try {
         const payloadItems: Array<{
@@ -1019,12 +1021,19 @@ export default function InspectionPage() {
         for (const item of sortedItems) {
           if (!item.id) continue;
           const st = itemsState[item.id];
-          if (!st || !st.resultado) { setFeedback({ type: "error", message: "Selecione C / NC / N/A para todos os itens." }); setSaving(false); setSavingAction(null); return; }
+          if (!st || !st.resultado) {
+            setFeedback({ type: "error", message: "Selecione C / NC / N/A para todos os itens." });
+            setSaving(false);
+            setSavingAction(null);
+            setSaveLocked(false);
+            return;
+          }
           const osValue = (lockedOsNumero ?? st.osNumero).trim().toUpperCase();
           if (st.resultado === "NC" && !osValue) {
             setFeedback({ type: "error", message: "Informe o Nº da O.S. para todos os itens marcados como NC." });
             setSaving(false);
             setSavingAction(null);
+            setSaveLocked(false);
             return;
           }
           const osNumeroItem = osValue || undefined;
@@ -1066,7 +1075,13 @@ export default function InspectionPage() {
             osNumeroItem,
           });
         }
-        if (!payloadItems.length) { setFeedback({ type: "error", message: "Template sem itens configurados." }); setSaving(false); setSavingAction(null); return; }
+        if (!payloadItems.length) {
+          setFeedback({ type: "error", message: "Template sem itens configurados." });
+          setSaving(false);
+          setSavingAction(null);
+          setSaveLocked(false);
+          return;
+        }
 
         let assinaturaDataUrl: string | undefined;
         let assinaturaProfileId: string | undefined;
@@ -1082,6 +1097,7 @@ export default function InspectionPage() {
           setFeedback({ type: "error", message: "Informe a assinatura antes de salvar." });
           setSaving(false);
           setSavingAction(null);
+          setSaveLocked(false);
           return;
         }
         const resolveIds = Object.entries(resolveIssues).filter(([, c]) => c).map(([id]) => id);
@@ -1147,6 +1163,7 @@ export default function InspectionPage() {
         router.replace(`/home?${params.toString()}`);
       } catch (err: unknown) {
         setFeedback({ type: "error", message: err instanceof Error && err.message ? err.message : "Falha ao salvar inspeção." });
+        setSaveLocked(false);
       } finally { setSaving(false); setSavingAction(null); }
     },
     [
@@ -1157,6 +1174,7 @@ export default function InspectionPage() {
       resolveIssues,
       router,
       saving,
+      saveLocked,
       savedSignatureProfile,
       signatureDataUrl,
       signatureMode,
@@ -1819,7 +1837,7 @@ export default function InspectionPage() {
               </button>
               <button
                 type="button"
-                disabled={saving || cancelLoading}
+                disabled={saving || cancelLoading || saveLocked}
                 onClick={submitInspection}
                 className="inline-flex items-center justify-center rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
