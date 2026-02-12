@@ -4,6 +4,7 @@ import { requireAdminFromRequest } from "@/lib/guards";
 import { fromDataUrl } from "@/lib/storage/dataUrl";
 import { r2Provider } from "@/lib/storage/r2Provider";
 import { isPcmProfileId } from "@/lib/signature-profiles";
+import { sanitizeIsoHeaderConfig } from "@/lib/iso-header-config";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,6 +17,7 @@ type RequestBody = {
   matricula?: string;
   assinaturaDataUrl?: string;
   assinaturaProfileId?: string;
+  isoHeaderConfig?: unknown;
 };
 
 export async function PATCH(req: NextRequest, ctx: RouteContext) {
@@ -38,6 +40,10 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
       typeof body?.assinaturaDataUrl === "string" ? body.assinaturaDataUrl.trim() : "";
     const assinaturaProfileId =
       typeof body?.assinaturaProfileId === "string" ? body.assinaturaProfileId.trim() : "";
+    const hasIsoHeaderConfig =
+      body !== null &&
+      typeof body === "object" &&
+      Object.prototype.hasOwnProperty.call(body, "isoHeaderConfig");
 
     if (!nome || !matricula || (!assinaturaDataUrl && !assinaturaProfileId)) {
       return NextResponse.json({ error: "Missing nome, matricula or assinatura" }, { status: 400 });
@@ -50,6 +56,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     }
 
     let assinaturaUrl: string | null = null;
+    let profileIsoHeaderConfig: unknown = null;
     if (assinaturaProfileId) {
       if (!isPcmProfileId(assinaturaProfileId)) {
         return NextResponse.json({ error: "INVALID_PROFILE" }, { status: 400 });
@@ -63,6 +70,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
       if (!profileUrl) {
         return NextResponse.json({ error: "PROFILE_SIGNATURE_MISSING" }, { status: 400 });
       }
+      profileIsoHeaderConfig = profileData.isoHeaderConfig;
       assinaturaUrl = profileUrl;
     } else {
       const { buffer, mime } = fromDataUrl(assinaturaDataUrl);
@@ -70,6 +78,9 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
       assinaturaUrl = upload.url;
     }
 
+    const isoHeaderConfig = sanitizeIsoHeaderConfig(
+      hasIsoHeaderConfig ? body?.isoHeaderConfig : profileIsoHeaderConfig
+    );
     const signedAt = new Date().toISOString();
     const pcmSign = {
       nome,
@@ -77,6 +88,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
       matricula,
       assinaturaUrl,
       signedAt,
+      isoHeaderConfig,
     };
 
     await docRef.update({

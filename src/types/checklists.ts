@@ -2,6 +2,30 @@ export type NonConformityStatus = "open" | "in_progress" | "resolved";
 
 import type { StoredImage } from "./images";
 
+export type IsoHeaderFontFamily = "helvetica" | "times" | "courier";
+export type IsoHeaderFontStyle = "normal" | "bold" | "italic" | "bolditalic";
+
+export interface IsoHeaderTextSegment {
+  text: string;
+  color?: string | null;
+  fontFamily?: IsoHeaderFontFamily | null;
+  fontStyle?: IsoHeaderFontStyle | null;
+  fontSize?: number | null;
+  letterSpacing?: number | null;
+}
+
+export interface IsoHeaderText {
+  segments: IsoHeaderTextSegment[];
+}
+
+export interface InspectionIsoHeaderConfig {
+  emissao: IsoHeaderText;
+  revisao: IsoHeaderText;
+  revisaoNumero: IsoHeaderText;
+  foNumero: IsoHeaderText;
+  orientacoes: IsoHeaderText;
+}
+
 export interface ChecklistAnswer {
   questionId: string;
   questionText?: string | null;
@@ -64,6 +88,7 @@ export interface ChecklistResponse {
     matricula?: string | null;
     assinaturaUrl?: string | null;
     signedAt?: string | null;
+    isoHeaderConfig?: InspectionIsoHeaderConfig | null;
   } | null;
   createdAt?: string | null;
   updatedAt?: string | null;
