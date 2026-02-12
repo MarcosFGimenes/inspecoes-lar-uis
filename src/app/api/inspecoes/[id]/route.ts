@@ -272,7 +272,7 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       ? await adminDb
           .collection("issues")
           .where("machineId", "==", inspection.machine.machineId)
-          .where("status", "==", "aberta")
+          .where("status", "in", ["aberta", "concluida"])
           .get()
       : null;
 

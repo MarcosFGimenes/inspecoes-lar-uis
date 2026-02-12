@@ -92,7 +92,7 @@ export type Issue = {
   descricao: string;
   osNumero?: string;
   fotos?: StoredImage[];
-  status: "aberta" | "resolvida";
+  status: "aberta" | "concluida" | "resolvida";
   abertaEmInspecaoId: string;
   resolvidaEmInspecaoId?: string;
   createdAt: string;

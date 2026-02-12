@@ -64,11 +64,19 @@ export async function GET(req: NextRequest) {
     const issuesSnap = await adminDb
       .collection("issues")
       .where("machineId", "==", machineRecord.id)
-      .where("status", "==", "aberta")
+      .where("status", "in", ["aberta", "concluida"])
       .get();
 
     const openIssues = issuesSnap.docs.map(doc => {
       const data = doc.data() ?? {};
+      const rawResolution = data.maintainerResolution ?? null;
+      const maintainerResolution = rawResolution && typeof rawResolution === "object"
+        ? {
+            resolvedAt: rawResolution.resolvedAt ?? null,
+            description: rawResolution.description ?? null,
+            resolvedByName: rawResolution.resolvedByName ?? null,
+          }
+        : null;
       return {
         id: doc.id,
         templateItemId: data.templateItemId ?? null,
@@ -76,6 +84,8 @@ export async function GET(req: NextRequest) {
         osNumero: data.osNumero ?? null,
         fotos: normalizeStoredImages(data.fotos ?? []),
         createdAt: data.createdAt ?? null,
+        status: data.status === "concluida" ? "concluida" : "aberta",
+        maintainerResolution,
       };
     });
 

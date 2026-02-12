@@ -36,6 +36,11 @@ const payloadSchema = z.object({
     )
     .min(1),
   resolveIssues: z.array(z.string().trim().min(1)).optional(),
+  resolveDescriptions: z.record(z.string(), z.string().trim()).optional(),
+  maintainerResolutions: z.array(z.object({
+    issueId: z.string().trim().min(1),
+    description: z.string().trim().min(1),
+  })).optional(),
 });
 
 type Payload = z.infer<typeof payloadSchema>;
@@ -252,7 +257,6 @@ export async function POST(req: NextRequest) {
       osNumeroItem: string | null;
     }> = [];
     const answersPayload: ChecklistAnswer[] = [];
-    const treatmentsPayload: ChecklistNonConformityTreatment[] = [];
 
     const fallbackOsNumero = osNumeroFinal;
 
@@ -300,20 +304,13 @@ export async function POST(req: NextRequest) {
         photoUrls: fotoAttachments,
         itemOsNumero: osNumeroItem,
       });
-
-      if (response === "nc") {
-        treatmentsPayload.push({
-          questionId: item.templateItemId,
-          status: "open",
-          createdAt: nowIso,
-        });
-      }
     }
 
+    // Busca issues abertas/concluidas ANTES de criar tratativas
     const openIssuesSnap = await adminDb
       .collection("issues")
       .where("machineId", "==", machineRecord.id)
-      .where("status", "==", "aberta")
+      .where("status", "in", ["aberta", "concluida"])
       .get();
 
     const openIssuesByTemplate = new Map<string, QueryDocumentSnapshot<DocumentData>>();
@@ -327,9 +324,12 @@ export async function POST(req: NextRequest) {
 
     const issuesCriadas: string[] = [];
     const issuesResolvidas: string[] = [];
+    // Rastreia quais itens NC já tinham issue aberta (não gera tratativa nova)
+    const ncItemsWithExistingOpenIssue = new Set<string>();
 
     const osNumero = osNumeroFinal;
     const observacoes = payload.observacoes?.trim() ? payload.observacoes.trim() : null;
+    const resolveDescriptions = payload.resolveDescriptions ?? {};
 
     for (const item of itensPayload) {
       if (item.resultado !== "NC") {
@@ -337,18 +337,58 @@ export async function POST(req: NextRequest) {
       }
       const existingIssue = openIssuesByTemplate.get(item.templateItemId);
       if (existingIssue) {
-        const issueUpdates: Record<string, unknown> = {};
-        if (item.osNumeroItem && existingIssue.data()?.osNumero !== item.osNumeroItem) {
-          issueUpdates.osNumero = item.osNumeroItem;
-        }
-        if (item.fotos.length > 0) {
-          issueUpdates.fotos = item.fotos;
-        }
-        const novaDescricao = item.observacaoItem?.trim();
-        if (novaDescricao && existingIssue.data()?.descricao !== novaDescricao) {
-          issueUpdates.descricao = novaDescricao;
-        }
-        if (Object.keys(issueUpdates).length > 0) {
+        const issueData = existingIssue.data() ?? {};
+
+        if (issueData.status === "concluida") {
+          // PCM tratou mas problema persiste → resolver antiga + criar nova
+          await existingIssue.ref.update({
+            status: "resolvida",
+            resolvedAt: nowIso,
+            resolvidaEmInspecaoId: inspectionId,
+          });
+          issuesResolvidas.push(existingIssue.id);
+
+          const templateItem = templateMap.get(item.templateItemId) ?? {};
+          const descricao = item.observacaoItem || buildIssueDescription(templateItem, "NC identificada na inspeção - problema persiste após tratativa do PCM");
+          const issueRef = adminDb.collection("issues").doc();
+          await issueRef.set({
+            machineId: machineRecord.id,
+            tag: machineRecord.tag ?? null,
+            templateItemId: item.templateItemId,
+            descricao,
+            osNumero: item.osNumeroItem ?? null,
+            fotos: item.fotos,
+            status: "aberta",
+            abertaEmInspecaoId: inspectionId,
+            createdAt: nowIso,
+            reabertaDe: existingIssue.id,
+            reincidenciaCount: 0,
+          });
+          issuesCriadas.push(issueRef.id);
+        } else {
+          // Status "aberta" → apenas atualiza a issue existente (não cria nova)
+          // Incrementa contador de reincidência
+          ncItemsWithExistingOpenIssue.add(item.templateItemId);
+          const currentReincidencia = typeof issueData.reincidenciaCount === "number" ? issueData.reincidenciaCount : 0;
+          const issueUpdates: Record<string, unknown> = {
+            reincidenciaCount: currentReincidencia + 1,
+            ultimaReincidenciaEm: nowIso,
+            ultimaReincidenciaInspecaoId: inspectionId,
+          };
+          if (item.osNumeroItem && issueData.osNumero !== item.osNumeroItem) {
+            issueUpdates.osNumero = item.osNumeroItem;
+          }
+          if (item.fotos.length > 0) {
+            issueUpdates.fotos = item.fotos;
+          }
+          const novaDescricao = item.observacaoItem?.trim();
+          if (novaDescricao && issueData.descricao !== novaDescricao) {
+            issueUpdates.descricao = novaDescricao;
+          }
+          // Limpa maintainerResolution se o mantenedor marca NC novamente
+          if (issueData.maintainerResolution) {
+            issueUpdates.maintainerResolution = null;
+          }
           await existingIssue.ref.update(issueUpdates);
         }
         continue;
@@ -367,8 +407,23 @@ export async function POST(req: NextRequest) {
         status: "aberta",
         abertaEmInspecaoId: inspectionId,
         createdAt: nowIso,
+        reincidenciaCount: 0,
       });
       issuesCriadas.push(issueRef.id);
+    }
+
+    // Monta treatmentsPayload SOMENTE para NC sem issue aberta pré-existente
+    const treatmentsPayload: ChecklistNonConformityTreatment[] = [];
+    for (const item of itensPayload) {
+      if (item.resultado !== "NC") continue;
+      // Só cria tratativa se NÃO havia issue aberta antes desta inspeção
+      if (!ncItemsWithExistingOpenIssue.has(item.templateItemId)) {
+        treatmentsPayload.push({
+          questionId: item.templateItemId,
+          status: "open",
+          createdAt: nowIso,
+        });
+      }
     }
 
     const resolveIssuesIds = payload.resolveIssues ?? [];
@@ -387,12 +442,51 @@ export async function POST(req: NextRequest) {
           if (data.machineId !== machineRecord.id || data.status === "resolvida") {
             continue;
           }
-          await doc.ref.update({
+          const description = resolveDescriptions[doc.id] ?? null;
+          const resolveUpdate: Record<string, unknown> = {
             status: "resolvida",
             resolvedAt: nowIso,
             resolvidaEmInspecaoId: inspectionId,
-          });
+          };
+          if (description) {
+            resolveUpdate.resolvedDescription = description;
+          }
+          await doc.ref.update(resolveUpdate);
           issuesResolvidas.push(doc.id);
+        }
+      }
+    }
+
+    // Registra resolução do mantenedor em issues "aberta" (não resolve, só marca como realizado)
+    const maintainerResolutions = payload.maintainerResolutions ?? [];
+    if (maintainerResolutions.length > 0) {
+      const resolutionChunks: Array<{ issueId: string; description: string }>[] = [];
+      for (let i = 0; i < maintainerResolutions.length; i += 10) {
+        resolutionChunks.push(maintainerResolutions.slice(i, i + 10));
+      }
+      for (const chunk of resolutionChunks) {
+        const chunkIds = chunk.map(r => r.issueId);
+        const snap = await adminDb
+          .collection("issues")
+          .where(FieldPath.documentId(), "in", chunkIds)
+          .get();
+        for (const docSnap of snap.docs) {
+          const data = docSnap.data() ?? {};
+          if (data.machineId !== machineRecord.id || data.status !== "aberta") {
+            continue;
+          }
+          const resolution = chunk.find(r => r.issueId === docSnap.id);
+          if (!resolution) continue;
+          await docSnap.ref.update({
+            maintainerResolution: {
+              resolvedAt: nowIso,
+              resolvedByName: auth.store.nome ?? null,
+              resolvedByMatricula: auth.store.matricula ?? null,
+              description: resolution.description,
+              osNumero: osNumeroFinal ?? null,
+              inspecaoId: inspectionId,
+            },
+          });
         }
       }
     }

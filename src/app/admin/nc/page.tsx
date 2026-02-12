@@ -10,6 +10,7 @@ import {
   orderBy,
   query,
   updateDoc,
+  where,
 } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase-client";
 import { Button } from "@/components/ui/button";
@@ -72,6 +73,19 @@ interface NonConformityItem {
   dueDateIso: string | null;
   recurrence: boolean;
   updatedAt: string | null;
+}
+
+interface IssueResolutionInfo {
+  issueId: string;
+  reincidenciaCount: number;
+  maintainerResolution: {
+    resolvedAt: string | null;
+    resolvedByName: string | null;
+    resolvedByMatricula: string | null;
+    description: string;
+    osNumero: string | null;
+    inspecaoId: string | null;
+  } | null;
 }
 
 interface FeedbackState {
@@ -190,6 +204,8 @@ export default function AdminNonConformitiesPage() {
   const [feedback, setFeedback] = useState<Record<string, FeedbackState>>({});
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkSaving, setBulkSaving] = useState(false);
+  const [issueResolutionMap, setIssueResolutionMap] = useState<Map<string, IssueResolutionInfo>>(new Map());
+  const [expandedResolutions, setExpandedResolutions] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     setSelectedIds(prev => prev.filter(id => items.some(item => item.id === id)));
@@ -205,10 +221,11 @@ export default function AdminNonConformitiesPage() {
         return;
       }
 
-      const [machinesSnap, templatesSnap, responsesSnap] = await Promise.all([
+      const [machinesSnap, templatesSnap, responsesSnap, issuesSnap] = await Promise.all([
         getDocs(collection(firebaseDb, "machines")),
         getDocs(collection(firebaseDb, "templates")),
         getDocs(query(collection(firebaseDb, "inspecoes"), orderBy("createdAt", "desc"), limit(200))),
+        getDocs(query(collection(firebaseDb, "issues"), where("status", "==", "aberta"))),
       ]);
 
       const machineOptions: MachineOption[] = machinesSnap.docs.map(docSnap => {
@@ -298,8 +315,57 @@ export default function AdminNonConformitiesPage() {
           });
       });
 
+      // Deduplica por máquina+questão+ciclo:
+      // - Múltiplas "open"/"in_progress" do mesmo item → 1 entrada ativa
+      // - Múltiplas "resolved" do mesmo item → 1 entrada resolvida
+      // - "open" + "resolved" do mesmo item → 2 entradas separadas (histórico + nova)
+      const dedupeMap = new Map<string, NonConformityItem>();
+      for (const item of builtItems) {
+        const cycle = item.status === "resolved" ? "resolved" : "active";
+        const key = `${item.machineId}:${item.questionId}:${cycle}`;
+        const existing = dedupeMap.get(key);
+        if (!existing) {
+          dedupeMap.set(key, item);
+          continue;
+        }
+        // Dentro do mesmo ciclo: quem tem tratativa preenchida vence
+        const existingHasWork = !!(existing.summary.trim() || existing.responsible.trim() || existing.dueDate);
+        const currentHasWork = !!(item.summary.trim() || item.responsible.trim() || item.dueDate);
+        if (!existingHasWork && currentHasWork) {
+          dedupeMap.set(key, item);
+        }
+      }
+      const dedupedItems = Array.from(dedupeMap.values());
+
+      // Monta mapa de resoluções do mantenedor a partir das issues
+      const resolutionMap = new Map<string, IssueResolutionInfo>();
+      issuesSnap.docs.forEach(issueDoc => {
+        const issueData = issueDoc.data() ?? {};
+        const machId = typeof issueData.machineId === "string" ? issueData.machineId : null;
+        const templateItemId = typeof issueData.templateItemId === "string" ? issueData.templateItemId : null;
+        if (!machId || !templateItemId) return;
+        const rawResolution = issueData.maintainerResolution ?? null;
+        const maintainerResolution = rawResolution && typeof rawResolution === "object"
+          ? {
+              resolvedAt: rawResolution.resolvedAt ?? null,
+              resolvedByName: rawResolution.resolvedByName ?? null,
+              resolvedByMatricula: rawResolution.resolvedByMatricula ?? null,
+              description: typeof rawResolution.description === "string" ? rawResolution.description : "",
+              osNumero: rawResolution.osNumero ?? null,
+              inspecaoId: rawResolution.inspecaoId ?? null,
+            }
+          : null;
+        const reincidenciaCount = typeof issueData.reincidenciaCount === "number" ? issueData.reincidenciaCount : 0;
+        resolutionMap.set(`${machId}:${templateItemId}`, {
+          issueId: issueDoc.id,
+          reincidenciaCount,
+          maintainerResolution,
+        });
+      });
+
+      setIssueResolutionMap(resolutionMap);
       setMachines(machineOptions);
-      setItems(builtItems);
+      setItems(dedupedItems);
       setTreatmentsByResponse(treatmentsRecord);
     } catch (err: unknown) {
       const message = err instanceof Error && err.message ? err.message : "Erro ao carregar dados";
@@ -365,6 +431,46 @@ export default function AdminNonConformitiesPage() {
           nonConformityTreatments: nextTreatments,
           updatedAt: nowIso,
         });
+
+        // Sincroniza o status na coleção "issues" para refletir na inspeção do mantenedor
+        if (item.machineId && item.questionId) {
+          try {
+            if (item.status === "resolved") {
+              // PCM marcou como resolvida → atualiza issue para "concluida"
+              // (mantenedor verá na próxima inspeção que foi tratada)
+              const issuesQuery = query(
+                collection(firebaseDb, "issues"),
+                where("machineId", "==", item.machineId),
+                where("templateItemId", "==", item.questionId),
+                where("status", "==", "aberta")
+              );
+              const issuesSnap = await getDocs(issuesQuery);
+              for (const issueDoc of issuesSnap.docs) {
+                await updateDoc(issueDoc.ref, {
+                  status: "concluida",
+                  concluidaEm: nowIso,
+                  concluidaPorTratativa: true,
+                });
+              }
+            } else {
+              // PCM reverteu o status → volta issue para "aberta"
+              const issuesQuery = query(
+                collection(firebaseDb, "issues"),
+                where("machineId", "==", item.machineId),
+                where("templateItemId", "==", item.questionId),
+                where("status", "==", "concluida")
+              );
+              const issuesSnap = await getDocs(issuesQuery);
+              for (const issueDoc of issuesSnap.docs) {
+                await updateDoc(issueDoc.ref, {
+                  status: "aberta",
+                });
+              }
+            }
+          } catch (syncErr) {
+            console.error("[nc-page] Falha ao sincronizar issue:", syncErr);
+          }
+        }
 
         setTreatmentsByResponse(prev => ({ ...prev, [item.responseId]: nextTreatments }));
         handleUpdateItem(item.id, {
@@ -432,6 +538,18 @@ export default function AdminNonConformitiesPage() {
       return Array.from(merged);
     });
   }, [filteredItems, selectedIds]);
+
+  const handleToggleResolution = useCallback((itemId: string) => {
+    setExpandedResolutions(prev => {
+      const next = new Set(prev);
+      if (next.has(itemId)) {
+        next.delete(itemId);
+      } else {
+        next.add(itemId);
+      }
+      return next;
+    });
+  }, []);
 
   const allVisibleSelected =
     filteredItems.length > 0 && filteredItems.every(item => selectedIds.includes(item.id));
@@ -584,6 +702,11 @@ export default function AdminNonConformitiesPage() {
         <div className="space-y-6">
           {filteredItems.map(item => {
             const itemFeedback = feedback[item.id];
+            const issueKey = `${item.machineId}:${item.questionId}`;
+            const issueInfo = issueResolutionMap.get(issueKey);
+            const hasMaintainerResolution = issueInfo?.maintainerResolution != null;
+            const reincidenciaCount = issueInfo?.reincidenciaCount ?? 0;
+            const isResolutionExpanded = expandedResolutions.has(item.id);
             return (
               <article key={item.id}>
                 <Card>
@@ -598,9 +721,58 @@ export default function AdminNonConformitiesPage() {
                       <div className="flex-1 space-y-3">
                         <div className="flex flex-wrap items-center gap-3">
                           {renderStatusBadge(item.status)}
-                          {item.recurrence && <Badge variant="warning">Reincidência</Badge>}
+                          {reincidenciaCount > 0 && (
+                            <Badge variant="danger">{"REINCID\u00caNCIA H\u00c1: " + reincidenciaCount + (reincidenciaCount === 1 ? " INSPE\u00c7\u00c3O" : " INSPE\u00c7\u00d5ES")}</Badge>
+                          )}
+                          {hasMaintainerResolution && (
+                            <Badge variant="info">REALIZADO PELO MANTENEDOR</Badge>
+                          )}
+                          {item.recurrence && !reincidenciaCount && <Badge variant="warning">Reincid\u00eancia</Badge>}
                           {item.templateVersion && <Badge variant="muted">Versão {item.templateVersion}</Badge>}
                         </div>
+                        {hasMaintainerResolution && (
+                          <div className="space-y-2">
+                            <button
+                              type="button"
+                              onClick={() => handleToggleResolution(item.id)}
+                              className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-800 transition"
+                            >
+                              {isResolutionExpanded ? "Fechar detalhes" : "Ver detalhes da resolução do mantenedor"}
+                              <span className="text-[10px]">{isResolutionExpanded ? "\u25B2" : "\u25BC"}</span>
+                            </button>
+                            {isResolutionExpanded && issueInfo?.maintainerResolution && (
+                              <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900 space-y-1">
+                                {issueInfo.maintainerResolution.resolvedAt && (
+                                  <p>
+                                    <span className="font-semibold">Realizado em:</span>{" "}
+                                    {formatDateTime(issueInfo.maintainerResolution.resolvedAt)}
+                                  </p>
+                                )}
+                                {issueInfo.maintainerResolution.resolvedByName && (
+                                  <p>
+                                    <span className="font-semibold">Mantenedor:</span>{" "}
+                                    {issueInfo.maintainerResolution.resolvedByName}
+                                    {issueInfo.maintainerResolution.resolvedByMatricula
+                                      ? ` (mat. ${issueInfo.maintainerResolution.resolvedByMatricula})`
+                                      : ""}
+                                  </p>
+                                )}
+                                {issueInfo.maintainerResolution.description && (
+                                  <p>
+                                    <span className="font-semibold">Descrição:</span>{" "}
+                                    {issueInfo.maintainerResolution.description}
+                                  </p>
+                                )}
+                                {issueInfo.maintainerResolution.osNumero && (
+                                  <p>
+                                    <span className="font-semibold">Nº da O.S.:</span>{" "}
+                                    {issueInfo.maintainerResolution.osNumero}
+                                  </p>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
                         <div className="space-y-1">
                           <CardTitle className="text-lg text-[var(--text)]">{item.questionText}</CardTitle>
                           <p className="text-sm text-[var(--muted)]">
