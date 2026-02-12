@@ -110,7 +110,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
         .collection("issues")
         .where("machineId", "==", machineId)
         .where("templateItemId", "==", payload.templateItemId)
-        .where("status", "==", "aberta")
+        .where("status", "in", ["aberta", "concluida"])
         .get();
 
       await Promise.all(

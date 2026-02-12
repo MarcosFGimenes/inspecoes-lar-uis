@@ -10,6 +10,7 @@ import {
   orderBy,
   query,
   updateDoc,
+  where,
 } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase-client";
 import { Button } from "@/components/ui/button";
@@ -365,6 +366,46 @@ export default function AdminNonConformitiesPage() {
           nonConformityTreatments: nextTreatments,
           updatedAt: nowIso,
         });
+
+        // Sincroniza o status na coleção "issues" para refletir na inspeção do mantenedor
+        if (item.machineId && item.questionId) {
+          try {
+            if (item.status === "resolved") {
+              // PCM marcou como resolvida → atualiza issue para "concluida"
+              // (mantenedor verá na próxima inspeção que foi tratada)
+              const issuesQuery = query(
+                collection(firebaseDb, "issues"),
+                where("machineId", "==", item.machineId),
+                where("templateItemId", "==", item.questionId),
+                where("status", "==", "aberta")
+              );
+              const issuesSnap = await getDocs(issuesQuery);
+              for (const issueDoc of issuesSnap.docs) {
+                await updateDoc(issueDoc.ref, {
+                  status: "concluida",
+                  concluidaEm: nowIso,
+                  concluidaPorTratativa: true,
+                });
+              }
+            } else {
+              // PCM reverteu o status → volta issue para "aberta"
+              const issuesQuery = query(
+                collection(firebaseDb, "issues"),
+                where("machineId", "==", item.machineId),
+                where("templateItemId", "==", item.questionId),
+                where("status", "==", "concluida")
+              );
+              const issuesSnap = await getDocs(issuesQuery);
+              for (const issueDoc of issuesSnap.docs) {
+                await updateDoc(issueDoc.ref, {
+                  status: "aberta",
+                });
+              }
+            }
+          } catch (syncErr) {
+            console.error("[nc-page] Falha ao sincronizar issue:", syncErr);
+          }
+        }
 
         setTreatmentsByResponse(prev => ({ ...prev, [item.responseId]: nextTreatments }));
         handleUpdateItem(item.id, {
