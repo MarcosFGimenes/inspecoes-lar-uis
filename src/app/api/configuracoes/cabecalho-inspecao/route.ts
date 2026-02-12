@@ -65,15 +65,14 @@ export async function PUT(req: NextRequest) {
       { merge: true }
     );
 
-    const savedSnap = await docRef.get();
-    const savedData = savedSnap.data() ?? {};
+    console.log("[DEBUG] Dados salvos com sucesso");
 
-    console.log("[DEBUG] Dados recuperados do Firestore:", JSON.stringify(savedData.isoHeaderConfig, null, 2));
-
+    // Retornar diretamente os dados sanitizados que foram salvos
+    // Não ler de volta do Firestore para evitar problemas de serialização
     return NextResponse.json({
       ok: true,
-      isoHeaderConfig: sanitizeIsoHeaderConfig(savedData.isoHeaderConfig),
-      updatedAt: typeof savedData.updatedAt === "string" ? savedData.updatedAt : updatedAt,
+      isoHeaderConfig,
+      updatedAt,
     });
   } catch (error: unknown) {
     const message = error instanceof Error && error.message ? error.message : "INTERNAL_ERROR";

@@ -92,7 +92,11 @@ export default function AdminConfiguracoesPage() {
       const payload = (await response.json()) as ConfigResponse;
       console.log("[DEBUG FRONTEND] Recebido do servidor:", JSON.stringify(payload.isoHeaderConfig, null, 2));
       
-      setIsoHeaderConfig(sanitizeIsoHeaderConfig(payload.isoHeaderConfig));
+      // Os dados já foram sanitizados no backend, não precisamos sanitizar novamente
+      const receivedConfig = payload.isoHeaderConfig as InspectionIsoHeaderConfig | undefined;
+      if (receivedConfig) {
+        setIsoHeaderConfig(receivedConfig);
+      }
       setUpdatedAt(typeof payload.updatedAt === "string" ? payload.updatedAt : new Date().toISOString());
       setSuccess("Configuração salva com sucesso.");
     } catch (err: unknown) {
@@ -155,7 +159,10 @@ export default function AdminConfiguracoesPage() {
 
       <IsoHeaderConfigEditor
         value={isoHeaderConfig}
-        onChange={value => setIsoHeaderConfig(sanitizeIsoHeaderConfig(value))}
+        onChange={value => {
+          console.log("[DEBUG FRONTEND] Configuração alterada no editor:", JSON.stringify(value, null, 2));
+          setIsoHeaderConfig(value);
+        }}
         disabled={loading || saving}
       />
     </div>

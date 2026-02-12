@@ -62,11 +62,11 @@ const DEFAULT_CONFIG: InspectionIsoHeaderConfig = {
 function cloneTextSegment(segment: IsoHeaderTextSegment): IsoHeaderTextSegment {
   return {
     text: segment.text,
-    color: segment.color ?? DEFAULT_SEGMENT_STYLE.color,
-    fontFamily: segment.fontFamily ?? DEFAULT_SEGMENT_STYLE.fontFamily,
-    fontStyle: segment.fontStyle ?? DEFAULT_SEGMENT_STYLE.fontStyle,
-    fontSize: segment.fontSize ?? DEFAULT_SEGMENT_STYLE.fontSize,
-    letterSpacing: segment.letterSpacing ?? DEFAULT_SEGMENT_STYLE.letterSpacing,
+    color: segment.color !== undefined && segment.color !== null ? segment.color : DEFAULT_SEGMENT_STYLE.color,
+    fontFamily: segment.fontFamily !== undefined && segment.fontFamily !== null ? segment.fontFamily : DEFAULT_SEGMENT_STYLE.fontFamily,
+    fontStyle: segment.fontStyle !== undefined && segment.fontStyle !== null ? segment.fontStyle : DEFAULT_SEGMENT_STYLE.fontStyle,
+    fontSize: segment.fontSize !== undefined && segment.fontSize !== null ? segment.fontSize : DEFAULT_SEGMENT_STYLE.fontSize,
+    letterSpacing: segment.letterSpacing !== undefined && segment.letterSpacing !== null ? segment.letterSpacing : DEFAULT_SEGMENT_STYLE.letterSpacing,
   };
 }
 
@@ -165,18 +165,25 @@ function sanitizeSegment(raw: unknown, fallbackText: string): IsoHeaderTextSegme
 
   const text =
     typeof raw.text === "string" ? normalizeSegmentText(raw.text) : normalizeSegmentText(fallbackText);
+  
+  // Preservar valores existentes quando válidos, sem forçar defaults
+  const color = raw.color !== undefined ? normalizeColor(raw.color) : DEFAULT_SEGMENT_STYLE.color;
+  const fontFamily = raw.fontFamily !== undefined ? normalizeFontFamily(raw.fontFamily) : DEFAULT_SEGMENT_STYLE.fontFamily;
+  const fontStyle = raw.fontStyle !== undefined ? normalizeFontStyle(raw.fontStyle) : DEFAULT_SEGMENT_STYLE.fontStyle;
+  const fontSize = raw.fontSize !== undefined 
+    ? clampNumber(raw.fontSize, MIN_FONT_SIZE, MAX_FONT_SIZE, DEFAULT_SEGMENT_STYLE.fontSize)
+    : DEFAULT_SEGMENT_STYLE.fontSize;
+  const letterSpacing = raw.letterSpacing !== undefined
+    ? clampNumber(raw.letterSpacing, MIN_LETTER_SPACING, MAX_LETTER_SPACING, DEFAULT_SEGMENT_STYLE.letterSpacing)
+    : DEFAULT_SEGMENT_STYLE.letterSpacing;
+
   return {
     text,
-    color: normalizeColor(raw.color),
-    fontFamily: normalizeFontFamily(raw.fontFamily),
-    fontStyle: normalizeFontStyle(raw.fontStyle),
-    fontSize: clampNumber(raw.fontSize, MIN_FONT_SIZE, MAX_FONT_SIZE, DEFAULT_SEGMENT_STYLE.fontSize),
-    letterSpacing: clampNumber(
-      raw.letterSpacing,
-      MIN_LETTER_SPACING,
-      MAX_LETTER_SPACING,
-      DEFAULT_SEGMENT_STYLE.letterSpacing
-    ),
+    color,
+    fontFamily,
+    fontStyle,
+    fontSize,
+    letterSpacing,
   };
 }
 
