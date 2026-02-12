@@ -144,6 +144,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+function normalizeSegmentText(value: string) {
+  return value
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/\\n/g, "\n");
+}
+
 function isLegacyIsoText(value: unknown): value is IsoHeaderText {
   return isRecord(value) && Array.isArray(value.segments);
 }
@@ -156,7 +163,8 @@ function sanitizeSegment(raw: unknown, fallbackText: string): IsoHeaderTextSegme
     };
   }
 
-  const text = typeof raw.text === "string" ? raw.text : fallbackText;
+  const text =
+    typeof raw.text === "string" ? normalizeSegmentText(raw.text) : normalizeSegmentText(fallbackText);
   return {
     text,
     color: normalizeColor(raw.color),
@@ -177,7 +185,7 @@ function sanitizeText(raw: unknown, fallbackText: string): IsoHeaderText {
     return {
       segments: [
         {
-          text: raw,
+          text: normalizeSegmentText(raw),
           ...DEFAULT_SEGMENT_STYLE,
         },
       ],
@@ -187,7 +195,7 @@ function sanitizeText(raw: unknown, fallbackText: string): IsoHeaderText {
     return {
       segments: [
         {
-          text: fallbackText,
+          text: normalizeSegmentText(fallbackText),
           ...DEFAULT_SEGMENT_STYLE,
         },
       ],
@@ -198,7 +206,7 @@ function sanitizeText(raw: unknown, fallbackText: string): IsoHeaderText {
 
   if (segments.length === 0) {
     segments.push({
-      text: fallbackText,
+      text: normalizeSegmentText(fallbackText),
       ...DEFAULT_SEGMENT_STYLE,
     });
   }

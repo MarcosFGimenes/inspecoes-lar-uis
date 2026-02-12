@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Select } from "@/components/ui/select";
 import {
   createDefaultIsoHeaderConfig,
@@ -281,10 +282,12 @@ export function IsoHeaderConfigEditor({ value, onChange, disabled = false }: Iso
                     <div className="space-y-3">
                       <label className="space-y-1 text-xs">
                         <span className="text-[var(--muted)]">Texto</span>
-                        <Input
+                        <Textarea
                           value={segment.text ?? ""}
                           onChange={event => updateSegment(field.key, index, { text: event.target.value })}
-                          placeholder="Digite o texto deste segmento"
+                          placeholder="Digite o texto deste segmento (aceita quebra de linha)"
+                          rows={3}
+                          className="min-h-[92px] resize-y"
                           disabled={disabled}
                         />
                       </label>
