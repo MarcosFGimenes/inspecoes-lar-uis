@@ -316,23 +316,29 @@ export default function AdminNonConformitiesPage() {
       });
 
       // Deduplica: para cada máquina+questão, mantém apenas 1 item
-      // Prioriza o item que possui tratativa preenchida (summary/responsible/dueDate)
+      // Prioridade: itens ativos (open/in_progress) > resolvidos
+      // Entre itens de mesma prioridade, quem tem tratativa preenchida vence
       const dedupeMap = new Map<string, NonConformityItem>();
-      const dedupeResponseMap = new Map<string, string>(); // chave → responseId da entrada mantida
       for (const item of builtItems) {
         const key = `${item.machineId}:${item.questionId}`;
         const existing = dedupeMap.get(key);
         if (!existing) {
           dedupeMap.set(key, item);
-          dedupeResponseMap.set(key, item.responseId);
           continue;
         }
-        // Mantém o item que tem tratativa mais completa
-        const existingHasWork = !!(existing.summary.trim() || existing.responsible.trim() || existing.dueDate || existing.status !== "open");
-        const currentHasWork = !!(item.summary.trim() || item.responsible.trim() || item.dueDate || item.status !== "open");
+        const existingIsActive = existing.status !== "resolved";
+        const currentIsActive = item.status !== "resolved";
+        // Itens ativos têm prioridade sobre resolvidos
+        if (existingIsActive && !currentIsActive) continue;
+        if (!existingIsActive && currentIsActive) {
+          dedupeMap.set(key, item);
+          continue;
+        }
+        // Mesma categoria: quem tem tratativa preenchida vence
+        const existingHasWork = !!(existing.summary.trim() || existing.responsible.trim() || existing.dueDate);
+        const currentHasWork = !!(item.summary.trim() || item.responsible.trim() || item.dueDate);
         if (!existingHasWork && currentHasWork) {
           dedupeMap.set(key, item);
-          dedupeResponseMap.set(key, item.responseId);
         }
       }
       const dedupedItems = Array.from(dedupeMap.values());
