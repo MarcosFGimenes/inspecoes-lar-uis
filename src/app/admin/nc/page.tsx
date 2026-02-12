@@ -77,6 +77,7 @@ interface NonConformityItem {
 
 interface IssueResolutionInfo {
   issueId: string;
+  reincidenciaCount: number;
   maintainerResolution: {
     resolvedAt: string | null;
     resolvedByName: string | null;
@@ -332,8 +333,10 @@ export default function AdminNonConformitiesPage() {
               inspecaoId: rawResolution.inspecaoId ?? null,
             }
           : null;
+        const reincidenciaCount = typeof issueData.reincidenciaCount === "number" ? issueData.reincidenciaCount : 0;
         resolutionMap.set(`${machId}:${templateItemId}`, {
           issueId: issueDoc.id,
+          reincidenciaCount,
           maintainerResolution,
         });
       });
@@ -680,6 +683,7 @@ export default function AdminNonConformitiesPage() {
             const issueKey = `${item.machineId}:${item.questionId}`;
             const issueInfo = issueResolutionMap.get(issueKey);
             const hasMaintainerResolution = issueInfo?.maintainerResolution != null;
+            const reincidenciaCount = issueInfo?.reincidenciaCount ?? 0;
             const isResolutionExpanded = expandedResolutions.has(item.id);
             return (
               <article key={item.id}>
@@ -695,10 +699,13 @@ export default function AdminNonConformitiesPage() {
                       <div className="flex-1 space-y-3">
                         <div className="flex flex-wrap items-center gap-3">
                           {renderStatusBadge(item.status)}
+                          {reincidenciaCount > 0 && (
+                            <Badge variant="danger">{"REINCID\u00caNCIA H\u00c1: " + reincidenciaCount + (reincidenciaCount === 1 ? " INSPE\u00c7\u00c3O" : " INSPE\u00c7\u00d5ES")}</Badge>
+                          )}
                           {hasMaintainerResolution && (
                             <Badge variant="info">REALIZADO PELO MANTENEDOR</Badge>
                           )}
-                          {item.recurrence && <Badge variant="warning">Reincidência</Badge>}
+                          {item.recurrence && !reincidenciaCount && <Badge variant="warning">Reincid\u00eancia</Badge>}
                           {item.templateVersion && <Badge variant="muted">Versão {item.templateVersion}</Badge>}
                         </div>
                         {hasMaintainerResolution && (

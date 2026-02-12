@@ -257,7 +257,6 @@ export async function POST(req: NextRequest) {
       osNumeroItem: string | null;
     }> = [];
     const answersPayload: ChecklistAnswer[] = [];
-    const treatmentsPayload: ChecklistNonConformityTreatment[] = [];
 
     const fallbackOsNumero = osNumeroFinal;
 
@@ -305,16 +304,9 @@ export async function POST(req: NextRequest) {
         photoUrls: fotoAttachments,
         itemOsNumero: osNumeroItem,
       });
-
-      if (response === "nc") {
-        treatmentsPayload.push({
-          questionId: item.templateItemId,
-          status: "open",
-          createdAt: nowIso,
-        });
-      }
     }
 
+    // Busca issues abertas/concluidas ANTES de criar tratativas
     const openIssuesSnap = await adminDb
       .collection("issues")
       .where("machineId", "==", machineRecord.id)
@@ -332,6 +324,8 @@ export async function POST(req: NextRequest) {
 
     const issuesCriadas: string[] = [];
     const issuesResolvidas: string[] = [];
+    // Rastreia quais itens NC já tinham issue aberta (não gera tratativa nova)
+    const ncItemsWithExistingOpenIssue = new Set<string>();
 
     const osNumero = osNumeroFinal;
     const observacoes = payload.observacoes?.trim() ? payload.observacoes.trim() : null;
@@ -368,11 +362,19 @@ export async function POST(req: NextRequest) {
             abertaEmInspecaoId: inspectionId,
             createdAt: nowIso,
             reabertaDe: existingIssue.id,
+            reincidenciaCount: 0,
           });
           issuesCriadas.push(issueRef.id);
         } else {
           // Status "aberta" → apenas atualiza a issue existente (não cria nova)
-          const issueUpdates: Record<string, unknown> = {};
+          // Incrementa contador de reincidência
+          ncItemsWithExistingOpenIssue.add(item.templateItemId);
+          const currentReincidencia = typeof issueData.reincidenciaCount === "number" ? issueData.reincidenciaCount : 0;
+          const issueUpdates: Record<string, unknown> = {
+            reincidenciaCount: currentReincidencia + 1,
+            ultimaReincidenciaEm: nowIso,
+            ultimaReincidenciaInspecaoId: inspectionId,
+          };
           if (item.osNumeroItem && issueData.osNumero !== item.osNumeroItem) {
             issueUpdates.osNumero = item.osNumeroItem;
           }
@@ -383,9 +385,11 @@ export async function POST(req: NextRequest) {
           if (novaDescricao && issueData.descricao !== novaDescricao) {
             issueUpdates.descricao = novaDescricao;
           }
-          if (Object.keys(issueUpdates).length > 0) {
-            await existingIssue.ref.update(issueUpdates);
+          // Limpa maintainerResolution se o mantenedor marca NC novamente
+          if (issueData.maintainerResolution) {
+            issueUpdates.maintainerResolution = null;
           }
+          await existingIssue.ref.update(issueUpdates);
         }
         continue;
       }
@@ -403,8 +407,23 @@ export async function POST(req: NextRequest) {
         status: "aberta",
         abertaEmInspecaoId: inspectionId,
         createdAt: nowIso,
+        reincidenciaCount: 0,
       });
       issuesCriadas.push(issueRef.id);
+    }
+
+    // Monta treatmentsPayload SOMENTE para NC sem issue aberta pré-existente
+    const treatmentsPayload: ChecklistNonConformityTreatment[] = [];
+    for (const item of itensPayload) {
+      if (item.resultado !== "NC") continue;
+      // Só cria tratativa se NÃO havia issue aberta antes desta inspeção
+      if (!ncItemsWithExistingOpenIssue.has(item.templateItemId)) {
+        treatmentsPayload.push({
+          questionId: item.templateItemId,
+          status: "open",
+          createdAt: nowIso,
+        });
+      }
     }
 
     const resolveIssuesIds = payload.resolveIssues ?? [];
