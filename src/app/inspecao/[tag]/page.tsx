@@ -5,7 +5,19 @@ import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import type { SignatureCanvasInstance } from "@/components/signature-canvas-client";
-import type { StoredImage } from "@/types";
+import {
+  mapIsoHeaderFontToCss,
+  sanitizeIsoHeaderConfig,
+  serializeIsoHeaderText,
+  shouldShowIsoHeaderFieldInInspectionHeader,
+} from "@/lib/iso-header-config";
+import type {
+  InspectionIsoHeaderConfig,
+  IsoHeaderFieldConfig,
+  IsoHeaderText,
+  IsoHeaderTextSegment,
+  StoredImage,
+} from "@/types";
 import { normalizeStoredImages } from "@/lib/storage/images";
 
 type SignatureCanvasComponent = typeof import("@/components/signature-canvas-client").default;
@@ -37,7 +49,13 @@ type IssueRecord = {
   status: "aberta" | "concluida";
   maintainerResolution?: MaintainerResolution | null;
 };
-type InspectionContext = { maintainer: MaintainerInfo; machine: MachineInfo; template: TemplateInfo; openIssues: IssueRecord[] };
+type InspectionContext = {
+  maintainer: MaintainerInfo;
+  machine: MachineInfo;
+  template: TemplateInfo;
+  openIssues: IssueRecord[];
+  isoHeaderConfig?: InspectionIsoHeaderConfig | null;
+};
 
 type ItemPhotoState = {
   id: string;
@@ -208,6 +226,57 @@ function ChoiceBtn({
       className={`${base} ${active ? activeByTone[tone] : inactive} ${ringByTone[tone]}`} onClick={onClick}>
       {children}
     </button>
+  );
+}
+
+function mapSegmentFontStyle(fontStyle: IsoHeaderTextSegment["fontStyle"]) {
+  if (fontStyle === "bold") {
+    return { fontWeight: 700 as const, fontStyle: "normal" as const };
+  }
+  if (fontStyle === "italic") {
+    return { fontWeight: 400 as const, fontStyle: "italic" as const };
+  }
+  if (fontStyle === "bolditalic") {
+    return { fontWeight: 700 as const, fontStyle: "italic" as const };
+  }
+  return { fontWeight: 400 as const, fontStyle: "normal" as const };
+}
+
+function IsoStyledText({
+  text,
+  fallback = "-",
+  className = "",
+}: {
+  text: IsoHeaderText;
+  fallback?: string;
+  className?: string;
+}) {
+  const content = serializeIsoHeaderText(text);
+  if (!content.trim()) {
+    return <span className={`text-xs text-[var(--muted)] ${className}`}>{fallback}</span>;
+  }
+  return (
+    <span className={className}>
+      {text.segments.map((segment, index) => {
+        const fontStyleInfo = mapSegmentFontStyle(segment.fontStyle);
+        return (
+          <span
+            key={`iso-segment-${index}-${segment.text}`}
+            style={{
+              color: segment.color ?? "#111111",
+              fontFamily: mapIsoHeaderFontToCss(segment.fontFamily),
+              fontSize: `${segment.fontSize ?? 10}px`,
+              letterSpacing: `${segment.letterSpacing ?? 0}px`,
+              fontWeight: fontStyleInfo.fontWeight,
+              fontStyle: fontStyleInfo.fontStyle,
+              whiteSpace: "pre-wrap",
+            }}
+          >
+            {segment.text}
+          </span>
+        );
+      })}
+    </span>
   );
 }
 
@@ -836,6 +905,10 @@ export default function InspectionPage() {
 
   /* ===== Derivados ===== */
   const hasNC = useMemo(() => Object.values(itemsState).some((i) => i.resultado === "NC"), [itemsState]);
+  const globalIsoHeaderConfig = useMemo(
+    () => sanitizeIsoHeaderConfig(context?.isoHeaderConfig),
+    [context?.isoHeaderConfig]
+  );
 
   // itens que têm issue aberta -> vira “alerta amarelo”
   const openIssuesByItem = useMemo(() => {
@@ -1313,6 +1386,62 @@ export default function InspectionPage() {
           </div>
         )}
       </header>
+
+      {/* Cabeçalho ISO global */}
+      {context && (
+        <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+          {(() => {
+            const headerFields: Array<{ key: string; label: string; value: IsoHeaderFieldConfig }> = [
+              { key: "foNumero", label: "Número (FO)", value: globalIsoHeaderConfig.foNumero },
+              { key: "emissao", label: "Emissão", value: globalIsoHeaderConfig.emissao },
+              { key: "revisao", label: "Revisão", value: globalIsoHeaderConfig.revisao },
+              { key: "revisaoNumero", label: "Nº da revisão", value: globalIsoHeaderConfig.revisaoNumero },
+            ];
+            const visibleHeaderFields = headerFields.filter(field =>
+              shouldShowIsoHeaderFieldInInspectionHeader(field.value)
+            );
+            const showOrientacoes = shouldShowIsoHeaderFieldInInspectionHeader(
+              globalIsoHeaderConfig.orientacoes
+            );
+
+            if (!visibleHeaderFields.length && !showOrientacoes) {
+              return (
+                <p className="text-sm text-gray-500">
+                  Cabeçalho ISO oculto para o sistema de preenchimento.
+                </p>
+              );
+            }
+
+            return (
+              <>
+                {visibleHeaderFields.length > 0 ? (
+                  <div className="grid gap-3 md:grid-cols-4">
+                    {visibleHeaderFields.map(field => (
+                      <div key={field.key} className="rounded-md border border-gray-200 bg-gray-50 p-3">
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                          {field.label}
+                        </p>
+                        <IsoStyledText text={field.value.text} className="mt-1 block leading-snug" />
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                {showOrientacoes ? (
+                  <div className="mt-3 rounded-md border border-dashed border-gray-300 bg-gray-50 p-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                      Orientações
+                    </p>
+                    <IsoStyledText
+                      text={globalIsoHeaderConfig.orientacoes.text}
+                      className="mt-1 block leading-snug"
+                    />
+                  </div>
+                ) : null}
+              </>
+            );
+          })()}
+        </section>
+      )}
 
       {/* Identificação da máquina (visual novo) */}
       {context && (

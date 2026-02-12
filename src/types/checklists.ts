@@ -2,6 +2,40 @@ export type NonConformityStatus = "open" | "in_progress" | "resolved";
 
 import type { StoredImage } from "./images";
 
+export type IsoHeaderFontFamily = "helvetica" | "times" | "courier";
+export type IsoHeaderFontStyle = "normal" | "bold" | "italic" | "bolditalic";
+
+export interface IsoHeaderTextSegment {
+  text: string;
+  color?: string | null;
+  fontFamily?: IsoHeaderFontFamily | null;
+  fontStyle?: IsoHeaderFontStyle | null;
+  fontSize?: number | null;
+  letterSpacing?: number | null;
+}
+
+export interface IsoHeaderText {
+  segments: IsoHeaderTextSegment[];
+}
+
+export interface IsoHeaderFieldVisibility {
+  pdf: boolean;
+  inspectionHeader: boolean;
+}
+
+export interface IsoHeaderFieldConfig {
+  text: IsoHeaderText;
+  visibility: IsoHeaderFieldVisibility;
+}
+
+export interface InspectionIsoHeaderConfig {
+  emissao: IsoHeaderFieldConfig;
+  revisao: IsoHeaderFieldConfig;
+  revisaoNumero: IsoHeaderFieldConfig;
+  foNumero: IsoHeaderFieldConfig;
+  orientacoes: IsoHeaderFieldConfig;
+}
+
 export interface ChecklistAnswer {
   questionId: string;
   questionText?: string | null;

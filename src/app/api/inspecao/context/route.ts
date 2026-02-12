@@ -3,6 +3,7 @@ import { adminDb } from "@/lib/firebase-admin";
 import { findMachineByTag } from "@/lib/db/machines";
 import { requireMaint } from "@/lib/guards";
 import { normalizeStoredImages } from "@/lib/storage/images";
+import { sanitizeIsoHeaderConfig } from "@/lib/iso-header-config";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -60,6 +61,11 @@ export async function GET(req: NextRequest) {
     }
 
     const templateData = templateSnap.data() ?? {};
+    const headerConfigSnap = await adminDb
+      .collection("config_inspecao")
+      .doc("cabecalho_iso_global")
+      .get();
+    const headerConfigData = headerConfigSnap.data() ?? {};
 
     const issuesSnap = await adminDb
       .collection("issues")
@@ -112,6 +118,7 @@ export async function GET(req: NextRequest) {
         imagemUrl: templateData.imagemUrl ?? null,
         itens: Array.isArray(templateData.itens) ? templateData.itens : [],
       },
+      isoHeaderConfig: sanitizeIsoHeaderConfig(headerConfigData.isoHeaderConfig),
       openIssues,
     });
   } catch (error: unknown) {

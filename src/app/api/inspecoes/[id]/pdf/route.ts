@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { jsPDF } from "jspdf";
 import { adminDb } from "@/lib/firebase-admin";
 import { requireAdmin, requireMaint } from "@/lib/guards";
+import { sanitizeIsoHeaderConfig } from "@/lib/iso-header-config";
 import { drawLarHeader } from "@/server/pdf/header-lar";
 import type { LarHeaderData } from "@/server/pdf/header-lar";
 
@@ -109,6 +110,12 @@ export async function GET(_req: NextRequest, context: RouteContext) {
     const maintainer = inspectionData.maintainer ?? {};
     const machine = inspectionData.machine ?? {};
     const template = inspectionData.template ?? {};
+    const pcmSign = (inspectionData.pcmSign ?? {}) as Record<string, unknown>;
+    const headerConfigSnap = await adminDb
+      .collection("config_inspecao")
+      .doc("cabecalho_iso_global")
+      .get();
+    const headerConfigData = headerConfigSnap.data() ?? {};
     const itens: Array<{ templateItemId: string; resultado: string; observacaoItem?: string | null }> = Array.isArray(
       inspectionData.itens
     )
@@ -205,6 +212,7 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       dataHoraISO: inspectionDate ? inspectionDate.toISOString() : undefined,
       lac,
       local: machineLocalRaw,
+      isoHeaderConfig: sanitizeIsoHeaderConfig(headerConfigData.isoHeaderConfig),
     };
 
     const { topHeightMm } = drawLarHeader(doc, headerData);
@@ -212,7 +220,6 @@ export async function GET(_req: NextRequest, context: RouteContext) {
     let cursorY = margin + topHeightMm + 6;
 
     const maintSignature = await fetchImageData(inspectionData.assinaturaUrl ?? null);
-    const pcmSign = (inspectionData.pcmSign ?? {}) as Record<string, unknown>;
     const pcmSignatureUrl = typeof pcmSign.assinaturaUrl === "string" ? pcmSign.assinaturaUrl : null;
     const pcmSignature = await fetchImageData(pcmSignatureUrl);
     const pcmName = typeof pcmSign.nome === "string" ? pcmSign.nome : null;

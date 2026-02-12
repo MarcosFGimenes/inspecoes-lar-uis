@@ -1,6 +1,12 @@
 import { readFileSync } from "fs";
 import { join } from "path";
 import type { jsPDF } from "jspdf";
+import {
+  sanitizeIsoHeaderConfig,
+  serializeIsoHeaderText,
+  shouldShowIsoHeaderFieldInPdf,
+} from "@/lib/iso-header-config";
+import type { InspectionIsoHeaderConfig, IsoHeaderText, IsoHeaderTextSegment } from "@/types";
 
 export type LarHeaderData = {
   tituloTemplate: string;
@@ -18,6 +24,7 @@ export type LarHeaderData = {
   dataHoraISO?: string;
   lac?: string;
   local?: string;
+  isoHeaderConfig?: InspectionIsoHeaderConfig | null;
 };
 
 const M = 10;
@@ -39,6 +46,163 @@ const DEFAULT_H_PHOTO = 36;
 const H_MACHINE_LABEL = 7;
 const MACHINE_LABEL_GAP = 2;
 const H_PHOTO = DEFAULT_H_PHOTO;
+
+type ResolvedStyledSegment = {
+  text: string;
+  color: string;
+  fontFamily: "helvetica" | "times" | "courier";
+  fontStyle: "normal" | "bold" | "italic" | "bolditalic";
+  fontSize: number;
+  letterSpacing: number;
+};
+
+type StyledToken = ResolvedStyledSegment & {
+  isLineBreak: boolean;
+  isWhitespace: boolean;
+};
+
+type DrawStyledTextOptions = {
+  x: number;
+  y: number;
+  maxWidth: number;
+  lineHeight: number;
+  maxLines: number;
+};
+
+function hexToRgb(color: string) {
+  const value = color.startsWith("#") ? color.slice(1) : color;
+  const normalized = value.length === 3 ? value.split("").map(char => `${char}${char}`).join("") : value;
+  const safe = normalized.padEnd(6, "0").slice(0, 6);
+  return {
+    r: parseInt(safe.slice(0, 2), 16),
+    g: parseInt(safe.slice(2, 4), 16),
+    b: parseInt(safe.slice(4, 6), 16),
+  };
+}
+
+function resolveStyledSegment(segment: IsoHeaderTextSegment): ResolvedStyledSegment {
+  const fontFamily = segment.fontFamily === "times" || segment.fontFamily === "courier"
+    ? segment.fontFamily
+    : "helvetica";
+  const fontStyle =
+    segment.fontStyle === "bold" ||
+    segment.fontStyle === "italic" ||
+    segment.fontStyle === "bolditalic"
+      ? segment.fontStyle
+      : "normal";
+  const fontSize =
+    typeof segment.fontSize === "number" && Number.isFinite(segment.fontSize)
+      ? Math.min(28, Math.max(6, segment.fontSize))
+      : 10;
+  const letterSpacing =
+    typeof segment.letterSpacing === "number" && Number.isFinite(segment.letterSpacing)
+      ? Math.min(8, Math.max(-2, segment.letterSpacing))
+      : 0;
+  const color = typeof segment.color === "string" && segment.color.trim() ? segment.color : "#111111";
+  return {
+    text: segment.text ?? "",
+    color,
+    fontFamily,
+    fontStyle,
+    fontSize,
+    letterSpacing,
+  };
+}
+
+function tokenizeStyledText(text: IsoHeaderText): StyledToken[] {
+  const tokens: StyledToken[] = [];
+  text.segments.forEach(segment => {
+    const resolved = resolveStyledSegment(segment);
+    const lines = resolved.text.split("\n");
+    lines.forEach((line, lineIndex) => {
+      const chunks = line.split(/(\s+)/).filter(chunk => chunk.length > 0);
+      chunks.forEach(chunk => {
+        tokens.push({
+          ...resolved,
+          text: chunk,
+          isLineBreak: false,
+          isWhitespace: /^\s+$/.test(chunk),
+        });
+      });
+      if (lineIndex < lines.length - 1) {
+        tokens.push({
+          ...resolved,
+          text: "",
+          isLineBreak: true,
+          isWhitespace: false,
+        });
+      }
+    });
+  });
+  return tokens;
+}
+
+function applyStyledSegment(doc: jsPDF, segment: ResolvedStyledSegment) {
+  doc.setFont(segment.fontFamily, segment.fontStyle);
+  doc.setFontSize(segment.fontSize);
+  const rgb = hexToRgb(segment.color);
+  doc.setTextColor(rgb.r, rgb.g, rgb.b);
+  const docWithCharSpacing = doc as jsPDF & { setCharSpace?: (value: number) => void };
+  docWithCharSpacing.setCharSpace?.(segment.letterSpacing);
+}
+
+function measureTokenWidth(doc: jsPDF, token: StyledToken) {
+  if (!token.text) return 0;
+  applyStyledSegment(doc, token);
+  return doc.getTextWidth(token.text);
+}
+
+function resetStyledTextState(doc: jsPDF) {
+  doc.setTextColor(0);
+  const docWithCharSpacing = doc as jsPDF & { setCharSpace?: (value: number) => void };
+  docWithCharSpacing.setCharSpace?.(0);
+}
+
+function drawStyledText(doc: jsPDF, text: IsoHeaderText, options: DrawStyledTextOptions) {
+  const tokens = tokenizeStyledText(text);
+  if (tokens.length === 0) {
+    return { linesUsed: 0 };
+  }
+
+  const maxX = options.x + options.maxWidth;
+  let line = 0;
+  let cursorX = options.x;
+  let cursorY = options.y;
+
+  for (const token of tokens) {
+    if (token.isLineBreak) {
+      line += 1;
+      if (line >= options.maxLines) break;
+      cursorX = options.x;
+      cursorY += options.lineHeight;
+      continue;
+    }
+
+    if (token.isWhitespace && cursorX === options.x) {
+      continue;
+    }
+
+    const tokenWidth = measureTokenWidth(doc, token);
+    const willOverflow = cursorX + tokenWidth > maxX;
+
+    if (willOverflow && !token.isWhitespace && cursorX > options.x) {
+      line += 1;
+      if (line >= options.maxLines) break;
+      cursorX = options.x;
+      cursorY += options.lineHeight;
+    }
+
+    if (line >= options.maxLines) break;
+    if (token.isWhitespace && cursorX === options.x) continue;
+
+    applyStyledSegment(doc, token);
+    doc.text(token.text, cursorX, cursorY);
+    cursorX += tokenWidth;
+  }
+
+  resetStyledTextState(doc);
+  return { linesUsed: line + 1 };
+}
 
 let cachedLarLogoDataUrl: string | null | undefined;
 
@@ -96,6 +260,7 @@ export function drawLarHeader(doc: jsPDF, data: LarHeaderData): {
 } {
   doc.setDrawColor(0);
   doc.setTextColor(0);
+  const isoHeaderConfig = sanitizeIsoHeaderConfig(data.isoHeaderConfig);
 
   // Top band
   doc.setLineWidth(0.4);
@@ -160,24 +325,72 @@ export function drawLarHeader(doc: jsPDF, data: LarHeaderData): {
   });
 
   // Box texts
+  const showFoNumero = shouldShowIsoHeaderFieldInPdf(isoHeaderConfig.foNumero);
+  const showEmissao = shouldShowIsoHeaderFieldInPdf(isoHeaderConfig.emissao);
+  const showRevisao = shouldShowIsoHeaderFieldInPdf(isoHeaderConfig.revisao);
+  const showRevisaoNumero = shouldShowIsoHeaderFieldInPdf(isoHeaderConfig.revisaoNumero);
+
   doc.setFont("helvetica", "bold");
   doc.setFontSize(8.5);
-  doc.text("NÚMERO:", boxX + 2, boxY + 6);
+  if (showFoNumero) {
+    doc.text("NÚMERO:", boxX + 2, boxY + 6);
+  }
   doc.text("PÁGINAS:", boxMidX + 2, boxY + 6);
 
+  if (showFoNumero) {
+    drawStyledText(doc, isoHeaderConfig.foNumero.text, {
+      x: boxX + 2,
+      y: boxMidY - 3,
+      maxWidth: boxMidX - boxX - 4,
+      lineHeight: 3.8,
+      maxLines: 1,
+    });
+  }
+
+  doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
-  doc.text("FO 012 050 33", boxX + 2, boxMidY - 3);
+  doc.setTextColor(0);
   doc.text("1/1", boxMidX + 2, boxMidY - 3);
 
+  doc.setFont("helvetica", "bold");
   doc.setFontSize(8.5);
-  doc.text("EMISSÃO:", boxX + 2, boxLabelSplitY - 3);
-  doc.text("REVISÃO:", boxC2 + 2, boxLabelSplitY - 3);
-  doc.text("Nº", boxC3 + 2, boxLabelSplitY - 3);
+  if (showEmissao) {
+    doc.text("EMISSÃO:", boxX + 2, boxLabelSplitY - 3);
+  }
+  if (showRevisao) {
+    doc.text("REVISÃO:", boxC2 + 2, boxLabelSplitY - 3);
+  }
+  if (showRevisaoNumero) {
+    doc.text("Nº", boxC3 + 2, boxLabelSplitY - 3);
+  }
 
-  doc.setFontSize(10);
-  doc.text("08/04/2024", boxX + 2, boxBottom - 3);
-  doc.text("05/07/2024", boxC2 + 2, boxBottom - 3);
-  doc.text("01", boxC3 + 2, boxBottom - 3);
+  if (showEmissao) {
+    drawStyledText(doc, isoHeaderConfig.emissao.text, {
+      x: boxX + 2,
+      y: boxBottom - 3,
+      maxWidth: boxC2 - boxX - 4,
+      lineHeight: 3.6,
+      maxLines: 1,
+    });
+  }
+  if (showRevisao) {
+    drawStyledText(doc, isoHeaderConfig.revisao.text, {
+      x: boxC2 + 2,
+      y: boxBottom - 3,
+      maxWidth: boxC3 - boxC2 - 4,
+      lineHeight: 3.6,
+      maxLines: 1,
+    });
+  }
+  if (showRevisaoNumero) {
+    drawStyledText(doc, isoHeaderConfig.revisaoNumero.text, {
+      x: boxC3 + 2,
+      y: boxBottom - 3,
+      maxWidth: boxRight - boxC3 - 4,
+      lineHeight: 3.6,
+      maxLines: 1,
+    });
+  }
 
   // Identification block
   const infoTop = M + H_TOP;
@@ -296,6 +509,20 @@ export function drawLarHeader(doc: jsPDF, data: LarHeaderData): {
 
   const lacValue = data.lac?.trim() || "—";
   const localValue = data.local?.trim();
+  const orientacoesLabel = "Orientacoes:";
+  const showOrientacoes = shouldShowIsoHeaderFieldInPdf(isoHeaderConfig.orientacoes);
+  const orientacoesValue = serializeIsoHeaderText(isoHeaderConfig.orientacoes.text).trim() || "—";
+  const orientationLineHeight = 4;
+  const orientationLabelGap = 4.2;
+  const orientationMaxLines = 4;
+  let orientationSectionHeight = 0;
+  if (showOrientacoes) {
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    const orientationLines = doc.splitTextToSize(orientacoesValue, availableWidth);
+    const orientationLinesCount = Math.max(1, Math.min(orientationMaxLines, orientationLines.length));
+    orientationSectionHeight = orientationLabelGap + orientationLineHeight * orientationLinesCount + 3.5;
+  }
 
   const panelFields = [
     { label: "Template:", value: templateValue },
@@ -326,6 +553,7 @@ export function drawLarHeader(doc: jsPDF, data: LarHeaderData): {
 
   const contentHeight =
     panelPadding * 2 +
+    orientationSectionHeight +
     measuredFields.reduce((acc, current, idx) => {
       const heightForField = lineHeight * current.linesCount;
       const spacing = idx < measuredFields.length - 1 ? fieldSpacing : 0;
@@ -339,10 +567,32 @@ export function drawLarHeader(doc: jsPDF, data: LarHeaderData): {
   doc.setDrawColor(0);
 
   let textY = panelY + panelPadding + 4;
+  const labelX = panelX + panelPadding;
+  if (showOrientacoes) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8.5);
+    doc.setTextColor(0);
+    doc.text(orientacoesLabel, labelX, textY);
+    const orientationStartY = textY + orientationLabelGap;
+    const orientationDraw = drawStyledText(doc, isoHeaderConfig.orientacoes.text, {
+      x: labelX,
+      y: orientationStartY,
+      maxWidth: availableWidth,
+      lineHeight: orientationLineHeight,
+      maxLines: orientationMaxLines,
+    });
+    const orientationUsedLines = Math.max(1, orientationDraw.linesUsed || 0);
+    textY = orientationStartY + orientationUsedLines * orientationLineHeight + 1.5;
+
+    doc.setDrawColor(0);
+    doc.setLineWidth(0.25);
+    doc.line(labelX, textY, panelX + panelWidth - panelPadding, textY);
+    textY += 3.2;
+  }
+
   measuredFields.forEach(({ field, labelWidth, lines, linesCount }, index) => {
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8.5);
-    const labelX = panelX + panelPadding;
     doc.text(field.label, labelX, textY);
 
     const valueX = labelX + labelWidth;
