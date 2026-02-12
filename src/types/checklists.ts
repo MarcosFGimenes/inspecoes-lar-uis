@@ -18,12 +18,22 @@ export interface IsoHeaderText {
   segments: IsoHeaderTextSegment[];
 }
 
+export interface IsoHeaderFieldVisibility {
+  pdf: boolean;
+  inspectionHeader: boolean;
+}
+
+export interface IsoHeaderFieldConfig {
+  text: IsoHeaderText;
+  visibility: IsoHeaderFieldVisibility;
+}
+
 export interface InspectionIsoHeaderConfig {
-  emissao: IsoHeaderText;
-  revisao: IsoHeaderText;
-  revisaoNumero: IsoHeaderText;
-  foNumero: IsoHeaderText;
-  orientacoes: IsoHeaderText;
+  emissao: IsoHeaderFieldConfig;
+  revisao: IsoHeaderFieldConfig;
+  revisaoNumero: IsoHeaderFieldConfig;
+  foNumero: IsoHeaderFieldConfig;
+  orientacoes: IsoHeaderFieldConfig;
 }
 
 export interface ChecklistAnswer {

@@ -1,5 +1,7 @@
 import type {
   InspectionIsoHeaderConfig,
+  IsoHeaderFieldConfig,
+  IsoHeaderFieldVisibility,
   IsoHeaderFontFamily,
   IsoHeaderFontStyle,
   IsoHeaderText,
@@ -22,26 +24,38 @@ const DEFAULT_SEGMENT_STYLE = {
   letterSpacing: 0,
 };
 
+const DEFAULT_VISIBILITY: IsoHeaderFieldVisibility = {
+  pdf: true,
+  inspectionHeader: true,
+};
+
 const DEFAULT_CONFIG: InspectionIsoHeaderConfig = {
   emissao: {
-    segments: [{ text: "08/04/2024", ...DEFAULT_SEGMENT_STYLE }],
+    text: { segments: [{ text: "08/04/2024", ...DEFAULT_SEGMENT_STYLE }] },
+    visibility: { ...DEFAULT_VISIBILITY },
   },
   revisao: {
-    segments: [{ text: "05/07/2024", ...DEFAULT_SEGMENT_STYLE }],
+    text: { segments: [{ text: "05/07/2024", ...DEFAULT_SEGMENT_STYLE }] },
+    visibility: { ...DEFAULT_VISIBILITY },
   },
   revisaoNumero: {
-    segments: [{ text: "01", ...DEFAULT_SEGMENT_STYLE }],
+    text: { segments: [{ text: "01", ...DEFAULT_SEGMENT_STYLE }] },
+    visibility: { ...DEFAULT_VISIBILITY },
   },
   foNumero: {
-    segments: [{ text: "FO 012 050 33", ...DEFAULT_SEGMENT_STYLE }],
+    text: { segments: [{ text: "FO 012 050 33", ...DEFAULT_SEGMENT_STYLE }] },
+    visibility: { ...DEFAULT_VISIBILITY },
   },
   orientacoes: {
-    segments: [
-      {
-        text: "Registrar desvios, acoes corretivas e responsaveis.",
-        ...DEFAULT_SEGMENT_STYLE,
-      },
-    ],
+    text: {
+      segments: [
+        {
+          text: "Registrar desvios, acoes corretivas e responsaveis.",
+          ...DEFAULT_SEGMENT_STYLE,
+        },
+      ],
+    },
+    visibility: { ...DEFAULT_VISIBILITY },
   },
 };
 
@@ -62,13 +76,27 @@ function cloneText(text: IsoHeaderText): IsoHeaderText {
   };
 }
 
+function cloneVisibility(visibility: IsoHeaderFieldVisibility): IsoHeaderFieldVisibility {
+  return {
+    pdf: visibility.pdf,
+    inspectionHeader: visibility.inspectionHeader,
+  };
+}
+
+function cloneField(field: IsoHeaderFieldConfig): IsoHeaderFieldConfig {
+  return {
+    text: cloneText(field.text),
+    visibility: cloneVisibility(field.visibility),
+  };
+}
+
 function cloneConfig(config: InspectionIsoHeaderConfig): InspectionIsoHeaderConfig {
   return {
-    emissao: cloneText(config.emissao),
-    revisao: cloneText(config.revisao),
-    revisaoNumero: cloneText(config.revisaoNumero),
-    foNumero: cloneText(config.foNumero),
-    orientacoes: cloneText(config.orientacoes),
+    emissao: cloneField(config.emissao),
+    revisao: cloneField(config.revisao),
+    revisaoNumero: cloneField(config.revisaoNumero),
+    foNumero: cloneField(config.foNumero),
+    orientacoes: cloneField(config.orientacoes),
   };
 }
 
@@ -114,6 +142,10 @@ function normalizeFontStyle(value: unknown): IsoHeaderFontStyle {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function isLegacyIsoText(value: unknown): value is IsoHeaderText {
+  return isRecord(value) && Array.isArray(value.segments);
 }
 
 function sanitizeSegment(raw: unknown, fallbackText: string): IsoHeaderTextSegment {
@@ -174,6 +206,40 @@ function sanitizeText(raw: unknown, fallbackText: string): IsoHeaderText {
   return { segments };
 }
 
+function sanitizeVisibility(raw: unknown, fallback: IsoHeaderFieldVisibility): IsoHeaderFieldVisibility {
+  if (!isRecord(raw)) {
+    return cloneVisibility(fallback);
+  }
+  return {
+    pdf: typeof raw.pdf === "boolean" ? raw.pdf : fallback.pdf,
+    inspectionHeader:
+      typeof raw.inspectionHeader === "boolean" ? raw.inspectionHeader : fallback.inspectionHeader,
+  };
+}
+
+function sanitizeField(raw: unknown, fallback: IsoHeaderFieldConfig): IsoHeaderFieldConfig {
+  // Retrocompatibilidade: quando o campo antigo vinha direto como texto/segments.
+  if (typeof raw === "string" || isLegacyIsoText(raw)) {
+    return {
+      text: sanitizeText(raw, serializeIsoHeaderText(fallback.text)),
+      visibility: cloneVisibility(fallback.visibility),
+    };
+  }
+
+  if (!isRecord(raw)) {
+    return cloneField(fallback);
+  }
+
+  const hasText = Object.prototype.hasOwnProperty.call(raw, "text");
+  const hasVisibility = Object.prototype.hasOwnProperty.call(raw, "visibility");
+  const textSource = hasText ? raw.text : isLegacyIsoText(raw) ? raw : fallback.text;
+
+  return {
+    text: sanitizeText(textSource, serializeIsoHeaderText(fallback.text)),
+    visibility: sanitizeVisibility(hasVisibility ? raw.visibility : null, fallback.visibility),
+  };
+}
+
 export function createDefaultIsoHeaderConfig(): InspectionIsoHeaderConfig {
   return cloneConfig(DEFAULT_CONFIG);
 }
@@ -184,21 +250,35 @@ export function sanitizeIsoHeaderConfig(raw: unknown): InspectionIsoHeaderConfig
     return defaults;
   }
   return {
-    emissao: sanitizeText(raw.emissao, serializeIsoHeaderText(defaults.emissao)),
-    revisao: sanitizeText(raw.revisao, serializeIsoHeaderText(defaults.revisao)),
-    revisaoNumero: sanitizeText(raw.revisaoNumero, serializeIsoHeaderText(defaults.revisaoNumero)),
-    foNumero: sanitizeText(raw.foNumero, serializeIsoHeaderText(defaults.foNumero)),
-    orientacoes: sanitizeText(raw.orientacoes, serializeIsoHeaderText(defaults.orientacoes)),
+    emissao: sanitizeField(raw.emissao, defaults.emissao),
+    revisao: sanitizeField(raw.revisao, defaults.revisao),
+    revisaoNumero: sanitizeField(raw.revisaoNumero, defaults.revisaoNumero),
+    foNumero: sanitizeField(raw.foNumero, defaults.foNumero),
+    orientacoes: sanitizeField(raw.orientacoes, defaults.orientacoes),
   };
 }
 
-export function serializeIsoHeaderText(text: IsoHeaderText | null | undefined) {
+export function serializeIsoHeaderText(
+  value: IsoHeaderText | IsoHeaderFieldConfig | null | undefined
+) {
+  const text =
+    isRecord(value) && Object.prototype.hasOwnProperty.call(value, "text")
+      ? (value as IsoHeaderFieldConfig).text
+      : (value as IsoHeaderText | null | undefined);
   if (!text?.segments?.length) return "";
   return text.segments.map(segment => segment.text ?? "").join("");
 }
 
 export function normalizeIsoHeaderForStorage(raw: unknown) {
   return sanitizeIsoHeaderConfig(raw);
+}
+
+export function shouldShowIsoHeaderFieldInPdf(field: IsoHeaderFieldConfig | null | undefined) {
+  return field?.visibility?.pdf !== false;
+}
+
+export function shouldShowIsoHeaderFieldInInspectionHeader(field: IsoHeaderFieldConfig | null | undefined) {
+  return field?.visibility?.inspectionHeader !== false;
 }
 
 export function mapIsoHeaderFontToCss(font: IsoHeaderFontFamily | null | undefined) {

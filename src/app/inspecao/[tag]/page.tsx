@@ -5,8 +5,19 @@ import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import type { SignatureCanvasInstance } from "@/components/signature-canvas-client";
-import { mapIsoHeaderFontToCss, sanitizeIsoHeaderConfig, serializeIsoHeaderText } from "@/lib/iso-header-config";
-import type { InspectionIsoHeaderConfig, IsoHeaderText, IsoHeaderTextSegment, StoredImage } from "@/types";
+import {
+  mapIsoHeaderFontToCss,
+  sanitizeIsoHeaderConfig,
+  serializeIsoHeaderText,
+  shouldShowIsoHeaderFieldInInspectionHeader,
+} from "@/lib/iso-header-config";
+import type {
+  InspectionIsoHeaderConfig,
+  IsoHeaderFieldConfig,
+  IsoHeaderText,
+  IsoHeaderTextSegment,
+  StoredImage,
+} from "@/types";
 import { normalizeStoredImages } from "@/lib/storage/images";
 
 type SignatureCanvasComponent = typeof import("@/components/signature-canvas-client").default;
@@ -1379,28 +1390,56 @@ export default function InspectionPage() {
       {/* Cabeçalho ISO global */}
       {context && (
         <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-          <div className="grid gap-3 md:grid-cols-4">
-            <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Número (FO)</p>
-              <IsoStyledText text={globalIsoHeaderConfig.foNumero} className="mt-1 block leading-snug" />
-            </div>
-            <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Emissão</p>
-              <IsoStyledText text={globalIsoHeaderConfig.emissao} className="mt-1 block leading-snug" />
-            </div>
-            <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Revisão</p>
-              <IsoStyledText text={globalIsoHeaderConfig.revisao} className="mt-1 block leading-snug" />
-            </div>
-            <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Nº da revisão</p>
-              <IsoStyledText text={globalIsoHeaderConfig.revisaoNumero} className="mt-1 block leading-snug" />
-            </div>
-          </div>
-          <div className="mt-3 rounded-md border border-dashed border-gray-300 bg-gray-50 p-3">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Orientações</p>
-            <IsoStyledText text={globalIsoHeaderConfig.orientacoes} className="mt-1 block leading-snug" />
-          </div>
+          {(() => {
+            const headerFields: Array<{ key: string; label: string; value: IsoHeaderFieldConfig }> = [
+              { key: "foNumero", label: "Número (FO)", value: globalIsoHeaderConfig.foNumero },
+              { key: "emissao", label: "Emissão", value: globalIsoHeaderConfig.emissao },
+              { key: "revisao", label: "Revisão", value: globalIsoHeaderConfig.revisao },
+              { key: "revisaoNumero", label: "Nº da revisão", value: globalIsoHeaderConfig.revisaoNumero },
+            ];
+            const visibleHeaderFields = headerFields.filter(field =>
+              shouldShowIsoHeaderFieldInInspectionHeader(field.value)
+            );
+            const showOrientacoes = shouldShowIsoHeaderFieldInInspectionHeader(
+              globalIsoHeaderConfig.orientacoes
+            );
+
+            if (!visibleHeaderFields.length && !showOrientacoes) {
+              return (
+                <p className="text-sm text-gray-500">
+                  Cabeçalho ISO oculto para o sistema de preenchimento.
+                </p>
+              );
+            }
+
+            return (
+              <>
+                {visibleHeaderFields.length > 0 ? (
+                  <div className="grid gap-3 md:grid-cols-4">
+                    {visibleHeaderFields.map(field => (
+                      <div key={field.key} className="rounded-md border border-gray-200 bg-gray-50 p-3">
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                          {field.label}
+                        </p>
+                        <IsoStyledText text={field.value.text} className="mt-1 block leading-snug" />
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                {showOrientacoes ? (
+                  <div className="mt-3 rounded-md border border-dashed border-gray-300 bg-gray-50 p-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                      Orientações
+                    </p>
+                    <IsoStyledText
+                      text={globalIsoHeaderConfig.orientacoes.text}
+                      className="mt-1 block leading-snug"
+                    />
+                  </div>
+                ) : null}
+              </>
+            );
+          })()}
         </section>
       )}
 

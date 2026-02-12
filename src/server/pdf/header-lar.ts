@@ -1,7 +1,11 @@
 import { readFileSync } from "fs";
 import { join } from "path";
 import type { jsPDF } from "jspdf";
-import { sanitizeIsoHeaderConfig, serializeIsoHeaderText } from "@/lib/iso-header-config";
+import {
+  sanitizeIsoHeaderConfig,
+  serializeIsoHeaderText,
+  shouldShowIsoHeaderFieldInPdf,
+} from "@/lib/iso-header-config";
 import type { InspectionIsoHeaderConfig, IsoHeaderText, IsoHeaderTextSegment } from "@/types";
 
 export type LarHeaderData = {
@@ -321,18 +325,27 @@ export function drawLarHeader(doc: jsPDF, data: LarHeaderData): {
   });
 
   // Box texts
+  const showFoNumero = shouldShowIsoHeaderFieldInPdf(isoHeaderConfig.foNumero);
+  const showEmissao = shouldShowIsoHeaderFieldInPdf(isoHeaderConfig.emissao);
+  const showRevisao = shouldShowIsoHeaderFieldInPdf(isoHeaderConfig.revisao);
+  const showRevisaoNumero = shouldShowIsoHeaderFieldInPdf(isoHeaderConfig.revisaoNumero);
+
   doc.setFont("helvetica", "bold");
   doc.setFontSize(8.5);
-  doc.text("NÚMERO:", boxX + 2, boxY + 6);
+  if (showFoNumero) {
+    doc.text("NÚMERO:", boxX + 2, boxY + 6);
+  }
   doc.text("PÁGINAS:", boxMidX + 2, boxY + 6);
 
-  drawStyledText(doc, isoHeaderConfig.foNumero, {
-    x: boxX + 2,
-    y: boxMidY - 3,
-    maxWidth: boxMidX - boxX - 4,
-    lineHeight: 3.8,
-    maxLines: 1,
-  });
+  if (showFoNumero) {
+    drawStyledText(doc, isoHeaderConfig.foNumero.text, {
+      x: boxX + 2,
+      y: boxMidY - 3,
+      maxWidth: boxMidX - boxX - 4,
+      lineHeight: 3.8,
+      maxLines: 1,
+    });
+  }
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
@@ -341,31 +354,43 @@ export function drawLarHeader(doc: jsPDF, data: LarHeaderData): {
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(8.5);
-  doc.text("EMISSÃO:", boxX + 2, boxLabelSplitY - 3);
-  doc.text("REVISÃO:", boxC2 + 2, boxLabelSplitY - 3);
-  doc.text("Nº", boxC3 + 2, boxLabelSplitY - 3);
+  if (showEmissao) {
+    doc.text("EMISSÃO:", boxX + 2, boxLabelSplitY - 3);
+  }
+  if (showRevisao) {
+    doc.text("REVISÃO:", boxC2 + 2, boxLabelSplitY - 3);
+  }
+  if (showRevisaoNumero) {
+    doc.text("Nº", boxC3 + 2, boxLabelSplitY - 3);
+  }
 
-  drawStyledText(doc, isoHeaderConfig.emissao, {
-    x: boxX + 2,
-    y: boxBottom - 3,
-    maxWidth: boxC2 - boxX - 4,
-    lineHeight: 3.6,
-    maxLines: 1,
-  });
-  drawStyledText(doc, isoHeaderConfig.revisao, {
-    x: boxC2 + 2,
-    y: boxBottom - 3,
-    maxWidth: boxC3 - boxC2 - 4,
-    lineHeight: 3.6,
-    maxLines: 1,
-  });
-  drawStyledText(doc, isoHeaderConfig.revisaoNumero, {
-    x: boxC3 + 2,
-    y: boxBottom - 3,
-    maxWidth: boxRight - boxC3 - 4,
-    lineHeight: 3.6,
-    maxLines: 1,
-  });
+  if (showEmissao) {
+    drawStyledText(doc, isoHeaderConfig.emissao.text, {
+      x: boxX + 2,
+      y: boxBottom - 3,
+      maxWidth: boxC2 - boxX - 4,
+      lineHeight: 3.6,
+      maxLines: 1,
+    });
+  }
+  if (showRevisao) {
+    drawStyledText(doc, isoHeaderConfig.revisao.text, {
+      x: boxC2 + 2,
+      y: boxBottom - 3,
+      maxWidth: boxC3 - boxC2 - 4,
+      lineHeight: 3.6,
+      maxLines: 1,
+    });
+  }
+  if (showRevisaoNumero) {
+    drawStyledText(doc, isoHeaderConfig.revisaoNumero.text, {
+      x: boxC3 + 2,
+      y: boxBottom - 3,
+      maxWidth: boxRight - boxC3 - 4,
+      lineHeight: 3.6,
+      maxLines: 1,
+    });
+  }
 
   // Identification block
   const infoTop = M + H_TOP;
@@ -485,15 +510,19 @@ export function drawLarHeader(doc: jsPDF, data: LarHeaderData): {
   const lacValue = data.lac?.trim() || "—";
   const localValue = data.local?.trim();
   const orientacoesLabel = "Orientacoes:";
-  const orientacoesValue = serializeIsoHeaderText(isoHeaderConfig.orientacoes).trim() || "—";
+  const showOrientacoes = shouldShowIsoHeaderFieldInPdf(isoHeaderConfig.orientacoes);
+  const orientacoesValue = serializeIsoHeaderText(isoHeaderConfig.orientacoes.text).trim() || "—";
   const orientationLineHeight = 4;
   const orientationLabelGap = 4.2;
   const orientationMaxLines = 4;
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(9);
-  const orientationLines = doc.splitTextToSize(orientacoesValue, availableWidth);
-  const orientationLinesCount = Math.max(1, Math.min(orientationMaxLines, orientationLines.length));
-  const orientationSectionHeight = orientationLabelGap + orientationLineHeight * orientationLinesCount + 3.5;
+  let orientationSectionHeight = 0;
+  if (showOrientacoes) {
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    const orientationLines = doc.splitTextToSize(orientacoesValue, availableWidth);
+    const orientationLinesCount = Math.max(1, Math.min(orientationMaxLines, orientationLines.length));
+    orientationSectionHeight = orientationLabelGap + orientationLineHeight * orientationLinesCount + 3.5;
+  }
 
   const panelFields = [
     { label: "Template:", value: templateValue },
@@ -539,25 +568,27 @@ export function drawLarHeader(doc: jsPDF, data: LarHeaderData): {
 
   let textY = panelY + panelPadding + 4;
   const labelX = panelX + panelPadding;
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(8.5);
-  doc.setTextColor(0);
-  doc.text(orientacoesLabel, labelX, textY);
-  const orientationStartY = textY + orientationLabelGap;
-  const orientationDraw = drawStyledText(doc, isoHeaderConfig.orientacoes, {
-    x: labelX,
-    y: orientationStartY,
-    maxWidth: availableWidth,
-    lineHeight: orientationLineHeight,
-    maxLines: orientationMaxLines,
-  });
-  const orientationUsedLines = Math.max(1, orientationDraw.linesUsed || 0);
-  textY = orientationStartY + orientationUsedLines * orientationLineHeight + 1.5;
+  if (showOrientacoes) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8.5);
+    doc.setTextColor(0);
+    doc.text(orientacoesLabel, labelX, textY);
+    const orientationStartY = textY + orientationLabelGap;
+    const orientationDraw = drawStyledText(doc, isoHeaderConfig.orientacoes.text, {
+      x: labelX,
+      y: orientationStartY,
+      maxWidth: availableWidth,
+      lineHeight: orientationLineHeight,
+      maxLines: orientationMaxLines,
+    });
+    const orientationUsedLines = Math.max(1, orientationDraw.linesUsed || 0);
+    textY = orientationStartY + orientationUsedLines * orientationLineHeight + 1.5;
 
-  doc.setDrawColor(0);
-  doc.setLineWidth(0.25);
-  doc.line(labelX, textY, panelX + panelWidth - panelPadding, textY);
-  textY += 3.2;
+    doc.setDrawColor(0);
+    doc.setLineWidth(0.25);
+    doc.line(labelX, textY, panelX + panelWidth - panelPadding, textY);
+    textY += 3.2;
+  }
 
   measuredFields.forEach(({ field, labelWidth, lines, linesCount }, index) => {
     doc.setFont("helvetica", "bold");

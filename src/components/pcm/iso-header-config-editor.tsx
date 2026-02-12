@@ -86,14 +86,17 @@ export function IsoHeaderConfigEditor({ value, onChange, disabled = false }: Iso
 
   const updateSegment = (fieldKey: HeaderFieldKey, index: number, patch: Partial<IsoHeaderTextSegment>) => {
     const currentField = value[fieldKey];
-    const nextSegments = currentField.segments.map((segment, segmentIndex) =>
+    const nextSegments = currentField.text.segments.map((segment, segmentIndex) =>
       segmentIndex === index ? { ...segment, ...patch } : segment
     );
     onChange({
       ...value,
       [fieldKey]: {
         ...currentField,
-        segments: nextSegments,
+        text: {
+          ...currentField.text,
+          segments: nextSegments,
+        },
       },
     });
   };
@@ -104,19 +107,25 @@ export function IsoHeaderConfigEditor({ value, onChange, disabled = false }: Iso
       ...value,
       [fieldKey]: {
         ...currentField,
-        segments: [...currentField.segments, createDefaultSegment()],
+        text: {
+          ...currentField.text,
+          segments: [...currentField.text.segments, createDefaultSegment()],
+        },
       },
     });
   };
 
   const removeSegment = (fieldKey: HeaderFieldKey, index: number) => {
     const currentField = value[fieldKey];
-    if (currentField.segments.length <= 1) {
+    if (currentField.text.segments.length <= 1) {
       onChange({
         ...value,
         [fieldKey]: {
           ...currentField,
-          segments: [{ ...currentField.segments[0], text: "" }],
+          text: {
+            ...currentField.text,
+            segments: [{ ...currentField.text.segments[0], text: "" }],
+          },
         },
       });
       return;
@@ -125,7 +134,28 @@ export function IsoHeaderConfigEditor({ value, onChange, disabled = false }: Iso
       ...value,
       [fieldKey]: {
         ...currentField,
-        segments: currentField.segments.filter((_, segmentIndex) => segmentIndex !== index),
+        text: {
+          ...currentField.text,
+          segments: currentField.text.segments.filter((_, segmentIndex) => segmentIndex !== index),
+        },
+      },
+    });
+  };
+
+  const updateVisibility = (
+    fieldKey: HeaderFieldKey,
+    target: "pdf" | "inspectionHeader",
+    checked: boolean
+  ) => {
+    const currentField = value[fieldKey];
+    onChange({
+      ...value,
+      [fieldKey]: {
+        ...currentField,
+        visibility: {
+          ...currentField.visibility,
+          [target]: checked,
+        },
       },
     });
   };
@@ -149,13 +179,37 @@ export function IsoHeaderConfigEditor({ value, onChange, disabled = false }: Iso
       <div className="space-y-4">
         {FIELD_DEFINITIONS.map(field => {
           const fieldValue = value[field.key];
-          const previewText = serializeIsoHeaderText(fieldValue).trim();
+          const previewText = serializeIsoHeaderText(fieldValue.text).trim();
           return (
             <article key={field.key} className="space-y-3 rounded-xl border border-[var(--border)] bg-white p-3">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <h5 className="text-sm font-semibold text-[var(--text)]">{field.label}</h5>
                   <p className="text-xs text-[var(--muted)]">{field.helper}</p>
+                  <div className="mt-2 flex flex-wrap items-center gap-4">
+                    <label className="inline-flex items-center gap-2 text-xs text-[var(--muted)]">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4"
+                        checked={fieldValue.visibility.pdf}
+                        onChange={event => updateVisibility(field.key, "pdf", event.target.checked)}
+                        disabled={disabled}
+                      />
+                      Exibir no PDF
+                    </label>
+                    <label className="inline-flex items-center gap-2 text-xs text-[var(--muted)]">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4"
+                        checked={fieldValue.visibility.inspectionHeader}
+                        onChange={event =>
+                          updateVisibility(field.key, "inspectionHeader", event.target.checked)
+                        }
+                        disabled={disabled}
+                      />
+                      Exibir no cabeçalho da inspeção
+                    </label>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2">
                   <Button
@@ -183,7 +237,7 @@ export function IsoHeaderConfigEditor({ value, onChange, disabled = false }: Iso
                 <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-[var(--muted)]">Pre-visualizacao</p>
                 <div className="min-h-7 text-sm leading-relaxed">
                   {previewText ? (
-                    fieldValue.segments.map((segment, index) => {
+                    fieldValue.text.segments.map((segment, index) => {
                       const styleInfo = toCssFontStyle(segment.fontStyle ?? "normal");
                       return (
                         <span
@@ -209,7 +263,7 @@ export function IsoHeaderConfigEditor({ value, onChange, disabled = false }: Iso
               </div>
 
               <div className="space-y-3">
-                {fieldValue.segments.map((segment, index) => (
+                {fieldValue.text.segments.map((segment, index) => (
                   <div key={`${field.key}-segment-${index}`} className="rounded-lg border border-[var(--border)] p-3">
                     <div className="mb-2 flex items-center justify-between">
                       <p className="text-xs font-medium text-[var(--muted)]">Segmento {index + 1}</p>
