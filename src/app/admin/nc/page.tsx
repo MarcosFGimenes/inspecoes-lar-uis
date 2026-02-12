@@ -4,10 +4,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import {
   collection,
+  deleteField,
   doc,
+  getDoc,
   getDocs,
-  limit,
-  orderBy,
   query,
   updateDoc,
   where,
@@ -33,6 +33,7 @@ interface MachineOption {
   id: string;
   nome: string;
   tag?: string | null;
+  templateId?: string | null;
   ativo?: boolean;
 }
 
@@ -51,7 +52,7 @@ interface TemplateMeta {
 
 interface NonConformityItem {
   id: string;
-  responseId: string;
+  responseId: string | null;
   questionId: string;
   machineId: string | null;
   machineLabel: string;
@@ -66,26 +67,40 @@ interface NonConformityItem {
   observation: string | null;
   photos: StoredImage[];
   itemOsNumero: string | null;
+  issueStatus: "aberta" | "concluida";
   status: NonConformityStatus;
   summary: string;
   responsible: string;
   dueDate: string;
   dueDateIso: string | null;
   recurrence: boolean;
+  reincidenciaCount: number;
+  maintainerResolution: MaintainerResolutionInfo | null;
   updatedAt: string | null;
 }
 
-interface IssueResolutionInfo {
-  issueId: string;
-  reincidenciaCount: number;
-  maintainerResolution: {
-    resolvedAt: string | null;
-    resolvedByName: string | null;
-    resolvedByMatricula: string | null;
-    description: string;
-    osNumero: string | null;
-    inspecaoId: string | null;
-  } | null;
+interface MaintainerResolutionInfo {
+  resolvedAt: string | null;
+  resolvedByName: string | null;
+  resolvedByMatricula: string | null;
+  description: string;
+  osNumero: string | null;
+  inspecaoId: string | null;
+}
+
+interface SourceInspectionData {
+  machineId: string | null;
+  machineLabel: string;
+  machineTag: string | null;
+  templateId: string | null;
+  templateLabel: string;
+  templateVersion: string | null;
+  checklistDate: string | null;
+  operatorNome: string | null;
+  operatorMatricula: string | null;
+  treatments: ChecklistNonConformityTreatment[];
+  treatmentMap: Map<string, ChecklistNonConformityTreatment>;
+  answersMap: Map<string, ChecklistAnswer>;
 }
 
 interface FeedbackState {
@@ -105,6 +120,13 @@ function formatDateInput(value: string | null | undefined) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
   return date.toISOString().slice(0, 10);
+}
+
+function normalizeStatus(value: unknown): NonConformityStatus | null {
+  if (value === "open" || value === "in_progress" || value === "resolved") {
+    return value;
+  }
+  return null;
 }
 
 function dedupeAnswers(answers: ChecklistAnswer[]) {
@@ -180,6 +202,14 @@ function buildMachineLabel(machine: Record<string, unknown>) {
   return tag ? `${nome} (${tag})` : nome;
 }
 
+function buildMachineLabelFromOption(machine: MachineOption | undefined, fallbackTag?: string | null) {
+  if (!machine) {
+    return fallbackTag ? `Máquina (${fallbackTag})` : "Máquina";
+  }
+  const tag = machine.tag ?? fallbackTag ?? null;
+  return tag ? `${machine.nome} (${tag})` : machine.nome;
+}
+
 function renderStatusBadge(status: NonConformityStatus) {
   if (status === "resolved") return <Badge variant="success">Resolvida</Badge>;
   if (status === "in_progress") return <Badge variant="warning">Em andamento</Badge>;
@@ -204,7 +234,6 @@ export default function AdminNonConformitiesPage() {
   const [feedback, setFeedback] = useState<Record<string, FeedbackState>>({});
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkSaving, setBulkSaving] = useState(false);
-  const [issueResolutionMap, setIssueResolutionMap] = useState<Map<string, IssueResolutionInfo>>(new Map());
   const [expandedResolutions, setExpandedResolutions] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -221,11 +250,10 @@ export default function AdminNonConformitiesPage() {
         return;
       }
 
-      const [machinesSnap, templatesSnap, responsesSnap, issuesSnap] = await Promise.all([
+      const [machinesSnap, templatesSnap, issuesSnap] = await Promise.all([
         getDocs(collection(firebaseDb, "machines")),
         getDocs(collection(firebaseDb, "templates")),
-        getDocs(query(collection(firebaseDb, "inspecoes"), orderBy("createdAt", "desc"), limit(200))),
-        getDocs(query(collection(firebaseDb, "issues"), where("status", "==", "aberta"))),
+        getDocs(query(collection(firebaseDb, "issues"), where("status", "in", ["aberta", "concluida"]))),
       ]);
 
       const machineOptions: MachineOption[] = machinesSnap.docs.map(docSnap => {
@@ -234,9 +262,11 @@ export default function AdminNonConformitiesPage() {
           id: docSnap.id,
           nome: typeof data.nome === "string" ? data.nome : docSnap.id,
           tag: data.tag ? String(data.tag) : null,
+          templateId: typeof data.templateId === "string" ? data.templateId : null,
           ativo: data.ativo !== false,
         } satisfies MachineOption;
       });
+      const machinesById = new Map(machineOptions.map(machine => [machine.id, machine]));
 
       const templateMap = new Map<string, TemplateMeta>();
       templatesSnap.docs.forEach(docSnap => {
@@ -255,95 +285,138 @@ export default function AdminNonConformitiesPage() {
         });
       });
 
-      const builtItems: NonConformityItem[] = [];
-      const treatmentsRecord: Record<string, ChecklistNonConformityTreatment[]> = {};
+      const sourceInspectionIds = Array.from(
+        new Set(
+          issuesSnap.docs
+            .map(issueDoc => {
+              const issueData = issueDoc.data() ?? {};
+              return typeof issueData.abertaEmInspecaoId === "string"
+                ? issueData.abertaEmInspecaoId
+                : null;
+            })
+            .filter((value): value is string => Boolean(value))
+        )
+      );
 
-      responsesSnap.docs.forEach(docSnap => {
-        const data = docSnap.data() ?? {};
-        const machine = (data.machine ?? {}) as Record<string, unknown>;
-        const maintainer = (data.maintainer ?? {}) as Record<string, unknown>;
-        const templateInfo = (data.template ?? {}) as Record<string, unknown>;
-        const templateId = templateInfo.id
-          ? String(templateInfo.id)
-          : machine.templateId
-          ? String(machine.templateId)
-          : null;
-        const templateMeta = templateId ? templateMap.get(templateId) : undefined;
-        const answers = normalizeAnswers(data, templateMeta?.itensMap ?? new Map());
-        const treatmentsArray = Array.isArray(data.nonConformityTreatments)
-          ? (data.nonConformityTreatments as ChecklistNonConformityTreatment[])
-          : [];
-
-        treatmentsRecord[docSnap.id] = treatmentsArray;
-        const treatmentMap = new Map<string, ChecklistNonConformityTreatment>();
-        treatmentsArray.forEach(treatment => {
-          if (treatment?.questionId) {
-            treatmentMap.set(treatment.questionId, treatment);
+      const sourceInspectionEntries = await Promise.all(
+        sourceInspectionIds.map(async inspectionId => {
+          const inspectionRef = doc(collection(firebaseDb, "inspecoes"), inspectionId);
+          const inspectionSnap = await getDoc(inspectionRef);
+          if (!inspectionSnap.exists()) {
+            return [inspectionId, null] as const;
           }
-        });
 
-        answers
-          .filter(answer => answer.response === "nc")
-          .forEach(answer => {
-            const treatment = treatmentMap.get(answer.questionId);
-            const dueDateIso = treatment?.dueDate ? String(treatment.dueDate) : null;
-            builtItems.push({
-              id: `${docSnap.id}:${answer.questionId}`,
-              responseId: docSnap.id,
-              questionId: answer.questionId,
-              machineId: machine.machineId ? String(machine.machineId) : machine.id ? String(machine.id) : null,
-              machineLabel: buildMachineLabel(machine),
-              machineTag: machine.tag ? String(machine.tag) : null,
-              templateId,
-              templateLabel: templateMeta?.nome ?? (templateInfo.nome ? String(templateInfo.nome) : "Template"),
-              templateVersion: templateMeta?.versao ?? (templateInfo.versao ? String(templateInfo.versao) : null),
-              questionText: answer.questionText ?? `Item ${answer.questionId}`,
-              checklistDate: data.createdAt ? String(data.createdAt) : data.finalizadaEm ? String(data.finalizadaEm) : null,
-              operatorNome: maintainer.nome ? String(maintainer.nome) : null,
-              operatorMatricula: maintainer.matricula ? String(maintainer.matricula) : null,
-              observation: answer.observation ?? null,
-              photos: normalizeStoredImages(answer.photoUrls ?? []),
-              itemOsNumero: answer.itemOsNumero ?? null,
-              status: treatment?.status ?? "open",
-              summary: treatment?.summary ?? "",
-              responsible: treatment?.responsible ?? "",
-              dueDate: formatDateInput(dueDateIso),
-              dueDateIso,
-              recurrence: answer.recurrence ?? false,
-              updatedAt: treatment?.updatedAt ? String(treatment.updatedAt) : treatment?.createdAt ? String(treatment.createdAt) : null,
-            });
+          const inspectionData = inspectionSnap.data() ?? {};
+          const machine = (inspectionData.machine ?? {}) as Record<string, unknown>;
+          const maintainer = (inspectionData.maintainer ?? {}) as Record<string, unknown>;
+          const templateInfo = (inspectionData.template ?? {}) as Record<string, unknown>;
+          const templateId =
+            typeof templateInfo.id === "string"
+              ? templateInfo.id
+              : typeof machine.templateId === "string"
+              ? machine.templateId
+              : null;
+          const templateMeta = templateId ? templateMap.get(templateId) : undefined;
+          const answers = normalizeAnswers(inspectionData, templateMeta?.itensMap ?? new Map());
+          const answersMap = new Map(answers.map(answer => [answer.questionId, answer]));
+          const treatments = Array.isArray(inspectionData.nonConformityTreatments)
+            ? (inspectionData.nonConformityTreatments as ChecklistNonConformityTreatment[])
+            : [];
+          const treatmentMap = new Map<string, ChecklistNonConformityTreatment>();
+          treatments.forEach(treatment => {
+            if (treatment?.questionId) {
+              treatmentMap.set(treatment.questionId, treatment);
+            }
           });
+
+          return [
+            inspectionId,
+            {
+              machineId:
+                typeof machine.machineId === "string"
+                  ? machine.machineId
+                  : typeof machine.id === "string"
+                  ? machine.id
+                  : null,
+              machineLabel: buildMachineLabel(machine),
+              machineTag: typeof machine.tag === "string" ? machine.tag : null,
+              templateId,
+              templateLabel:
+                templateMeta?.nome ??
+                (typeof templateInfo.nome === "string" ? String(templateInfo.nome) : "Template"),
+              templateVersion:
+                templateMeta?.versao ??
+                (typeof templateInfo.versao === "string" ? String(templateInfo.versao) : null),
+              checklistDate:
+                typeof inspectionData.createdAt === "string"
+                  ? inspectionData.createdAt
+                  : typeof inspectionData.finalizadaEm === "string"
+                  ? inspectionData.finalizadaEm
+                  : null,
+              operatorNome: typeof maintainer.nome === "string" ? maintainer.nome : null,
+              operatorMatricula: typeof maintainer.matricula === "string" ? maintainer.matricula : null,
+              treatments,
+              treatmentMap,
+              answersMap,
+            } satisfies SourceInspectionData,
+          ] as const;
+        })
+      );
+
+      const sourceInspectionMap = new Map<string, SourceInspectionData>();
+      const treatmentsRecord: Record<string, ChecklistNonConformityTreatment[]> = {};
+      sourceInspectionEntries.forEach(([inspectionId, inspectionData]) => {
+        if (!inspectionData) return;
+        sourceInspectionMap.set(inspectionId, inspectionData);
+        treatmentsRecord[inspectionId] = inspectionData.treatments;
       });
 
-      // Deduplica por máquina+questão+ciclo:
-      // - Múltiplas "open"/"in_progress" do mesmo item → 1 entrada ativa
-      // - Múltiplas "resolved" do mesmo item → 1 entrada resolvida
-      // - "open" + "resolved" do mesmo item → 2 entradas separadas (histórico + nova)
-      const dedupeMap = new Map<string, NonConformityItem>();
-      for (const item of builtItems) {
-        const cycle = item.status === "resolved" ? "resolved" : "active";
-        const key = `${item.machineId}:${item.questionId}:${cycle}`;
-        const existing = dedupeMap.get(key);
-        if (!existing) {
-          dedupeMap.set(key, item);
-          continue;
-        }
-        // Dentro do mesmo ciclo: quem tem tratativa preenchida vence
-        const existingHasWork = !!(existing.summary.trim() || existing.responsible.trim() || existing.dueDate);
-        const currentHasWork = !!(item.summary.trim() || item.responsible.trim() || item.dueDate);
-        if (!existingHasWork && currentHasWork) {
-          dedupeMap.set(key, item);
-        }
-      }
-      const dedupedItems = Array.from(dedupeMap.values());
-
-      // Monta mapa de resoluções do mantenedor a partir das issues
-      const resolutionMap = new Map<string, IssueResolutionInfo>();
+      const builtItems: NonConformityItem[] = [];
       issuesSnap.docs.forEach(issueDoc => {
         const issueData = issueDoc.data() ?? {};
-        const machId = typeof issueData.machineId === "string" ? issueData.machineId : null;
-        const templateItemId = typeof issueData.templateItemId === "string" ? issueData.templateItemId : null;
-        if (!machId || !templateItemId) return;
+        const machineId = typeof issueData.machineId === "string" ? issueData.machineId : null;
+        const questionId = typeof issueData.templateItemId === "string" ? issueData.templateItemId : null;
+        if (!questionId) return;
+
+        const responseId =
+          typeof issueData.abertaEmInspecaoId === "string" ? issueData.abertaEmInspecaoId : null;
+        const sourceInspection = responseId ? sourceInspectionMap.get(responseId) : undefined;
+        const machineOption = machineId ? machinesById.get(machineId) : undefined;
+        const issueTag = typeof issueData.tag === "string" ? issueData.tag : null;
+        const templateId = sourceInspection?.templateId ?? machineOption?.templateId ?? null;
+        const templateMeta = templateId ? templateMap.get(templateId) : undefined;
+        const templateItem = templateMeta?.itensMap.get(questionId);
+        const answerData = sourceInspection?.answersMap.get(questionId);
+
+        const rawIssueTreatment =
+          issueData.pcmTreatment && typeof issueData.pcmTreatment === "object"
+            ? (issueData.pcmTreatment as Record<string, unknown>)
+            : null;
+        const sourceTreatment = sourceInspection?.treatmentMap.get(questionId);
+        const issueStatus = issueData.status === "concluida" ? "concluida" : "aberta";
+        const statusFromTreatment = normalizeStatus(rawIssueTreatment?.status ?? sourceTreatment?.status);
+        const status: NonConformityStatus = issueStatus === "concluida" ? "resolved" : statusFromTreatment ?? "open";
+
+        const summaryValue =
+          typeof rawIssueTreatment?.summary === "string"
+            ? rawIssueTreatment.summary
+            : sourceTreatment?.summary ?? null;
+        const responsibleValue =
+          typeof rawIssueTreatment?.responsible === "string"
+            ? rawIssueTreatment.responsible
+            : sourceTreatment?.responsible ?? null;
+        const dueDateIsoValue =
+          typeof rawIssueTreatment?.dueDate === "string"
+            ? rawIssueTreatment.dueDate
+            : sourceTreatment?.dueDate ?? null;
+        const updatedAtValue =
+          (typeof rawIssueTreatment?.updatedAt === "string" ? rawIssueTreatment.updatedAt : null) ??
+          (sourceTreatment?.updatedAt ? String(sourceTreatment.updatedAt) : null) ??
+          (typeof rawIssueTreatment?.createdAt === "string" ? rawIssueTreatment.createdAt : null) ??
+          (sourceTreatment?.createdAt ? String(sourceTreatment.createdAt) : null) ??
+          (typeof issueData.concluidaEm === "string" ? issueData.concluidaEm : null) ??
+          (typeof issueData.createdAt === "string" ? issueData.createdAt : null);
+
         const rawResolution = issueData.maintainerResolution ?? null;
         const maintainerResolution = rawResolution && typeof rawResolution === "object"
           ? {
@@ -356,16 +429,61 @@ export default function AdminNonConformitiesPage() {
             }
           : null;
         const reincidenciaCount = typeof issueData.reincidenciaCount === "number" ? issueData.reincidenciaCount : 0;
-        resolutionMap.set(`${machId}:${templateItemId}`, {
-          issueId: issueDoc.id,
+
+        builtItems.push({
+          id: issueDoc.id,
+          responseId,
+          questionId,
+          machineId: machineId ?? sourceInspection?.machineId ?? null,
+          machineLabel:
+            sourceInspection?.machineLabel ?? buildMachineLabelFromOption(machineOption, issueTag),
+          machineTag: sourceInspection?.machineTag ?? machineOption?.tag ?? issueTag,
+          templateId,
+          templateLabel: sourceInspection?.templateLabel ?? templateMeta?.nome ?? "Template",
+          templateVersion: sourceInspection?.templateVersion ?? templateMeta?.versao ?? null,
+          questionText:
+            answerData?.questionText ??
+            templateItem?.oQueChecar ??
+            templateItem?.criterio ??
+            templateItem?.componente ??
+            `Item ${questionId}`,
+          checklistDate:
+            sourceInspection?.checklistDate ??
+            (typeof issueData.createdAt === "string" ? issueData.createdAt : null),
+          operatorNome: sourceInspection?.operatorNome ?? null,
+          operatorMatricula: sourceInspection?.operatorMatricula ?? null,
+          observation:
+            typeof issueData.descricao === "string"
+              ? issueData.descricao
+              : answerData?.observation ?? null,
+          photos: normalizeStoredImages(issueData.fotos ?? answerData?.photoUrls ?? []),
+          itemOsNumero:
+            typeof issueData.osNumero === "string"
+              ? issueData.osNumero
+              : answerData?.itemOsNumero ?? null,
+          issueStatus,
+          status,
+          summary: summaryValue ? String(summaryValue) : "",
+          responsible: responsibleValue ? String(responsibleValue) : "",
+          dueDate: formatDateInput(dueDateIsoValue),
+          dueDateIso: dueDateIsoValue ? String(dueDateIsoValue) : null,
+          recurrence: answerData?.recurrence ?? reincidenciaCount > 0,
           reincidenciaCount,
           maintainerResolution,
+          updatedAt: updatedAtValue,
         });
       });
 
-      setIssueResolutionMap(resolutionMap);
+      builtItems.sort((a, b) => {
+        const aTs = Date.parse(a.updatedAt ?? a.checklistDate ?? "");
+        const bTs = Date.parse(b.updatedAt ?? b.checklistDate ?? "");
+        const normalizedA = Number.isNaN(aTs) ? 0 : aTs;
+        const normalizedB = Number.isNaN(bTs) ? 0 : bTs;
+        return normalizedB - normalizedA;
+      });
+
       setMachines(machineOptions);
-      setItems(dedupedItems);
+      setItems(builtItems);
       setTreatmentsByResponse(treatmentsRecord);
     } catch (err: unknown) {
       const message = err instanceof Error && err.message ? err.message : "Erro ao carregar dados";
@@ -406,11 +524,12 @@ export default function AdminNonConformitiesPage() {
       setSavingId(item.id);
       setFeedback(prev => ({ ...prev, [item.id]: { type: "success", message: "" } }));
       try {
-        const existing = treatmentsByResponse[item.responseId] ?? [];
+        const existing = item.responseId ? (treatmentsByResponse[item.responseId] ?? []) : [];
         const nowIso = new Date().toISOString();
         const summary = item.summary.trim();
         const responsible = item.responsible.trim();
         const dueDateIso = item.dueDate ? new Date(`${item.dueDate}T00:00:00`).toISOString() : null;
+        const existingTreatment = existing.find(t => t.questionId === item.questionId);
 
         const updatedTreatment: ChecklistNonConformityTreatment = {
           questionId: item.questionId,
@@ -418,67 +537,45 @@ export default function AdminNonConformitiesPage() {
           responsible: responsible || null,
           dueDate: dueDateIso,
           status: item.status,
-          createdAt: existing.find(t => t.questionId === item.questionId)?.createdAt ?? nowIso,
+          createdAt: existingTreatment?.createdAt ?? nowIso,
           updatedAt: nowIso,
         };
 
-        const nextTreatments = [
-          ...existing.filter(t => t.questionId !== item.questionId),
-          updatedTreatment,
-        ];
-
-        await updateDoc(doc(collection(firebaseDb, "inspecoes"), item.responseId), {
-          nonConformityTreatments: nextTreatments,
-          updatedAt: nowIso,
-        });
-
-        // Sincroniza o status na coleção "issues" para refletir na inspeção do mantenedor
-        if (item.machineId && item.questionId) {
-          try {
-            if (item.status === "resolved") {
-              // PCM marcou como resolvida → atualiza issue para "concluida"
-              // (mantenedor verá na próxima inspeção que foi tratada)
-              const issuesQuery = query(
-                collection(firebaseDb, "issues"),
-                where("machineId", "==", item.machineId),
-                where("templateItemId", "==", item.questionId),
-                where("status", "==", "aberta")
-              );
-              const issuesSnap = await getDocs(issuesQuery);
-              for (const issueDoc of issuesSnap.docs) {
-                await updateDoc(issueDoc.ref, {
-                  status: "concluida",
-                  concluidaEm: nowIso,
-                  concluidaPorTratativa: true,
-                });
-              }
-            } else {
-              // PCM reverteu o status → volta issue para "aberta"
-              const issuesQuery = query(
-                collection(firebaseDb, "issues"),
-                where("machineId", "==", item.machineId),
-                where("templateItemId", "==", item.questionId),
-                where("status", "==", "concluida")
-              );
-              const issuesSnap = await getDocs(issuesQuery);
-              for (const issueDoc of issuesSnap.docs) {
-                await updateDoc(issueDoc.ref, {
-                  status: "aberta",
-                });
-              }
-            }
-          } catch (syncErr) {
-            console.error("[nc-page] Falha ao sincronizar issue:", syncErr);
-          }
+        if (item.responseId) {
+          const responseId = item.responseId;
+          const nextTreatments = [
+            ...existing.filter(t => t.questionId !== item.questionId),
+            updatedTreatment,
+          ];
+          await updateDoc(doc(collection(firebaseDb, "inspecoes"), responseId), {
+            nonConformityTreatments: nextTreatments,
+            updatedAt: nowIso,
+          });
+          setTreatmentsByResponse(prev => ({ ...prev, [responseId]: nextTreatments }));
         }
 
-        setTreatmentsByResponse(prev => ({ ...prev, [item.responseId]: nextTreatments }));
+        const issueUpdatePayload: Record<string, unknown> = {
+          pcmTreatment: updatedTreatment,
+          updatedAt: nowIso,
+        };
+        if (item.status === "resolved") {
+          issueUpdatePayload.status = "concluida";
+          issueUpdatePayload.concluidaEm = nowIso;
+          issueUpdatePayload.concluidaPorTratativa = true;
+        } else {
+          issueUpdatePayload.status = "aberta";
+          issueUpdatePayload.concluidaEm = deleteField();
+          issueUpdatePayload.concluidaPorTratativa = deleteField();
+        }
+        await updateDoc(doc(collection(firebaseDb, "issues"), item.id), issueUpdatePayload);
+
         handleUpdateItem(item.id, {
           summary,
           responsible,
           dueDate: item.dueDate,
           dueDateIso,
           status: item.status,
+          issueStatus: item.status === "resolved" ? "concluida" : "aberta",
           updatedAt: nowIso,
         });
         setFeedback(prev => ({ ...prev, [item.id]: { type: "success", message: "Tratativa salva com sucesso" } }));
@@ -702,10 +799,8 @@ export default function AdminNonConformitiesPage() {
         <div className="space-y-6">
           {filteredItems.map(item => {
             const itemFeedback = feedback[item.id];
-            const issueKey = `${item.machineId}:${item.questionId}`;
-            const issueInfo = issueResolutionMap.get(issueKey);
-            const hasMaintainerResolution = issueInfo?.maintainerResolution != null;
-            const reincidenciaCount = issueInfo?.reincidenciaCount ?? 0;
+            const hasMaintainerResolution = item.maintainerResolution != null;
+            const reincidenciaCount = item.reincidenciaCount;
             const isResolutionExpanded = expandedResolutions.has(item.id);
             return (
               <article key={item.id}>
@@ -740,33 +835,33 @@ export default function AdminNonConformitiesPage() {
                               {isResolutionExpanded ? "Fechar detalhes" : "Ver detalhes da resolução do mantenedor"}
                               <span className="text-[10px]">{isResolutionExpanded ? "\u25B2" : "\u25BC"}</span>
                             </button>
-                            {isResolutionExpanded && issueInfo?.maintainerResolution && (
+                            {isResolutionExpanded && item.maintainerResolution && (
                               <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900 space-y-1">
-                                {issueInfo.maintainerResolution.resolvedAt && (
+                                {item.maintainerResolution.resolvedAt && (
                                   <p>
                                     <span className="font-semibold">Realizado em:</span>{" "}
-                                    {formatDateTime(issueInfo.maintainerResolution.resolvedAt)}
+                                    {formatDateTime(item.maintainerResolution.resolvedAt)}
                                   </p>
                                 )}
-                                {issueInfo.maintainerResolution.resolvedByName && (
+                                {item.maintainerResolution.resolvedByName && (
                                   <p>
                                     <span className="font-semibold">Mantenedor:</span>{" "}
-                                    {issueInfo.maintainerResolution.resolvedByName}
-                                    {issueInfo.maintainerResolution.resolvedByMatricula
-                                      ? ` (mat. ${issueInfo.maintainerResolution.resolvedByMatricula})`
+                                    {item.maintainerResolution.resolvedByName}
+                                    {item.maintainerResolution.resolvedByMatricula
+                                      ? ` (mat. ${item.maintainerResolution.resolvedByMatricula})`
                                       : ""}
                                   </p>
                                 )}
-                                {issueInfo.maintainerResolution.description && (
+                                {item.maintainerResolution.description && (
                                   <p>
                                     <span className="font-semibold">Descrição:</span>{" "}
-                                    {issueInfo.maintainerResolution.description}
+                                    {item.maintainerResolution.description}
                                   </p>
                                 )}
-                                {issueInfo.maintainerResolution.osNumero && (
+                                {item.maintainerResolution.osNumero && (
                                   <p>
                                     <span className="font-semibold">Nº da O.S.:</span>{" "}
-                                    {issueInfo.maintainerResolution.osNumero}
+                                    {item.maintainerResolution.osNumero}
                                   </p>
                                 )}
                               </div>
