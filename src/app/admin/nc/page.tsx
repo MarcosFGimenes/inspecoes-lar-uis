@@ -67,7 +67,7 @@ interface NonConformityItem {
   observation: string | null;
   photos: StoredImage[];
   itemOsNumero: string | null;
-  issueStatus: "aberta" | "concluida";
+  issueStatus: "aberta" | "concluida" | "resolvida";
   status: NonConformityStatus;
   summary: string;
   responsible: string;
@@ -253,7 +253,7 @@ export default function AdminNonConformitiesPage() {
       const [machinesSnap, templatesSnap, issuesSnap] = await Promise.all([
         getDocs(collection(firebaseDb, "machines")),
         getDocs(collection(firebaseDb, "templates")),
-        getDocs(query(collection(firebaseDb, "issues"), where("status", "in", ["aberta", "concluida"]))),
+        getDocs(query(collection(firebaseDb, "issues"), where("status", "in", ["aberta", "concluida", "resolvida"]))),
       ]);
 
       const machineOptions: MachineOption[] = machinesSnap.docs.map(docSnap => {
@@ -393,9 +393,15 @@ export default function AdminNonConformitiesPage() {
             ? (issueData.pcmTreatment as Record<string, unknown>)
             : null;
         const sourceTreatment = sourceInspection?.treatmentMap.get(questionId);
-        const issueStatus = issueData.status === "concluida" ? "concluida" : "aberta";
+        const issueStatus =
+          issueData.status === "resolvida"
+            ? "resolvida"
+            : issueData.status === "concluida"
+            ? "concluida"
+            : "aberta";
         const statusFromTreatment = normalizeStatus(rawIssueTreatment?.status ?? sourceTreatment?.status);
-        const status: NonConformityStatus = issueStatus === "concluida" ? "resolved" : statusFromTreatment ?? "open";
+        const status: NonConformityStatus =
+          issueStatus === "aberta" ? statusFromTreatment ?? "open" : "resolved";
 
         const summaryValue =
           typeof rawIssueTreatment?.summary === "string"
@@ -559,9 +565,12 @@ export default function AdminNonConformitiesPage() {
           updatedAt: nowIso,
         };
         if (item.status === "resolved") {
-          issueUpdatePayload.status = "concluida";
-          issueUpdatePayload.concluidaEm = nowIso;
-          issueUpdatePayload.concluidaPorTratativa = true;
+          const resolvedIssueStatus = item.issueStatus === "resolvida" ? "resolvida" : "concluida";
+          issueUpdatePayload.status = resolvedIssueStatus;
+          if (resolvedIssueStatus === "concluida") {
+            issueUpdatePayload.concluidaEm = nowIso;
+            issueUpdatePayload.concluidaPorTratativa = true;
+          }
         } else {
           issueUpdatePayload.status = "aberta";
           issueUpdatePayload.concluidaEm = deleteField();
@@ -575,7 +584,11 @@ export default function AdminNonConformitiesPage() {
           dueDate: item.dueDate,
           dueDateIso,
           status: item.status,
-          issueStatus: item.status === "resolved" ? "concluida" : "aberta",
+          issueStatus: item.status === "resolved"
+            ? item.issueStatus === "resolvida"
+              ? "resolvida"
+              : "concluida"
+            : "aberta",
           updatedAt: nowIso,
         });
         setFeedback(prev => ({ ...prev, [item.id]: { type: "success", message: "Tratativa salva com sucesso" } }));
