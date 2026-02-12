@@ -78,6 +78,8 @@ export default function AdminConfiguracoesPage() {
     setError(null);
     setSuccess(null);
     try {
+      console.log("[DEBUG FRONTEND] Enviando configuração:", JSON.stringify(isoHeaderConfig, null, 2));
+      
       const response = await fetch("/api/configuracoes/cabecalho-inspecao", {
         method: "PUT",
         headers: { "content-type": "application/json" },
@@ -88,6 +90,8 @@ export default function AdminConfiguracoesPage() {
         throw new Error(payload?.error || "Falha ao salvar configuração.");
       }
       const payload = (await response.json()) as ConfigResponse;
+      console.log("[DEBUG FRONTEND] Recebido do servidor:", JSON.stringify(payload.isoHeaderConfig, null, 2));
+      
       setIsoHeaderConfig(sanitizeIsoHeaderConfig(payload.isoHeaderConfig));
       setUpdatedAt(typeof payload.updatedAt === "string" ? payload.updatedAt : new Date().toISOString());
       setSuccess("Configuração salva com sucesso.");
