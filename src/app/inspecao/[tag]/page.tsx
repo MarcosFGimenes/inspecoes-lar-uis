@@ -29,6 +29,7 @@ type IssueRecord = {
   osNumero: string | null;
   fotos: StoredImage[];
   createdAt: string | null;
+  status: "aberta" | "concluida";
 };
 type InspectionContext = { maintainer: MaintainerInfo; machine: MachineInfo; template: TemplateInfo; openIssues: IssueRecord[] };
 
@@ -63,6 +64,7 @@ type DraftDataState = {
   assinaturaDataUrl: string | null;
   itens: DraftItemState[];
   resolveIssues: string[];
+  issueResolveDescriptions?: Record<string, string>;
   updatedAt?: string | null;
 };
 
@@ -222,6 +224,7 @@ export default function InspectionPage() {
   const [osNumero, setOsNumero] = useState("");
   const [observacoes, setObservacoes] = useState("");
   const [resolveIssues, setResolveIssues] = useState<Record<string, boolean>>({});
+  const [issueResolveDescriptions, setIssueResolveDescriptions] = useState<Record<string, string>>({});
   const [feedback, setFeedback] = useState<FeedbackState | null>(null);
   const [saving, setSaving] = useState(false);
   const [savingAction, setSavingAction] = useState<"save" | null>(null);
@@ -408,6 +411,7 @@ export default function InspectionPage() {
     setOsNumero(osBloqueado ?? "");
     setObservacoes("");
     setResolveIssues({});
+    setIssueResolveDescriptions({});
     setDraftFeedback(null);
     setLastDraftUpdatedAt(null);
     lastDraftPayloadRef.current = null;
@@ -475,6 +479,7 @@ export default function InspectionPage() {
         resolveMap[id] = true;
       });
       setResolveIssues(resolveMap);
+      setIssueResolveDescriptions(draft.issueResolveDescriptions ?? {});
       setDraftFeedback(null);
       const updatedAt = draft.updatedAt ?? null;
       setLastDraftUpdatedAt(updatedAt);
@@ -520,6 +525,7 @@ export default function InspectionPage() {
         assinaturaDataUrl: signatureValue,
         itens: normalizedItems,
         resolveIssues: validResolveIds,
+        issueResolveDescriptions: draft.issueResolveDescriptions ?? {},
         updatedAt,
       };
       lastDraftPayloadRef.current = JSON.stringify(normalizedPayload);
@@ -572,6 +578,7 @@ export default function InspectionPage() {
                 }))
               : [],
             resolveIssues: Array.isArray(draft.resolveIssues) ? draft.resolveIssues : [],
+            issueResolveDescriptions: draft.issueResolveDescriptions ?? {},
             updatedAt: draft.updatedAt ?? null,
           });
         } else {
@@ -639,6 +646,8 @@ export default function InspectionPage() {
         fotos,
       });
     });
+    // Para o rascunho, salva as descrições de resolução como estão
+    // Os resolveIssues serão computados no momento do submit (não no rascunho)
     const resolveIds = Object.entries(resolveIssues)
       .filter(([, checked]) => checked)
       .map(([id]) => id)
@@ -650,14 +659,24 @@ export default function InspectionPage() {
       limitedSignature = null; // Remove assinatura muito grande do rascunho
     }
     
+    // Salva todas as descrições de resolução no rascunho
+    const filteredDescriptions: Record<string, string> = {};
+    for (const [id, desc] of Object.entries(issueResolveDescriptions)) {
+      const trimmed = desc?.trim();
+      if (trimmed) {
+        filteredDescriptions[id] = trimmed;
+      }
+    }
+
     return {
       osNumero: normalizedOs,
       observacoes: normalizedObs,
       assinaturaDataUrl: limitedSignature,
       itens,
       resolveIssues: resolveIds,
+      issueResolveDescriptions: filteredDescriptions,
     };
-  }, [itemsState, observacoes, osNumero, resolveIssues, signatureDataUrl, sortedItems]);
+  }, [itemsState, issueResolveDescriptions, observacoes, osNumero, resolveIssues, signatureDataUrl, sortedItems]);
 
   const saveDraft = useCallback(
     async (mode: "manual" | "auto") => {
@@ -678,6 +697,7 @@ export default function InspectionPage() {
         assinaturaDataUrl: draftState.assinaturaDataUrl,
         itens: draftState.itens,
         resolveIssues: draftState.resolveIssues,
+        issueResolveDescriptions: draftState.issueResolveDescriptions ?? undefined,
       };
 
       try {
@@ -812,16 +832,6 @@ export default function InspectionPage() {
   const hasNC = useMemo(() => Object.values(itemsState).some((i) => i.resultado === "NC"), [itemsState]);
 
   // itens que têm issue aberta -> vira “alerta amarelo”
-  const templateItemsMap = useMemo(() => {
-    const map = new Map<string, TemplateItem>();
-    context?.template?.itens?.forEach(item => {
-      if (item?.id) {
-        map.set(item.id, item);
-      }
-    });
-    return map;
-  }, [context?.template?.itens]);
-
   const openIssuesByItem = useMemo(() => {
     const map = new Map<string, IssueRecord>();
     for (const issue of context?.openIssues ?? []) {
@@ -957,8 +967,8 @@ export default function InspectionPage() {
     });
   }, []);
 
-  const handleResolveIssue = useCallback((issueId: string, checked: boolean) => {
-    setResolveIssues((prev) => ({ ...prev, [issueId]: checked }));
+  const handleIssueResolveDescriptionChange = useCallback((issueId: string, value: string) => {
+    setIssueResolveDescriptions(prev => ({ ...prev, [issueId]: value }));
   }, []);
 
   const handleSignatureEnd = useCallback(() => {
@@ -1100,7 +1110,40 @@ export default function InspectionPage() {
           setSaveLocked(false);
           return;
         }
-        const resolveIds = Object.entries(resolveIssues).filter(([, c]) => c).map(([id]) => id);
+        // Computa resolveIssues automaticamente: itens com NC anterior marcados como C são resolvidos
+        const resolveIds: string[] = [];
+        const resolveDescs: Record<string, string> = {};
+        for (const item of sortedItems) {
+          if (!item.id) continue;
+          const st = itemsState[item.id];
+          if (!st || st.resultado !== "C") continue;
+          const issue = openIssuesByItem.get(item.id);
+          if (issue) {
+            resolveIds.push(issue.id);
+            const desc = issueResolveDescriptions[issue.id]?.trim();
+            if (desc) {
+              resolveDescs[issue.id] = desc;
+            }
+          }
+        }
+
+        // Valida que itens com NC anterior "aberta" marcados como C tenham descrição
+        for (const item of sortedItems) {
+          if (!item.id) continue;
+          const st = itemsState[item.id];
+          if (!st || st.resultado !== "C") continue;
+          const issue = openIssuesByItem.get(item.id);
+          if (issue && issue.status === "aberta") {
+            const desc = issueResolveDescriptions[issue.id]?.trim();
+            if (!desc) {
+              setFeedback({ type: "error", message: "Informe o que foi feito para corrigir a não conformidade anterior em todos os itens marcados como Conforme." });
+              setSaving(false);
+              setSavingAction(null);
+              setSaveLocked(false);
+              return;
+            }
+          }
+        }
 
         const normalizedOsNumero = lockedOsNumero ?? osNumero.trim().toUpperCase();
 
@@ -1114,6 +1157,7 @@ export default function InspectionPage() {
             assinaturaProfileId,
             itens: payloadItems,
             resolveIssues: resolveIds.length ? resolveIds : undefined,
+            resolveDescriptions: Object.keys(resolveDescs).length ? resolveDescs : undefined,
             programacaoId: programacaoId ?? undefined,
             programacaoBatchId: programacaoBatchId ?? undefined,
             prazoProgramado: programacaoPrazo ?? undefined,
@@ -1169,9 +1213,10 @@ export default function InspectionPage() {
     [
       context,
       itemsState,
+      issueResolveDescriptions,
       observacoes,
+      openIssuesByItem,
       osNumero,
-      resolveIssues,
       router,
       saving,
       saveLocked,
@@ -1267,88 +1312,6 @@ export default function InspectionPage() {
         )}
       </header>
 
-      {/* Não conformidades anteriores */}
-      {context && (
-        <section className="space-y-3 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="text-lg font-semibold text-gray-900">Não conformidades anteriores</h2>
-            {context.openIssues.length > 0 && (
-              <span className="rounded-full bg-red-100 px-3 py-1 text-xs font-medium text-red-700">
-                {context.openIssues.length === 1
-                  ? "1 item pendente"
-                  : `${context.openIssues.length} itens pendentes`}
-              </span>
-            )}
-          </div>
-          {context.openIssues.length === 0 ? (
-            <p className="text-sm text-gray-600">Nenhuma não conformidade aberta para esta TAG.</p>
-          ) : (
-            <div className="flex flex-col gap-3">
-              {context.openIssues.map(issue => (
-                <label
-                  key={issue.id}
-                  className="flex cursor-pointer flex-col gap-1 rounded-md border border-gray-200 bg-white p-3 text-sm text-gray-700 transition hover:border-blue-300 hover:bg-blue-50"
-                >
-                  <div className="flex items-start gap-2">
-                    <input
-                      type="checkbox"
-                      checked={!!resolveIssues[issue.id]}
-                      onChange={e => handleResolveIssue(issue.id, e.target.checked)}
-                      className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                    />
-                    <div className="flex-1 space-y-1">
-                      <p className="font-medium text-gray-800">
-                        {(() => {
-                          if (issue.templateItemId) {
-                            const itemData = templateItemsMap.get(issue.templateItemId);
-                            if (itemData) {
-                              return itemData.componente || itemData.criterio || itemData.oQueChecar || `Item ${itemData.id}`;
-                            }
-                          }
-                          return issue.descricao ?? "Item sem identificação";
-                        })()}
-                      </p>
-                      {issue.descricao && (
-                        <p className="text-sm text-gray-600">
-                          <span className="font-medium text-gray-700">Descrição:</span> {issue.descricao}
-                        </p>
-                      )}
-                      {issue.osNumero && <p className="text-xs text-gray-500">Nº da O.S.: {issue.osNumero}</p>}
-                      {issue.createdAt && (
-                        <p className="text-xs text-gray-400">Aberta em {new Date(issue.createdAt).toLocaleString("pt-BR")}</p>
-                      )}
-                      {issue.fotos?.length ? (
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          {issue.fotos.map((foto, index) => (
-                            <a
-                              key={`${issue.id}-list-foto-${index}`}
-                              href={foto.url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="block overflow-hidden rounded border border-blue-200"
-                            >
-                              <Image
-                                src={foto.url}
-                                alt={`Foto da NC anterior`}
-                                width={96}
-                                height={72}
-                                className="h-16 w-24 object-cover"
-                                unoptimized
-                              />
-                            </a>
-                          ))}
-                        </div>
-                      ) : null}
-                      <p className="text-xs text-gray-600">Marcar como resolvida nesta inspeção</p>
-                    </div>
-                  </div>
-                </label>
-              ))}
-            </div>
-          )}
-        </section>
-      )}
-
       {/* Identificação da máquina (visual novo) */}
       {context && (
         <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
@@ -1413,88 +1376,6 @@ export default function InspectionPage() {
         )}
       </section>
 
-      {/* Não conformidades anteriores */}
-      {context && (
-        <section className="space-y-3 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="text-lg font-semibold text-gray-900">Não conformidades anteriores</h2>
-            {context.openIssues.length > 0 && (
-              <span className="rounded-full bg-red-100 px-3 py-1 text-xs font-medium text-red-700">
-                {context.openIssues.length === 1
-                  ? "1 item pendente"
-                  : `${context.openIssues.length} itens pendentes`}
-              </span>
-            )}
-          </div>
-          {context.openIssues.length === 0 ? (
-            <p className="text-sm text-gray-600">Nenhuma não conformidade aberta para esta TAG.</p>
-          ) : (
-            <div className="flex flex-col gap-3">
-              {context.openIssues.map(issue => (
-                <label
-                  key={issue.id}
-                  className="flex cursor-pointer flex-col gap-1 rounded-md border border-gray-200 bg-white p-3 text-sm text-gray-700 transition hover:border-blue-300 hover:bg-blue-50"
-                >
-                  <div className="flex items-start gap-2">
-                    <input
-                      type="checkbox"
-                      checked={!!resolveIssues[issue.id]}
-                      onChange={e => handleResolveIssue(issue.id, e.target.checked)}
-                      className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                    />
-                    <div className="flex-1 space-y-1">
-                      <p className="font-medium text-gray-800">
-                        {(() => {
-                          if (issue.templateItemId) {
-                            const itemData = templateItemsMap.get(issue.templateItemId);
-                            if (itemData) {
-                              return itemData.componente || itemData.criterio || itemData.oQueChecar || `Item ${itemData.id}`;
-                            }
-                          }
-                          return issue.descricao ?? "Item sem identificação";
-                        })()}
-                      </p>
-                      {issue.descricao && (
-                        <p className="text-sm text-gray-600">
-                          <span className="font-medium text-gray-700">Descrição:</span> {issue.descricao}
-                        </p>
-                      )}
-                      {issue.osNumero && <p className="text-xs text-gray-500">Nº da O.S.: {issue.osNumero}</p>}
-                      {issue.createdAt && (
-                        <p className="text-xs text-gray-400">Aberta em {new Date(issue.createdAt).toLocaleString("pt-BR")}</p>
-                      )}
-                      {issue.fotos?.length ? (
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          {issue.fotos.map((foto, index) => (
-                            <a
-                              key={`${issue.id}-list-foto-${index}`}
-                              href={foto.url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="block overflow-hidden rounded border border-blue-200"
-                            >
-                              <Image
-                                src={foto.url}
-                                alt={`Foto da NC anterior`}
-                                width={96}
-                                height={72}
-                                className="h-16 w-24 object-cover"
-                                unoptimized
-                              />
-                            </a>
-                          ))}
-                        </div>
-                      ) : null}
-                      <p className="text-xs text-gray-600">Marcar como resolvida nesta inspeção</p>
-                    </div>
-                  </div>
-                </label>
-              ))}
-            </div>
-          )}
-        </section>
-      )}
-
       {/* Checklist – layout novo + destaque amarelo quando houver issue aberta */}
       <section className="space-y-4">
         <div>
@@ -1531,56 +1412,95 @@ export default function InspectionPage() {
                     )}
                   </header>
 
-                  {hasOpenIssue && (
-                    <div className="mt-3 space-y-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-                      <p className="font-medium">Este item possui não conformidade anterior. Avalie e informe o resultado.</p>
-                      {(() => {
-                        const issue = openIssuesByItem.get(item.id!);
-                        if (!issue) return null;
-                        const templateItem = templateItemsMap.get(item.id!);
-                        const label = templateItem?.componente || templateItem?.criterio || templateItem?.oQueChecar || `Item ${String(idx + 1).padStart(2, "0")}`;
-                        return (
-                          <div className="space-y-1 text-amber-900/90">
+                  {hasOpenIssue && (() => {
+                    const issue = openIssuesByItem.get(item.id!);
+                    if (!issue) return null;
+                    const isConcluida = issue.status === "concluida";
+                    const borderColor = isConcluida ? "border-blue-300" : "border-amber-300";
+                    const bgColor = isConcluida ? "bg-blue-50" : "bg-amber-50";
+                    const textColor = isConcluida ? "text-blue-900" : "text-amber-900";
+                    const subTextColor = isConcluida ? "text-blue-900/90" : "text-amber-900/90";
+                    const photoBorderColor = isConcluida ? "border-blue-200" : "border-amber-200";
+
+                    return (
+                      <div className={`mt-3 space-y-2 rounded-md border ${borderColor} ${bgColor} p-3 text-sm ${textColor}`}>
+                        <p className="font-medium">
+                          {isConcluida
+                            ? "A não conformidade anterior foi tratada pelo PCM. Verifique se o problema foi resolvido."
+                            : "Este item possui não conformidade anterior pendente. Avalie e informe o resultado."}
+                        </p>
+                        <div className={`space-y-1 ${subTextColor}`}>
+                          {issue.descricao && (
                             <p className="text-sm">
-                              <span className="font-semibold">Item:</span> {label}
+                              <span className="font-semibold">Descrição:</span> {issue.descricao}
                             </p>
-                            {issue.descricao && (
-                              <p className="text-sm">
-                                <span className="font-semibold">Descrição registrada:</span> {issue.descricao}
-                              </p>
-                            )}
-                            {issue.osNumero && (
-                              <p className="text-sm">
-                                <span className="font-semibold">Nº da O.S.:</span> {issue.osNumero}
-                              </p>
-                            )}
-                            {issue.fotos?.length ? (
-                              <div className="mt-2 flex flex-wrap gap-2">
-                                {issue.fotos.map((foto, fotoIdx) => (
-                                  <a
-                                    key={`${issue.id}-foto-${fotoIdx}`}
-                                    href={foto.url}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="block overflow-hidden rounded border border-amber-200"
-                                  >
-                                    <Image
-                                      src={foto.url}
-                                      alt={`Foto da NC anterior - ${label}`}
-                                      width={96}
-                                      height={72}
-                                      className="h-16 w-24 object-cover"
-                                      unoptimized
-                                    />
-                                  </a>
-                                ))}
-                              </div>
-                            ) : null}
+                          )}
+                          {issue.osNumero && (
+                            <p className="text-sm">
+                              <span className="font-semibold">Nº da O.S.:</span> {issue.osNumero}
+                            </p>
+                          )}
+                          {issue.createdAt && (
+                            <p className="text-xs opacity-70">Aberta em {new Date(issue.createdAt).toLocaleString("pt-BR")}</p>
+                          )}
+                          {issue.fotos?.length ? (
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              {issue.fotos.map((foto, fotoIdx) => (
+                                <a
+                                  key={`${issue.id}-foto-${fotoIdx}`}
+                                  href={foto.url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className={`block overflow-hidden rounded border ${photoBorderColor}`}
+                                >
+                                  <Image
+                                    src={foto.url}
+                                    alt={`Foto da NC anterior`}
+                                    width={96}
+                                    height={72}
+                                    className="h-16 w-24 object-cover"
+                                    unoptimized
+                                  />
+                                </a>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+
+                        {/* Orientação baseada no resultado selecionado */}
+                        {st?.resultado === "C" && !isConcluida && (
+                          <div className="mt-2 space-y-1">
+                            <label className="block text-sm font-medium" htmlFor={`resolve-desc-${issue.id}`}>
+                              Descreva brevemente o que foi feito para corrigir:
+                            </label>
+                            <textarea
+                              id={`resolve-desc-${issue.id}`}
+                              value={issueResolveDescriptions[issue.id] ?? ""}
+                              onChange={e => handleIssueResolveDescriptionChange(issue.id, e.target.value)}
+                              rows={2}
+                              placeholder="Ex: Troca de vedação, ajuste de parafusos..."
+                              className="w-full rounded-md border border-amber-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-amber-500 focus:ring-2 focus:ring-amber-200"
+                            />
                           </div>
-                        );
-                      })()}
-                    </div>
-                  )}
+                        )}
+                        {st?.resultado === "C" && isConcluida && (
+                          <p className="mt-1 text-xs font-medium text-emerald-700">
+                            Marcado como conforme - a não conformidade será encerrada.
+                          </p>
+                        )}
+                        {st?.resultado === "NC" && !isConcluida && (
+                          <p className="mt-1 text-xs font-medium text-amber-800">
+                            Marcado como não conforme - o item permanece pendente para o PCM.
+                          </p>
+                        )}
+                        {st?.resultado === "NC" && isConcluida && (
+                          <p className="mt-1 text-xs font-medium text-red-700">
+                            Marcado como não conforme - será criada uma nova tratativa para o PCM.
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })()}
 
                   <div className="mt-3 grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
                     {/* Resultado (botões) */}

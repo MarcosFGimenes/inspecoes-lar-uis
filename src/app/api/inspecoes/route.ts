@@ -36,6 +36,7 @@ const payloadSchema = z.object({
     )
     .min(1),
   resolveIssues: z.array(z.string().trim().min(1)).optional(),
+  resolveDescriptions: z.record(z.string(), z.string().trim()).optional(),
 });
 
 type Payload = z.infer<typeof payloadSchema>;
@@ -313,7 +314,7 @@ export async function POST(req: NextRequest) {
     const openIssuesSnap = await adminDb
       .collection("issues")
       .where("machineId", "==", machineRecord.id)
-      .where("status", "==", "aberta")
+      .where("status", "in", ["aberta", "concluida"])
       .get();
 
     const openIssuesByTemplate = new Map<string, QueryDocumentSnapshot<DocumentData>>();
@@ -330,6 +331,7 @@ export async function POST(req: NextRequest) {
 
     const osNumero = osNumeroFinal;
     const observacoes = payload.observacoes?.trim() ? payload.observacoes.trim() : null;
+    const resolveDescriptions = payload.resolveDescriptions ?? {};
 
     for (const item of itensPayload) {
       if (item.resultado !== "NC") {
@@ -337,19 +339,49 @@ export async function POST(req: NextRequest) {
       }
       const existingIssue = openIssuesByTemplate.get(item.templateItemId);
       if (existingIssue) {
-        const issueUpdates: Record<string, unknown> = {};
-        if (item.osNumeroItem && existingIssue.data()?.osNumero !== item.osNumeroItem) {
-          issueUpdates.osNumero = item.osNumeroItem;
-        }
-        if (item.fotos.length > 0) {
-          issueUpdates.fotos = item.fotos;
-        }
-        const novaDescricao = item.observacaoItem?.trim();
-        if (novaDescricao && existingIssue.data()?.descricao !== novaDescricao) {
-          issueUpdates.descricao = novaDescricao;
-        }
-        if (Object.keys(issueUpdates).length > 0) {
-          await existingIssue.ref.update(issueUpdates);
+        const issueData = existingIssue.data() ?? {};
+
+        if (issueData.status === "concluida") {
+          // PCM tratou mas problema persiste → resolver antiga + criar nova
+          await existingIssue.ref.update({
+            status: "resolvida",
+            resolvedAt: nowIso,
+            resolvidaEmInspecaoId: inspectionId,
+          });
+          issuesResolvidas.push(existingIssue.id);
+
+          const templateItem = templateMap.get(item.templateItemId) ?? {};
+          const descricao = item.observacaoItem || buildIssueDescription(templateItem, "NC identificada na inspeção - problema persiste após tratativa do PCM");
+          const issueRef = adminDb.collection("issues").doc();
+          await issueRef.set({
+            machineId: machineRecord.id,
+            tag: machineRecord.tag ?? null,
+            templateItemId: item.templateItemId,
+            descricao,
+            osNumero: item.osNumeroItem ?? null,
+            fotos: item.fotos,
+            status: "aberta",
+            abertaEmInspecaoId: inspectionId,
+            createdAt: nowIso,
+            reabertaDe: existingIssue.id,
+          });
+          issuesCriadas.push(issueRef.id);
+        } else {
+          // Status "aberta" → apenas atualiza a issue existente (não cria nova)
+          const issueUpdates: Record<string, unknown> = {};
+          if (item.osNumeroItem && issueData.osNumero !== item.osNumeroItem) {
+            issueUpdates.osNumero = item.osNumeroItem;
+          }
+          if (item.fotos.length > 0) {
+            issueUpdates.fotos = item.fotos;
+          }
+          const novaDescricao = item.observacaoItem?.trim();
+          if (novaDescricao && issueData.descricao !== novaDescricao) {
+            issueUpdates.descricao = novaDescricao;
+          }
+          if (Object.keys(issueUpdates).length > 0) {
+            await existingIssue.ref.update(issueUpdates);
+          }
         }
         continue;
       }
@@ -387,11 +419,16 @@ export async function POST(req: NextRequest) {
           if (data.machineId !== machineRecord.id || data.status === "resolvida") {
             continue;
           }
-          await doc.ref.update({
+          const description = resolveDescriptions[doc.id] ?? null;
+          const resolveUpdate: Record<string, unknown> = {
             status: "resolvida",
             resolvedAt: nowIso,
             resolvidaEmInspecaoId: inspectionId,
-          });
+          };
+          if (description) {
+            resolveUpdate.resolvedDescription = description;
+          }
+          await doc.ref.update(resolveUpdate);
           issuesResolvidas.push(doc.id);
         }
       }

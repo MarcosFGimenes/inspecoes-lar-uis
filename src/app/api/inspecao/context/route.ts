@@ -64,7 +64,7 @@ export async function GET(req: NextRequest) {
     const issuesSnap = await adminDb
       .collection("issues")
       .where("machineId", "==", machineRecord.id)
-      .where("status", "==", "aberta")
+      .where("status", "in", ["aberta", "concluida"])
       .get();
 
     const openIssues = issuesSnap.docs.map(doc => {
@@ -76,6 +76,7 @@ export async function GET(req: NextRequest) {
         osNumero: data.osNumero ?? null,
         fotos: normalizeStoredImages(data.fotos ?? []),
         createdAt: data.createdAt ?? null,
+        status: data.status === "concluida" ? "concluida" : "aberta",
       };
     });
 

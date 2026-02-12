@@ -30,6 +30,7 @@ const payloadSchema = z.object({
   assinaturaDataUrl: z.string().trim().max(200_000).nullable().optional(),
   itens: z.array(itemSchema).optional(),
   resolveIssues: z.array(z.string().trim().min(1)).optional(),
+  issueResolveDescriptions: z.record(z.string(), z.string().trim().max(2000)).optional(),
 });
 
 function ensureDataUrl(value: string | null | undefined) {
@@ -190,6 +191,14 @@ export async function GET(_req: NextRequest, context: RouteContext) {
   const resolveIssues = Array.isArray(data.resolveIssues)
     ? (data.resolveIssues as unknown[]).filter((value): value is string => typeof value === "string" && value.trim().length > 0)
     : [];
+  const issueResolveDescriptions: Record<string, string> =
+    data.issueResolveDescriptions && typeof data.issueResolveDescriptions === "object"
+      ? Object.fromEntries(
+          Object.entries(data.issueResolveDescriptions as Record<string, unknown>)
+            .filter(([, v]) => typeof v === "string" && (v as string).trim().length > 0)
+            .map(([k, v]) => [k, String(v).trim()])
+        )
+      : {};
   const itens = resolved.templateItems
     .filter(item => item?.id)
     .map(item => {
@@ -222,6 +231,7 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       progressPercent: percent,
       updatedAt: coerceString(data.updatedAt),
       resolveIssues,
+      issueResolveDescriptions,
     },
   });
 }
@@ -259,6 +269,7 @@ export async function PUT(req: NextRequest, context: RouteContext) {
   const resolveIssuesIds = Array.isArray(payload.resolveIssues)
     ? payload.resolveIssues.filter(id => typeof id === "string" && id.trim().length > 0)
     : [];
+  const issueResolveDescriptions: Record<string, string> = payload.issueResolveDescriptions ?? {};
   const itensMap: Record<string, { resultado: string; observacao: string | null; osNumero: string | null; fotos: DraftFoto[] }> = {};
 
   let answered = 0;
@@ -303,6 +314,7 @@ export async function PUT(req: NextRequest, context: RouteContext) {
     updatedAt: nowIso,
     createdAt,
     resolveIssues: resolveIssuesIds,
+    issueResolveDescriptions,
   };
 
   await draftRef.set(payloadToSave, { merge: false });
@@ -324,6 +336,7 @@ export async function PUT(req: NextRequest, context: RouteContext) {
       progressPercent: percent,
       updatedAt: nowIso,
       resolveIssues: resolveIssuesIds,
+      issueResolveDescriptions,
     },
   });
 }
