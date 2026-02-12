@@ -49,22 +49,23 @@ export async function PUT(req: NextRequest) {
   const updatedAt = new Date().toISOString();
 
   try {
-    await adminDb
-      .collection(COLLECTION)
-      .doc(DOC_ID)
-      .set(
-        {
-          isoHeaderConfig,
-          updatedAt,
-          type: "cabecalho_inspecao",
-        },
-        { merge: true }
-      );
+    const docRef = adminDb.collection(COLLECTION).doc(DOC_ID);
+    await docRef.set(
+      {
+        isoHeaderConfig,
+        updatedAt,
+        type: "cabecalho_inspecao",
+      },
+      { merge: true }
+    );
+
+    const savedSnap = await docRef.get();
+    const savedData = savedSnap.data() ?? {};
 
     return NextResponse.json({
       ok: true,
-      isoHeaderConfig,
-      updatedAt,
+      isoHeaderConfig: sanitizeIsoHeaderConfig(savedData.isoHeaderConfig),
+      updatedAt: typeof savedData.updatedAt === "string" ? savedData.updatedAt : updatedAt,
     });
   } catch (error: unknown) {
     const message = error instanceof Error && error.message ? error.message : "INTERNAL_ERROR";
