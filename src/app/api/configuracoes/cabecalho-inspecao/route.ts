@@ -45,17 +45,12 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ error: "INVALID_PAYLOAD" }, { status: 422 });
   }
 
-  console.log("[DEBUG] Dados recebidos no PUT:", JSON.stringify(body?.isoHeaderConfig, null, 2));
-
   const isoHeaderConfig = sanitizeIsoHeaderConfig(body?.isoHeaderConfig);
   const updatedAt = new Date().toISOString();
-
-  console.log("[DEBUG] Dados após sanitização:", JSON.stringify(isoHeaderConfig, null, 2));
 
   try {
     const docRef = adminDb.collection(COLLECTION).doc(DOC_ID);
     
-    console.log("[DEBUG] Salvando no Firestore...");
     await docRef.set(
       {
         isoHeaderConfig,
@@ -64,8 +59,6 @@ export async function PUT(req: NextRequest) {
       },
       { merge: true }
     );
-
-    console.log("[DEBUG] Dados salvos com sucesso");
 
     // Retornar diretamente os dados sanitizados que foram salvos
     // Não ler de volta do Firestore para evitar problemas de serialização
@@ -76,7 +69,6 @@ export async function PUT(req: NextRequest) {
     });
   } catch (error: unknown) {
     const message = error instanceof Error && error.message ? error.message : "INTERNAL_ERROR";
-    console.error("[DEBUG] Erro ao salvar:", error);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
