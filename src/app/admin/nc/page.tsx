@@ -315,6 +315,28 @@ export default function AdminNonConformitiesPage() {
           });
       });
 
+      // Deduplica: para cada máquina+questão, mantém apenas 1 item
+      // Prioriza o item que possui tratativa preenchida (summary/responsible/dueDate)
+      const dedupeMap = new Map<string, NonConformityItem>();
+      const dedupeResponseMap = new Map<string, string>(); // chave → responseId da entrada mantida
+      for (const item of builtItems) {
+        const key = `${item.machineId}:${item.questionId}`;
+        const existing = dedupeMap.get(key);
+        if (!existing) {
+          dedupeMap.set(key, item);
+          dedupeResponseMap.set(key, item.responseId);
+          continue;
+        }
+        // Mantém o item que tem tratativa mais completa
+        const existingHasWork = !!(existing.summary.trim() || existing.responsible.trim() || existing.dueDate || existing.status !== "open");
+        const currentHasWork = !!(item.summary.trim() || item.responsible.trim() || item.dueDate || item.status !== "open");
+        if (!existingHasWork && currentHasWork) {
+          dedupeMap.set(key, item);
+          dedupeResponseMap.set(key, item.responseId);
+        }
+      }
+      const dedupedItems = Array.from(dedupeMap.values());
+
       // Monta mapa de resoluções do mantenedor a partir das issues
       const resolutionMap = new Map<string, IssueResolutionInfo>();
       issuesSnap.docs.forEach(issueDoc => {
@@ -343,7 +365,7 @@ export default function AdminNonConformitiesPage() {
 
       setIssueResolutionMap(resolutionMap);
       setMachines(machineOptions);
-      setItems(builtItems);
+      setItems(dedupedItems);
       setTreatmentsByResponse(treatmentsRecord);
     } catch (err: unknown) {
       const message = err instanceof Error && err.message ? err.message : "Erro ao carregar dados";
