@@ -37,6 +37,10 @@ const payloadSchema = z.object({
     .min(1),
   resolveIssues: z.array(z.string().trim().min(1)).optional(),
   resolveDescriptions: z.record(z.string(), z.string().trim()).optional(),
+  maintainerResolutions: z.array(z.object({
+    issueId: z.string().trim().min(1),
+    description: z.string().trim().min(1),
+  })).optional(),
 });
 
 type Payload = z.infer<typeof payloadSchema>;
@@ -430,6 +434,40 @@ export async function POST(req: NextRequest) {
           }
           await doc.ref.update(resolveUpdate);
           issuesResolvidas.push(doc.id);
+        }
+      }
+    }
+
+    // Registra resolução do mantenedor em issues "aberta" (não resolve, só marca como realizado)
+    const maintainerResolutions = payload.maintainerResolutions ?? [];
+    if (maintainerResolutions.length > 0) {
+      const resolutionChunks: Array<{ issueId: string; description: string }>[] = [];
+      for (let i = 0; i < maintainerResolutions.length; i += 10) {
+        resolutionChunks.push(maintainerResolutions.slice(i, i + 10));
+      }
+      for (const chunk of resolutionChunks) {
+        const chunkIds = chunk.map(r => r.issueId);
+        const snap = await adminDb
+          .collection("issues")
+          .where(FieldPath.documentId(), "in", chunkIds)
+          .get();
+        for (const docSnap of snap.docs) {
+          const data = docSnap.data() ?? {};
+          if (data.machineId !== machineRecord.id || data.status !== "aberta") {
+            continue;
+          }
+          const resolution = chunk.find(r => r.issueId === docSnap.id);
+          if (!resolution) continue;
+          await docSnap.ref.update({
+            maintainerResolution: {
+              resolvedAt: nowIso,
+              resolvedByName: auth.store.nome ?? null,
+              resolvedByMatricula: auth.store.matricula ?? null,
+              description: resolution.description,
+              osNumero: osNumeroFinal ?? null,
+              inspecaoId: inspectionId,
+            },
+          });
         }
       }
     }

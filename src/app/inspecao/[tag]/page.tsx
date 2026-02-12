@@ -22,6 +22,11 @@ type TemplateItem = {
   criterio?: string | null; oQueFazer?: string | null; imagemItemUrl?: string | null; ordem?: number | null;
 };
 type TemplateInfo = { id: string; nome: string | null; imagemUrl?: string | null; itens: TemplateItem[] };
+type MaintainerResolution = {
+  resolvedAt: string | null;
+  description: string | null;
+  resolvedByName: string | null;
+};
 type IssueRecord = {
   id: string;
   templateItemId: string | null;
@@ -30,6 +35,7 @@ type IssueRecord = {
   fotos: StoredImage[];
   createdAt: string | null;
   status: "aberta" | "concluida";
+  maintainerResolution?: MaintainerResolution | null;
 };
 type InspectionContext = { maintainer: MaintainerInfo; machine: MachineInfo; template: TemplateInfo; openIssues: IssueRecord[] };
 
@@ -1110,30 +1116,24 @@ export default function InspectionPage() {
           setSaveLocked(false);
           return;
         }
-        // Computa resolveIssues automaticamente: itens com NC anterior marcados como C são resolvidos
+        // Separa a lógica de resolução:
+        // - "concluida" (PCM tratou) + C → resolve issue definitivamente
+        // - "aberta" + C → registra resolução do mantenedor (não resolve, fica pendente pro PCM)
         const resolveIds: string[] = [];
         const resolveDescs: Record<string, string> = {};
+        const maintainerResolutionsPayload: Array<{ issueId: string; description: string }> = [];
         for (const item of sortedItems) {
           if (!item.id) continue;
           const st = itemsState[item.id];
           if (!st || st.resultado !== "C") continue;
           const issue = openIssuesByItem.get(item.id);
-          if (issue) {
-            resolveIds.push(issue.id);
-            const desc = issueResolveDescriptions[issue.id]?.trim();
-            if (desc) {
-              resolveDescs[issue.id] = desc;
-            }
-          }
-        }
+          if (!issue) continue;
 
-        // Valida que itens com NC anterior "aberta" marcados como C tenham descrição
-        for (const item of sortedItems) {
-          if (!item.id) continue;
-          const st = itemsState[item.id];
-          if (!st || st.resultado !== "C") continue;
-          const issue = openIssuesByItem.get(item.id);
-          if (issue && issue.status === "aberta") {
+          if (issue.status === "concluida") {
+            // PCM já tratou → resolver definitivamente
+            resolveIds.push(issue.id);
+          } else {
+            // Status "aberta" → registra que o mantenedor resolveu, mas NÃO fecha a issue
             const desc = issueResolveDescriptions[issue.id]?.trim();
             if (!desc) {
               setFeedback({ type: "error", message: "Informe o que foi feito para corrigir a não conformidade anterior em todos os itens marcados como Conforme." });
@@ -1142,6 +1142,7 @@ export default function InspectionPage() {
               setSaveLocked(false);
               return;
             }
+            maintainerResolutionsPayload.push({ issueId: issue.id, description: desc });
           }
         }
 
@@ -1158,6 +1159,7 @@ export default function InspectionPage() {
             itens: payloadItems,
             resolveIssues: resolveIds.length ? resolveIds : undefined,
             resolveDescriptions: Object.keys(resolveDescs).length ? resolveDescs : undefined,
+            maintainerResolutions: maintainerResolutionsPayload.length ? maintainerResolutionsPayload : undefined,
             programacaoId: programacaoId ?? undefined,
             programacaoBatchId: programacaoBatchId ?? undefined,
             prazoProgramado: programacaoPrazo ?? undefined,
@@ -1422,6 +1424,8 @@ export default function InspectionPage() {
                     const subTextColor = isConcluida ? "text-blue-900/90" : "text-amber-900/90";
                     const photoBorderColor = isConcluida ? "border-blue-200" : "border-amber-200";
 
+                    const hasPriorResolution = !isConcluida && issue.maintainerResolution?.resolvedAt;
+
                     return (
                       <div className={`mt-3 space-y-2 rounded-md border ${borderColor} ${bgColor} p-3 text-sm ${textColor}`}>
                         <p className="font-medium">
@@ -1429,6 +1433,18 @@ export default function InspectionPage() {
                             ? "A não conformidade anterior foi tratada pelo PCM. Verifique se o problema foi resolvido."
                             : "Este item possui não conformidade anterior pendente. Avalie e informe o resultado."}
                         </p>
+
+                        {/* Nota: mantenedor já registrou resolução anterior */}
+                        {hasPriorResolution && (
+                          <div className="rounded border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                            <p className="font-medium">Você já informou a resolução deste item em {new Date(issue.maintainerResolution!.resolvedAt!).toLocaleString("pt-BR")}.</p>
+                            {issue.maintainerResolution?.description && (
+                              <p className="mt-0.5">Descrição anterior: {issue.maintainerResolution.description}</p>
+                            )}
+                            <p className="mt-0.5 opacity-80">A NC permanece aberta até o PCM confirmar.</p>
+                          </div>
+                        )}
+
                         <div className={`space-y-1 ${subTextColor}`}>
                           {issue.descricao && (
                             <p className="text-sm">
@@ -1481,6 +1497,9 @@ export default function InspectionPage() {
                               placeholder="Ex: Troca de vedação, ajuste de parafusos..."
                               className="w-full rounded-md border border-amber-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-amber-500 focus:ring-2 focus:ring-amber-200"
                             />
+                            <p className="text-xs text-amber-700 opacity-80">
+                              A NC permanecerá visível até o PCM confirmar a resolução.
+                            </p>
                           </div>
                         )}
                         {st?.resultado === "C" && isConcluida && (
