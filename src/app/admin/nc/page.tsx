@@ -315,26 +315,20 @@ export default function AdminNonConformitiesPage() {
           });
       });
 
-      // Deduplica: para cada máquina+questão, mantém apenas 1 item
-      // Prioridade: itens ativos (open/in_progress) > resolvidos
-      // Entre itens de mesma prioridade, quem tem tratativa preenchida vence
+      // Deduplica por máquina+questão+ciclo:
+      // - Múltiplas "open"/"in_progress" do mesmo item → 1 entrada ativa
+      // - Múltiplas "resolved" do mesmo item → 1 entrada resolvida
+      // - "open" + "resolved" do mesmo item → 2 entradas separadas (histórico + nova)
       const dedupeMap = new Map<string, NonConformityItem>();
       for (const item of builtItems) {
-        const key = `${item.machineId}:${item.questionId}`;
+        const cycle = item.status === "resolved" ? "resolved" : "active";
+        const key = `${item.machineId}:${item.questionId}:${cycle}`;
         const existing = dedupeMap.get(key);
         if (!existing) {
           dedupeMap.set(key, item);
           continue;
         }
-        const existingIsActive = existing.status !== "resolved";
-        const currentIsActive = item.status !== "resolved";
-        // Itens ativos têm prioridade sobre resolvidos
-        if (existingIsActive && !currentIsActive) continue;
-        if (!existingIsActive && currentIsActive) {
-          dedupeMap.set(key, item);
-          continue;
-        }
-        // Mesma categoria: quem tem tratativa preenchida vence
+        // Dentro do mesmo ciclo: quem tem tratativa preenchida vence
         const existingHasWork = !!(existing.summary.trim() || existing.responsible.trim() || existing.dueDate);
         const currentHasWork = !!(item.summary.trim() || item.responsible.trim() || item.dueDate);
         if (!existingHasWork && currentHasWork) {
