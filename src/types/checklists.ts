@@ -88,7 +88,6 @@ export interface ChecklistResponse {
     matricula?: string | null;
     assinaturaUrl?: string | null;
     signedAt?: string | null;
-    isoHeaderConfig?: InspectionIsoHeaderConfig | null;
   } | null;
   createdAt?: string | null;
   updatedAt?: string | null;

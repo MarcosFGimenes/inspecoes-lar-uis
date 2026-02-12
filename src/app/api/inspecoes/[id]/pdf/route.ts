@@ -111,6 +111,11 @@ export async function GET(_req: NextRequest, context: RouteContext) {
     const machine = inspectionData.machine ?? {};
     const template = inspectionData.template ?? {};
     const pcmSign = (inspectionData.pcmSign ?? {}) as Record<string, unknown>;
+    const headerConfigSnap = await adminDb
+      .collection("config_inspecao")
+      .doc("cabecalho_iso_global")
+      .get();
+    const headerConfigData = headerConfigSnap.data() ?? {};
     const itens: Array<{ templateItemId: string; resultado: string; observacaoItem?: string | null }> = Array.isArray(
       inspectionData.itens
     )
@@ -207,7 +212,7 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       dataHoraISO: inspectionDate ? inspectionDate.toISOString() : undefined,
       lac,
       local: machineLocalRaw,
-      isoHeaderConfig: sanitizeIsoHeaderConfig(pcmSign.isoHeaderConfig),
+      isoHeaderConfig: sanitizeIsoHeaderConfig(headerConfigData.isoHeaderConfig),
     };
 
     const { topHeightMm } = drawLarHeader(doc, headerData);

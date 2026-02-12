@@ -4,7 +4,6 @@ import { adminDb } from "@/lib/firebase-admin";
 import { requireAdminFromRequest } from "@/lib/guards";
 import { buildPcmProfileId } from "@/lib/signature-profiles";
 import { normalizeName } from "@/lib/string-utils";
-import { sanitizeIsoHeaderConfig } from "@/lib/iso-header-config";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,7 +13,6 @@ const upsertSchema = z.object({
   matricula: z.string().trim().min(1),
   assinaturaUrl: z.string().url().optional(),
   saveSignature: z.boolean().optional(),
-  isoHeaderConfig: z.unknown().optional(),
 });
 
 type UpsertPayload = z.infer<typeof upsertSchema>;
@@ -25,7 +23,6 @@ function serializeProfile(docId: string, data: Record<string, unknown>) {
     nome: typeof data.nome === "string" ? data.nome : null,
     matricula: typeof data.matricula === "string" ? data.matricula : null,
     assinaturaUrl: typeof data.assinaturaUrl === "string" ? data.assinaturaUrl : null,
-    isoHeaderConfig: sanitizeIsoHeaderConfig(data.isoHeaderConfig),
   };
 }
 
@@ -83,7 +80,6 @@ export async function POST(req: NextRequest) {
   const now = new Date().toISOString();
   const saveSignature = payload.saveSignature === true;
   const assinaturaUrl = typeof payload.assinaturaUrl === "string" ? payload.assinaturaUrl : undefined;
-  const isoHeaderConfig = sanitizeIsoHeaderConfig(payload.isoHeaderConfig);
 
   try {
     const docRef = adminDb.collection("assinaturas").doc(profileId);
@@ -96,7 +92,6 @@ export async function POST(req: NextRequest) {
         nomeNormalized: normalizeName(payload.nome),
         matricula: payload.matricula,
         assinaturaUrl: saveSignature && assinaturaUrl ? assinaturaUrl : null,
-        isoHeaderConfig,
         createdAt: now,
         updatedAt: now,
       };
@@ -114,7 +109,6 @@ export async function POST(req: NextRequest) {
       nome: payload.nome,
       nomeNormalized: normalizeName(payload.nome),
       matricula: payload.matricula,
-      isoHeaderConfig,
       updatedAt: now,
     };
 

@@ -59,6 +59,11 @@ const navItems: AdminNavItem[] = [
     label: "Mantenedores",
     icon: "fas fa-users-cog",
   },
+  {
+    href: "/admin/configuracoes",
+    label: "Configurações",
+    icon: "fas fa-gear",
+  },
 ];
 
 const programacaoSubnav: AdminNavItem[] = [

@@ -13,10 +13,8 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select } from "@/components/ui/select";
 import SignatureCanvas, { SignatureCanvasInstance } from "@/components/signature-canvas-client";
-import { IsoHeaderConfigEditor } from "@/components/pcm/iso-header-config-editor";
 import { cn } from "@/lib/cn";
-import { createDefaultIsoHeaderConfig, sanitizeIsoHeaderConfig } from "@/lib/iso-header-config";
-import type { ChecklistAnswer, ChecklistResponse, InspectionIsoHeaderConfig } from "@/types";
+import type { ChecklistAnswer, ChecklistResponse } from "@/types";
 import { normalizeStoredImages } from "@/lib/storage/images";
 
 interface PendingSignInspection {
@@ -44,7 +42,6 @@ interface PcmProfileOption {
   nome: string | null;
   matricula: string | null;
   assinaturaUrl: string | null;
-  isoHeaderConfig?: InspectionIsoHeaderConfig | null;
 }
 
 interface InspectionDetailData {
@@ -70,8 +67,6 @@ interface SignatureModalProps {
   onSignatureModeChange(mode: "saved" | "new"): void;
   saveSignatureChoice: boolean;
   onSaveSignatureChoiceChange(value: boolean): void;
-  isoHeaderConfig: InspectionIsoHeaderConfig;
-  onIsoHeaderConfigChange(value: InspectionIsoHeaderConfig): void;
   loading: boolean;
   error: string | null;
   canvasRef: RefObject<SignatureCanvasInstance | null>;
@@ -90,7 +85,6 @@ type PcmSignResponse = {
     cargo?: string | null;
     matricula?: string | null;
     assinaturaUrl?: string | null;
-    isoHeaderConfig?: InspectionIsoHeaderConfig | null;
   };
 };
 
@@ -141,8 +135,6 @@ function SignatureModal({
   onSignatureModeChange,
   saveSignatureChoice,
   onSaveSignatureChoiceChange,
-  isoHeaderConfig,
-  onIsoHeaderConfigChange,
   loading,
   error,
   canvasRef,
@@ -473,15 +465,6 @@ function SignatureModal({
             {error && <p className="text-sm text-[var(--danger)]">{error}</p>}
           </section>
 
-          <section className="space-y-4">
-            <h3 className="text-base font-semibold text-[var(--text)]">Cabecalho ISO</h3>
-            <IsoHeaderConfigEditor
-              value={isoHeaderConfig}
-              onChange={onIsoHeaderConfigChange}
-              disabled={loading || detailLoading}
-            />
-          </section>
-
           <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
             <Button type="button" variant="ghost" onClick={onClose} disabled={loading}>
               Cancelar
@@ -516,9 +499,6 @@ export default function PendingSignaturesPage() {
   const [selectedProfileId, setSelectedProfileId] = useState<string>("new");
   const [signatureMode, setSignatureMode] = useState<"saved" | "new">("new");
   const [saveSignatureChoice, setSaveSignatureChoice] = useState(false);
-  const [isoHeaderConfig, setIsoHeaderConfig] = useState<InspectionIsoHeaderConfig>(() =>
-    createDefaultIsoHeaderConfig()
-  );
   const [maintainers, setMaintainers] = useState<MaintainerOption[]>([]);
   const [maintainerFilter, setMaintainerFilter] = useState<string>("all");
   const [pcmProfiles, setPcmProfiles] = useState<PcmProfileOption[]>([]);
@@ -542,12 +522,7 @@ export default function PendingSignaturesPage() {
       }
       const data = (await response.json()) as PcmProfileOption[];
       if (Array.isArray(data)) {
-        setPcmProfiles(
-          data.map(profile => ({
-            ...profile,
-            isoHeaderConfig: sanitizeIsoHeaderConfig(profile.isoHeaderConfig),
-          }))
-        );
+        setPcmProfiles(data);
       }
     } catch (err) {
       console.error("[pcm-profiles] failed to load", err);
@@ -750,7 +725,6 @@ export default function PendingSignaturesPage() {
       setSelectedProfileId("new");
       setSignatureMode("new");
       setSaveSignatureChoice(false);
-      setIsoHeaderConfig(createDefaultIsoHeaderConfig());
       setModalError(null);
       setDetail(null);
       setDetailError(null);
@@ -769,7 +743,6 @@ export default function PendingSignaturesPage() {
     setSelectedProfileId("new");
     setSignatureMode("new");
     setSaveSignatureChoice(false);
-    setIsoHeaderConfig(createDefaultIsoHeaderConfig());
     setModalError(null);
     setDetail(null);
     setDetailError(null);
@@ -804,7 +777,6 @@ export default function PendingSignaturesPage() {
         setMatricula("");
         setSignatureMode("new");
         setSaveSignatureChoice(false);
-        setIsoHeaderConfig(createDefaultIsoHeaderConfig());
         setTimeout(() => signatureRef.current?.clear(), 0);
         return;
       }
@@ -813,7 +785,6 @@ export default function PendingSignaturesPage() {
       setMatricula(profile?.matricula ? profile.matricula.toUpperCase() : "");
       setSignatureMode(profile?.assinaturaUrl ? "saved" : "new");
       setSaveSignatureChoice(false);
-      setIsoHeaderConfig(sanitizeIsoHeaderConfig(profile?.isoHeaderConfig));
       setTimeout(() => signatureRef.current?.clear(), 0);
     },
     [pcmProfiles]
@@ -880,7 +851,6 @@ export default function PendingSignaturesPage() {
         nome: trimmedName,
         cargo: trimmedCargo ? trimmedCargo : undefined,
         matricula: normalizedMatricula,
-        isoHeaderConfig,
       };
 
       if (assinaturaProfileId) {
@@ -917,7 +887,6 @@ export default function PendingSignaturesPage() {
           nome: trimmedName,
           matricula: normalizedMatricula,
           saveSignature: shouldSaveSignature,
-          isoHeaderConfig,
         };
         const resolvedSignatureUrl =
           signatureMode === "saved"
@@ -934,11 +903,7 @@ export default function PendingSignaturesPage() {
           body: JSON.stringify(profilePayload),
         });
         if (upsertResponse.ok) {
-          const updatedProfileRaw = (await upsertResponse.json()) as PcmProfileOption;
-          const updatedProfile = {
-            ...updatedProfileRaw,
-            isoHeaderConfig: sanitizeIsoHeaderConfig(updatedProfileRaw.isoHeaderConfig),
-          };
+          const updatedProfile = (await upsertResponse.json()) as PcmProfileOption;
           setPcmProfiles(prev => {
             const list = prev.filter(item => item.id !== updatedProfile.id);
             return [...list, updatedProfile];
@@ -979,7 +944,6 @@ export default function PendingSignaturesPage() {
     broadcastRef,
     cargo,
     closeModal,
-    isoHeaderConfig,
     matricula,
     nome,
     pcmProfiles,
@@ -1229,8 +1193,6 @@ export default function PendingSignaturesPage() {
         onSignatureModeChange={setSignatureMode}
         saveSignatureChoice={saveSignatureChoice}
         onSaveSignatureChoiceChange={setSaveSignatureChoice}
-        isoHeaderConfig={isoHeaderConfig}
-        onIsoHeaderConfigChange={value => setIsoHeaderConfig(sanitizeIsoHeaderConfig(value))}
         loading={modalLoading}
         error={modalError}
         canvasRef={signatureRef}
