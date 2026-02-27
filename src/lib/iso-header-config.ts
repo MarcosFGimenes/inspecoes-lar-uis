@@ -59,6 +59,13 @@ const DEFAULT_CONFIG: InspectionIsoHeaderConfig = {
   },
 };
 
+const STYLE_LOCKED_FIELDS: ReadonlySet<keyof InspectionIsoHeaderConfig> = new Set([
+  "foNumero",
+  "emissao",
+  "revisao",
+  "revisaoNumero",
+]);
+
 function cloneTextSegment(segment: IsoHeaderTextSegment): IsoHeaderTextSegment {
   return {
     text: segment.text,
@@ -248,6 +255,26 @@ function sanitizeField(raw: unknown, fallback: IsoHeaderFieldConfig): IsoHeaderF
   };
 }
 
+function lockFieldVisualStyle(field: IsoHeaderFieldConfig): IsoHeaderFieldConfig {
+  return {
+    text: {
+      segments: field.text.segments.map(segment => ({
+        ...segment,
+        color: DEFAULT_SEGMENT_STYLE.color,
+        fontFamily: DEFAULT_SEGMENT_STYLE.fontFamily,
+        fontStyle: DEFAULT_SEGMENT_STYLE.fontStyle,
+        fontSize: DEFAULT_SEGMENT_STYLE.fontSize,
+        letterSpacing: DEFAULT_SEGMENT_STYLE.letterSpacing,
+      })),
+    },
+    visibility: cloneVisibility(field.visibility),
+  };
+}
+
+export function isIsoHeaderFieldStyleCustomizable(fieldKey: keyof InspectionIsoHeaderConfig) {
+  return !STYLE_LOCKED_FIELDS.has(fieldKey);
+}
+
 export function createDefaultIsoHeaderConfig(): InspectionIsoHeaderConfig {
   return cloneConfig(DEFAULT_CONFIG);
 }
@@ -257,12 +284,20 @@ export function sanitizeIsoHeaderConfig(raw: unknown): InspectionIsoHeaderConfig
   if (!isRecord(raw)) {
     return defaults;
   }
-  return {
+  const sanitized = {
     emissao: sanitizeField(raw.emissao, defaults.emissao),
     revisao: sanitizeField(raw.revisao, defaults.revisao),
     revisaoNumero: sanitizeField(raw.revisaoNumero, defaults.revisaoNumero),
     foNumero: sanitizeField(raw.foNumero, defaults.foNumero),
     orientacoes: sanitizeField(raw.orientacoes, defaults.orientacoes),
+  };
+
+  return {
+    emissao: lockFieldVisualStyle(sanitized.emissao),
+    revisao: lockFieldVisualStyle(sanitized.revisao),
+    revisaoNumero: lockFieldVisualStyle(sanitized.revisaoNumero),
+    foNumero: lockFieldVisualStyle(sanitized.foNumero),
+    orientacoes: sanitized.orientacoes,
   };
 }
 

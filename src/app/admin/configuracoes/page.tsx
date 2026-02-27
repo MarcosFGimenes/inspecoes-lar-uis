@@ -77,18 +77,19 @@ export default function AdminConfiguracoesPage() {
     setSaving(true);
     setError(null);
     setSuccess(null);
+    const normalizedConfig = sanitizeIsoHeaderConfig(isoHeaderConfig);
     try {
       const response = await fetch("/api/configuracoes/cabecalho-inspecao", {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ isoHeaderConfig }),
+        body: JSON.stringify({ isoHeaderConfig: normalizedConfig }),
       });
       if (!response.ok) {
         const payload = (await response.json().catch(() => null)) as ConfigResponse | null;
         throw new Error(payload?.error || "Falha ao salvar configuração.");
       }
       const payload = (await response.json()) as ConfigResponse;
-      setIsoHeaderConfig(sanitizeIsoHeaderConfig(payload.isoHeaderConfig));
+      setIsoHeaderConfig(sanitizeIsoHeaderConfig(payload.isoHeaderConfig ?? normalizedConfig));
       setUpdatedAt(typeof payload.updatedAt === "string" ? payload.updatedAt : new Date().toISOString());
       setSuccess("Configuração salva com sucesso.");
     } catch (err: unknown) {
