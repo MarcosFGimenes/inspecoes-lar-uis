@@ -13,6 +13,12 @@ type UpdateBody = {
   isoHeaderConfig?: unknown;
 };
 
+function jsonNoStore(payload: unknown, init?: Parameters<typeof NextResponse.json>[1]) {
+  const response = NextResponse.json(payload, init);
+  response.headers.set("Cache-Control", "no-store, no-cache, max-age=0, must-revalidate");
+  return response;
+}
+
 export async function GET(req: NextRequest) {
   const authorized = await requireAdminFromRequest(req);
   if (!authorized) {
@@ -22,7 +28,7 @@ export async function GET(req: NextRequest) {
   try {
     const snap = await adminDb.collection(COLLECTION).doc(DOC_ID).get();
     const data = snap.data() ?? {};
-    return NextResponse.json({
+    return jsonNoStore({
       isoHeaderConfig: sanitizeIsoHeaderConfig(data.isoHeaderConfig),
       updatedAt: typeof data.updatedAt === "string" ? data.updatedAt : null,
     });
@@ -56,16 +62,13 @@ export async function PUT(req: NextRequest) {
         updatedAt,
         type: "cabecalho_inspecao",
       },
-      { merge: true }
+      { mergeFields: ["isoHeaderConfig", "updatedAt", "type"] }
     );
 
-    const savedSnap = await docRef.get();
-    const savedData = savedSnap.data() ?? {};
-
-    return NextResponse.json({
+    return jsonNoStore({
       ok: true,
-      isoHeaderConfig: sanitizeIsoHeaderConfig(savedData.isoHeaderConfig),
-      updatedAt: typeof savedData.updatedAt === "string" ? savedData.updatedAt : updatedAt,
+      isoHeaderConfig,
+      updatedAt,
     });
   } catch (error: unknown) {
     const message = error instanceof Error && error.message ? error.message : "INTERNAL_ERROR";

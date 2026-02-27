@@ -9,6 +9,7 @@ import {
   createDefaultIsoHeaderConfig,
   ISO_HEADER_FONT_FAMILIES,
   ISO_HEADER_FONT_STYLES,
+  isIsoHeaderFieldStyleCustomizable,
   mapIsoHeaderFontToCss,
   serializeIsoHeaderText,
 } from "@/lib/iso-header-config";
@@ -173,13 +174,15 @@ export function IsoHeaderConfigEditor({ value, onChange, disabled = false }: Iso
       <header className="space-y-1">
         <h4 className="text-sm font-semibold text-[var(--text)]">Cabecalho ISO da inspecao</h4>
         <p className="text-xs text-[var(--muted)]">
-          Personalize cada campo por segmentos. Para cor por palavra/letra, crie segmentos separados.
+          Personalize o texto por segmentos. Estilo visual (cor/tamanho/fonte) so pode ser editado em
+          Orientacoes.
         </p>
       </header>
 
       <div className="space-y-4">
         {FIELD_DEFINITIONS.map(field => {
           const fieldValue = value[field.key];
+          const styleCustomizable = isIsoHeaderFieldStyleCustomizable(field.key);
           const previewText = serializeIsoHeaderText(fieldValue.text).trim();
           return (
             <article key={field.key} className="space-y-3 rounded-xl border border-[var(--border)] bg-white p-3">
@@ -239,15 +242,25 @@ export function IsoHeaderConfigEditor({ value, onChange, disabled = false }: Iso
                 <div className="min-h-7 text-sm leading-relaxed">
                   {previewText ? (
                     fieldValue.text.segments.map((segment, index) => {
-                      const styleInfo = toCssFontStyle(segment.fontStyle ?? "normal");
+                      const previewSegment = styleCustomizable
+                        ? segment
+                        : {
+                            ...segment,
+                            color: "#111111",
+                            fontFamily: "helvetica" as const,
+                            fontStyle: "normal" as const,
+                            fontSize: 10,
+                            letterSpacing: 0,
+                          };
+                      const styleInfo = toCssFontStyle(previewSegment.fontStyle ?? "normal");
                       return (
                         <span
                           key={`${field.key}-preview-${index}`}
                           style={{
-                            color: segment.color ?? "#111111",
-                            fontFamily: mapIsoHeaderFontToCss(segment.fontFamily),
-                            fontSize: `${segment.fontSize ?? 10}px`,
-                            letterSpacing: `${segment.letterSpacing ?? 0}px`,
+                            color: previewSegment.color ?? "#111111",
+                            fontFamily: mapIsoHeaderFontToCss(previewSegment.fontFamily),
+                            fontSize: `${previewSegment.fontSize ?? 10}px`,
+                            letterSpacing: `${previewSegment.letterSpacing ?? 0}px`,
                             fontWeight: styleInfo.fontWeight,
                             fontStyle: styleInfo.fontStyle,
                             whiteSpace: "pre-wrap",
@@ -292,90 +305,96 @@ export function IsoHeaderConfigEditor({ value, onChange, disabled = false }: Iso
                         />
                       </label>
 
-                      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-5">
-                        <label className="space-y-1 text-xs">
-                          <span className="text-[var(--muted)]">Cor</span>
-                          <input
-                            type="color"
-                            value={segment.color ?? "#111111"}
-                            onChange={event => updateSegment(field.key, index, { color: event.target.value })}
-                            disabled={disabled}
-                            className="h-11 w-full cursor-pointer rounded-2xl border border-[var(--border)] bg-white px-2 py-1 disabled:cursor-not-allowed disabled:opacity-60"
-                          />
-                        </label>
+                      {styleCustomizable ? (
+                        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-5">
+                          <label className="space-y-1 text-xs">
+                            <span className="text-[var(--muted)]">Cor</span>
+                            <input
+                              type="color"
+                              value={segment.color ?? "#111111"}
+                              onChange={event => updateSegment(field.key, index, { color: event.target.value })}
+                              disabled={disabled}
+                              className="h-11 w-full cursor-pointer rounded-2xl border border-[var(--border)] bg-white px-2 py-1 disabled:cursor-not-allowed disabled:opacity-60"
+                            />
+                          </label>
 
-                        <label className="space-y-1 text-xs">
-                          <span className="text-[var(--muted)]">Fonte</span>
-                          <Select
-                            value={segment.fontFamily ?? "helvetica"}
-                            onChange={event =>
-                              updateSegment(field.key, index, {
-                                fontFamily: event.target.value as IsoHeaderTextSegment["fontFamily"],
-                              })
-                            }
-                            disabled={disabled}
-                          >
-                            {ISO_HEADER_FONT_FAMILIES.map(font => (
-                              <option key={font} value={font}>
-                                {FONT_FAMILY_LABELS[font]}
-                              </option>
-                            ))}
-                          </Select>
-                        </label>
+                          <label className="space-y-1 text-xs">
+                            <span className="text-[var(--muted)]">Fonte</span>
+                            <Select
+                              value={segment.fontFamily ?? "helvetica"}
+                              onChange={event =>
+                                updateSegment(field.key, index, {
+                                  fontFamily: event.target.value as IsoHeaderTextSegment["fontFamily"],
+                                })
+                              }
+                              disabled={disabled}
+                            >
+                              {ISO_HEADER_FONT_FAMILIES.map(font => (
+                                <option key={font} value={font}>
+                                  {FONT_FAMILY_LABELS[font]}
+                                </option>
+                              ))}
+                            </Select>
+                          </label>
 
-                        <label className="space-y-1 text-xs">
-                          <span className="text-[var(--muted)]">Estilo</span>
-                          <Select
-                            value={segment.fontStyle ?? "normal"}
-                            onChange={event =>
-                              updateSegment(field.key, index, {
-                                fontStyle: event.target.value as IsoHeaderTextSegment["fontStyle"],
-                              })
-                            }
-                            disabled={disabled}
-                          >
-                            {ISO_HEADER_FONT_STYLES.map(style => (
-                              <option key={style} value={style}>
-                                {FONT_STYLE_LABELS[style]}
-                              </option>
-                            ))}
-                          </Select>
-                        </label>
+                          <label className="space-y-1 text-xs">
+                            <span className="text-[var(--muted)]">Estilo</span>
+                            <Select
+                              value={segment.fontStyle ?? "normal"}
+                              onChange={event =>
+                                updateSegment(field.key, index, {
+                                  fontStyle: event.target.value as IsoHeaderTextSegment["fontStyle"],
+                                })
+                              }
+                              disabled={disabled}
+                            >
+                              {ISO_HEADER_FONT_STYLES.map(style => (
+                                <option key={style} value={style}>
+                                  {FONT_STYLE_LABELS[style]}
+                                </option>
+                              ))}
+                            </Select>
+                          </label>
 
-                        <label className="space-y-1 text-xs">
-                          <span className="text-[var(--muted)]">Tamanho</span>
-                          <Input
-                            type="number"
-                            min={6}
-                            max={28}
-                            step={1}
-                            value={segment.fontSize ?? 10}
-                            onChange={event =>
-                              updateSegment(field.key, index, {
-                                fontSize: Number(event.target.value || 10),
-                              })
-                            }
-                            disabled={disabled}
-                          />
-                        </label>
+                          <label className="space-y-1 text-xs">
+                            <span className="text-[var(--muted)]">Tamanho</span>
+                            <Input
+                              type="number"
+                              min={6}
+                              max={28}
+                              step={1}
+                              value={segment.fontSize ?? 10}
+                              onChange={event =>
+                                updateSegment(field.key, index, {
+                                  fontSize: Number(event.target.value || 10),
+                                })
+                              }
+                              disabled={disabled}
+                            />
+                          </label>
 
-                        <label className="space-y-1 text-xs">
-                          <span className="text-[var(--muted)]">Espaco entre letras</span>
-                          <Input
-                            type="number"
-                            min={-2}
-                            max={8}
-                            step={0.1}
-                            value={segment.letterSpacing ?? 0}
-                            onChange={event =>
-                              updateSegment(field.key, index, {
-                                letterSpacing: Number(event.target.value || 0),
-                              })
-                            }
-                            disabled={disabled}
-                          />
-                        </label>
-                      </div>
+                          <label className="space-y-1 text-xs">
+                            <span className="text-[var(--muted)]">Espaco entre letras</span>
+                            <Input
+                              type="number"
+                              min={-2}
+                              max={8}
+                              step={0.1}
+                              value={segment.letterSpacing ?? 0}
+                              onChange={event =>
+                                updateSegment(field.key, index, {
+                                  letterSpacing: Number(event.target.value || 0),
+                                })
+                              }
+                              disabled={disabled}
+                            />
+                          </label>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-[var(--muted)]">
+                          Este campo usa estilo visual padrao fixo (cor e tamanho nao editaveis).
+                        </p>
+                      )}
                     </div>
                   </div>
                 ))}
