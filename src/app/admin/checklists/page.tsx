@@ -129,7 +129,7 @@ function computeNcCount(data: Record<string, unknown>): number {
   return itensRaw.filter(item => String(item.resultado ?? item.response ?? "c").toLowerCase() === "nc").length;
 }
 
-const MAX_RESULTS = 400;
+const MAX_RESULTS = 1000;
 
 export default function AdminChecklistsPage() {
   const [machines, setMachines] = useState<MachineOption[]>([]);
