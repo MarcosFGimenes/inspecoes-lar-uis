@@ -65,6 +65,10 @@ function buildIssueDescription(item: TemplateItem, fallback: string) {
   return fallback;
 }
 
+function isIssueResolvedStatus(status: unknown) {
+  return status === "concluida" || status === "resolvida";
+}
+
 function extractMessage(err: unknown, fallback: string) {
   if (err instanceof Error && err.message) return err.message;
   return fallback;
@@ -306,19 +310,23 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Busca issues abertas/concluidas ANTES de criar tratativas
-    const openIssuesSnap = await adminDb
+    // Busca issues existentes ANTES de criar tratativas.
+    // A duplicidade considera máquina + item NC + status da issue.
+    const existingIssuesSnap = await adminDb
       .collection("issues")
       .where("machineId", "==", machineRecord.id)
-      .where("status", "in", ["aberta", "concluida"])
+      .where("status", "in", ["aberta", "concluida", "resolvida"])
       .get();
 
-    const openIssuesByTemplate = new Map<string, QueryDocumentSnapshot<DocumentData>>();
+    const issuesByTemplate = new Map<string, QueryDocumentSnapshot<DocumentData>[]>();
 
-    openIssuesSnap.docs.forEach(doc => {
+    existingIssuesSnap.docs.forEach(doc => {
       const data = doc.data() ?? {};
       if (data.templateItemId) {
-        openIssuesByTemplate.set(String(data.templateItemId), doc);
+        const templateItemId = String(data.templateItemId);
+        const current = issuesByTemplate.get(templateItemId) ?? [];
+        current.push(doc);
+        issuesByTemplate.set(templateItemId, current);
       }
     });
 
@@ -335,68 +343,48 @@ export async function POST(req: NextRequest) {
       if (item.resultado !== "NC") {
         continue;
       }
-      const existingIssue = openIssuesByTemplate.get(item.templateItemId);
-      if (existingIssue) {
-        const issueData = existingIssue.data() ?? {};
-
-        if (issueData.status === "concluida") {
-          // PCM tratou mas problema persiste → resolver antiga + criar nova
-          await existingIssue.ref.update({
-            status: "resolvida",
-            resolvedAt: nowIso,
-            resolvidaEmInspecaoId: inspectionId,
-          });
-          issuesResolvidas.push(existingIssue.id);
-
-          const templateItem = templateMap.get(item.templateItemId) ?? {};
-          const descricao = item.observacaoItem || buildIssueDescription(templateItem, "NC identificada na inspeção - problema persiste após tratativa do PCM");
-          const issueRef = adminDb.collection("issues").doc();
-          await issueRef.set({
-            machineId: machineRecord.id,
-            tag: machineRecord.tag ?? null,
-            templateItemId: item.templateItemId,
-            descricao,
-            osNumero: item.osNumeroItem ?? null,
-            fotos: item.fotos,
-            status: "aberta",
-            abertaEmInspecaoId: inspectionId,
-            createdAt: nowIso,
-            reabertaDe: existingIssue.id,
-            reincidenciaCount: 0,
-          });
-          issuesCriadas.push(issueRef.id);
-        } else {
-          // Status "aberta" → apenas atualiza a issue existente (não cria nova)
-          // Incrementa contador de reincidência
-          ncItemsWithExistingOpenIssue.add(item.templateItemId);
-          const currentReincidencia = typeof issueData.reincidenciaCount === "number" ? issueData.reincidenciaCount : 0;
-          const issueUpdates: Record<string, unknown> = {
-            reincidenciaCount: currentReincidencia + 1,
-            ultimaReincidenciaEm: nowIso,
-            ultimaReincidenciaInspecaoId: inspectionId,
-          };
-          if (item.osNumeroItem && issueData.osNumero !== item.osNumeroItem) {
-            issueUpdates.osNumero = item.osNumeroItem;
-          }
-          if (item.fotos.length > 0) {
-            issueUpdates.fotos = item.fotos;
-          }
-          const novaDescricao = item.observacaoItem?.trim();
-          if (novaDescricao && issueData.descricao !== novaDescricao) {
-            issueUpdates.descricao = novaDescricao;
-          }
-          // Limpa maintainerResolution se o mantenedor marca NC novamente
-          if (issueData.maintainerResolution) {
-            issueUpdates.maintainerResolution = null;
-          }
-          await existingIssue.ref.update(issueUpdates);
+      const templateIssues = issuesByTemplate.get(item.templateItemId) ?? [];
+      const existingActiveIssue = templateIssues.find(issueDoc => !isIssueResolvedStatus(issueDoc.data()?.status));
+      if (existingActiveIssue) {
+        const issueData = existingActiveIssue.data() ?? {};
+        // Já existe issue ativa → não cria nova, apenas atualiza reincidência/contexto
+        ncItemsWithExistingOpenIssue.add(item.templateItemId);
+        const currentReincidencia = typeof issueData.reincidenciaCount === "number" ? issueData.reincidenciaCount : 0;
+        const issueUpdates: Record<string, unknown> = {
+          reincidenciaCount: currentReincidencia + 1,
+          ultimaReincidenciaEm: nowIso,
+          ultimaReincidenciaInspecaoId: inspectionId,
+        };
+        if (item.osNumeroItem && issueData.osNumero !== item.osNumeroItem) {
+          issueUpdates.osNumero = item.osNumeroItem;
         }
+        if (item.fotos.length > 0) {
+          issueUpdates.fotos = item.fotos;
+        }
+        const novaDescricao = item.observacaoItem?.trim();
+        if (novaDescricao && issueData.descricao !== novaDescricao) {
+          issueUpdates.descricao = novaDescricao;
+        }
+        // Limpa maintainerResolution se o mantenedor marca NC novamente
+        if (issueData.maintainerResolution) {
+          issueUpdates.maintainerResolution = null;
+        }
+        await existingActiveIssue.ref.update(issueUpdates);
         continue;
       }
 
       const templateItem = templateMap.get(item.templateItemId) ?? {};
       const descricao = item.observacaoItem || buildIssueDescription(templateItem, "NC identificada na inspeção");
       const issueRef = adminDb.collection("issues").doc();
+      const latestResolvedIssue = templateIssues
+        .filter(issueDoc => isIssueResolvedStatus(issueDoc.data()?.status))
+        .sort((a, b) => {
+          const aData = a.data() ?? {};
+          const bData = b.data() ?? {};
+          const aTs = Date.parse(String(aData.resolvedAt ?? aData.concluidaEm ?? aData.updatedAt ?? aData.createdAt ?? ""));
+          const bTs = Date.parse(String(bData.resolvedAt ?? bData.concluidaEm ?? bData.updatedAt ?? bData.createdAt ?? ""));
+          return (Number.isNaN(bTs) ? 0 : bTs) - (Number.isNaN(aTs) ? 0 : aTs);
+        })[0];
       await issueRef.set({
         machineId: machineRecord.id,
         tag: machineRecord.tag ?? null,
@@ -407,6 +395,7 @@ export async function POST(req: NextRequest) {
         status: "aberta",
         abertaEmInspecaoId: inspectionId,
         createdAt: nowIso,
+        reabertaDe: latestResolvedIssue?.id ?? null,
         reincidenciaCount: 0,
       });
       issuesCriadas.push(issueRef.id);

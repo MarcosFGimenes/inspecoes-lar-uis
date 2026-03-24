@@ -118,6 +118,10 @@ function mapTemplateItems(templateData: Record<string, unknown>) {
   return new Map(items.filter(item => item?.id).map(item => [String(item.id), item]));
 }
 
+function isIssueResolvedStatus(status: unknown) {
+  return status === "concluida" || status === "resolvida";
+}
+
 function ensureChecklistResponse(docId: string, data: Record<string, unknown>): ChecklistResponse {
   return {
     id: docId,
@@ -268,20 +272,23 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       };
     }
 
-    const openIssuesSnap = inspection.machine?.machineId
+    const existingIssuesSnap = inspection.machine?.machineId
       ? await adminDb
           .collection("issues")
           .where("machineId", "==", inspection.machine.machineId)
-          .where("status", "in", ["aberta", "concluida"])
+          .where("status", "in", ["aberta", "concluida", "resolvida"])
           .get()
       : null;
 
-    const openIssuesMap = new Map<string, QueryDocumentSnapshot<DocumentData>>();
-    if (openIssuesSnap) {
-      openIssuesSnap.docs.forEach(doc => {
+    const issuesByQuestionId = new Map<string, QueryDocumentSnapshot<DocumentData>[]>();
+    if (existingIssuesSnap) {
+      existingIssuesSnap.docs.forEach(doc => {
         const issueData = doc.data() ?? {};
         if (issueData.templateItemId) {
-          openIssuesMap.set(String(issueData.templateItemId), doc);
+          const questionId = String(issueData.templateItemId);
+          const current = issuesByQuestionId.get(questionId) ?? [];
+          current.push(doc);
+          issuesByQuestionId.set(questionId, current);
         }
       });
     }
@@ -410,24 +417,34 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
               };
           treatmentsMap.set(item.questionId, updatedTreatment);
 
-          if (openIssuesMap.has(item.questionId)) {
-            const issueDoc = openIssuesMap.get(item.questionId)!;
+          const issueDocs = issuesByQuestionId.get(item.questionId) ?? [];
+          const activeIssueDoc = issueDocs.find(doc => !isIssueResolvedStatus(doc.data()?.status));
+          if (activeIssueDoc) {
             const updatesIssue: Record<string, unknown> = {};
             const osValue = item.osNumeroItem?.trim() ? item.osNumeroItem.trim().toUpperCase() : null;
-            if (osValue && issueDoc.data()?.osNumero !== osValue) {
+            if (osValue && activeIssueDoc.data()?.osNumero !== osValue) {
               updatesIssue.osNumero = osValue;
             }
             if (photoUrls.length > 0) {
               updatesIssue.fotos = photoUrls;
             }
-            if (observation && issueDoc.data()?.descricao !== observation) {
+            if (observation && activeIssueDoc.data()?.descricao !== observation) {
               updatesIssue.descricao = observation;
             }
             if (Object.keys(updatesIssue).length > 0) {
-              await issueDoc.ref.update(updatesIssue);
+              await activeIssueDoc.ref.update(updatesIssue);
             }
           } else if (inspection.machine?.machineId) {
             const issueRef = adminDb.collection("issues").doc();
+            const latestResolvedIssue = issueDocs
+              .filter(doc => isIssueResolvedStatus(doc.data()?.status))
+              .sort((a, b) => {
+                const aData = a.data() ?? {};
+                const bData = b.data() ?? {};
+                const aTs = Date.parse(String(aData.resolvedAt ?? aData.concluidaEm ?? aData.updatedAt ?? aData.createdAt ?? ""));
+                const bTs = Date.parse(String(bData.resolvedAt ?? bData.concluidaEm ?? bData.updatedAt ?? bData.createdAt ?? ""));
+                return (Number.isNaN(bTs) ? 0 : bTs) - (Number.isNaN(aTs) ? 0 : aTs);
+              })[0];
             await issueRef.set({
               machineId: inspection.machine.machineId,
               tag: inspection.machine.tag ?? null,
@@ -442,6 +459,7 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
               status: "aberta",
               abertaEmInspecaoId: id,
               createdAt: nowIso,
+              reabertaDe: latestResolvedIssue?.id ?? null,
             });
             issuesCriadas.push(issueRef.id);
           }
@@ -453,17 +471,17 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
               updatedAt: nowIso,
             });
           }
-          const issueDoc = openIssuesMap.get(item.questionId);
-          if (issueDoc) {
-            await issueDoc.ref.update({
+          const issueDocs = issuesByQuestionId.get(item.questionId) ?? [];
+          const activeIssueDoc = issueDocs.find(doc => !isIssueResolvedStatus(doc.data()?.status));
+          if (activeIssueDoc) {
+            await activeIssueDoc.ref.update({
               status: "resolvida",
               resolvedAt: nowIso,
               resolvidaEmInspecaoId: id,
             });
-            if (!issuesResolvidas.includes(issueDoc.id)) {
-              issuesResolvidas.push(issueDoc.id);
+            if (!issuesResolvidas.includes(activeIssueDoc.id)) {
+              issuesResolvidas.push(activeIssueDoc.id);
             }
-            openIssuesMap.delete(item.questionId);
           }
         }
       }
