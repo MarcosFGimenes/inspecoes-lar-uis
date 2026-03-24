@@ -27,6 +27,7 @@ import type {
   NonConformityStatus,
   StoredImage,
 } from "@/types";
+import { resolveIssueLastActivityAt, sortByLastActivityDesc } from "@/lib/non-conformity-priority";
 import { normalizeStoredImages } from "@/lib/storage/images";
 
 interface MachineOption {
@@ -415,13 +416,11 @@ export default function AdminNonConformitiesPage() {
           typeof rawIssueTreatment?.dueDate === "string"
             ? rawIssueTreatment.dueDate
             : sourceTreatment?.dueDate ?? null;
-        const updatedAtValue =
-          (typeof rawIssueTreatment?.updatedAt === "string" ? rawIssueTreatment.updatedAt : null) ??
-          (sourceTreatment?.updatedAt ? String(sourceTreatment.updatedAt) : null) ??
-          (typeof rawIssueTreatment?.createdAt === "string" ? rawIssueTreatment.createdAt : null) ??
-          (sourceTreatment?.createdAt ? String(sourceTreatment.createdAt) : null) ??
-          (typeof issueData.concluidaEm === "string" ? issueData.concluidaEm : null) ??
-          (typeof issueData.createdAt === "string" ? issueData.createdAt : null);
+        const updatedAtValue = resolveIssueLastActivityAt({
+          issueData,
+          rawIssueTreatment,
+          sourceTreatment,
+        });
 
         const rawResolution = issueData.maintainerResolution ?? null;
         const maintainerResolution = rawResolution && typeof rawResolution === "object"
@@ -480,16 +479,8 @@ export default function AdminNonConformitiesPage() {
         });
       });
 
-      builtItems.sort((a, b) => {
-        const aTs = Date.parse(a.updatedAt ?? a.checklistDate ?? "");
-        const bTs = Date.parse(b.updatedAt ?? b.checklistDate ?? "");
-        const normalizedA = Number.isNaN(aTs) ? 0 : aTs;
-        const normalizedB = Number.isNaN(bTs) ? 0 : bTs;
-        return normalizedB - normalizedA;
-      });
-
       setMachines(machineOptions);
-      setItems(builtItems);
+      setItems(sortByLastActivityDesc(builtItems));
       setTreatmentsByResponse(treatmentsRecord);
     } catch (err: unknown) {
       const message = err instanceof Error && err.message ? err.message : "Erro ao carregar dados";
@@ -522,7 +513,9 @@ export default function AdminNonConformitiesPage() {
   }, [items, machineFilter, statusFilter]);
 
   const handleUpdateItem = useCallback((id: string, updates: Partial<NonConformityItem>) => {
-    setItems(prev => prev.map(item => (item.id === id ? { ...item, ...updates } : item)));
+    setItems(prev =>
+      sortByLastActivityDesc(prev.map(item => (item.id === id ? { ...item, ...updates } : item)))
+    );
   }, []);
 
   const handleSave = useCallback(

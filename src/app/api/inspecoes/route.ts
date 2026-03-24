@@ -10,6 +10,7 @@ import type { ChecklistAnswer, ChecklistNonConformityTreatment } from "@/types";
 import { isMaintainerProfileId } from "@/lib/signature-profiles";
 import { fromDataUrl } from "@/lib/storage/dataUrl";
 import { r2Provider } from "@/lib/storage/r2Provider";
+import { buildIssueRecurrenceUpdates } from "@/lib/non-conformity-priority";
 import type { StoredImage } from "@/types";
 
 export const runtime = "nodejs";
@@ -349,26 +350,14 @@ export async function POST(req: NextRequest) {
         const issueData = existingActiveIssue.data() ?? {};
         // Já existe issue ativa → não cria nova, apenas atualiza reincidência/contexto
         ncItemsWithExistingOpenIssue.add(item.templateItemId);
-        const currentReincidencia = typeof issueData.reincidenciaCount === "number" ? issueData.reincidenciaCount : 0;
-        const issueUpdates: Record<string, unknown> = {
-          reincidenciaCount: currentReincidencia + 1,
-          ultimaReincidenciaEm: nowIso,
-          ultimaReincidenciaInspecaoId: inspectionId,
-        };
-        if (item.osNumeroItem && issueData.osNumero !== item.osNumeroItem) {
-          issueUpdates.osNumero = item.osNumeroItem;
-        }
-        if (item.fotos.length > 0) {
-          issueUpdates.fotos = item.fotos;
-        }
-        const novaDescricao = item.observacaoItem?.trim();
-        if (novaDescricao && issueData.descricao !== novaDescricao) {
-          issueUpdates.descricao = novaDescricao;
-        }
-        // Limpa maintainerResolution se o mantenedor marca NC novamente
-        if (issueData.maintainerResolution) {
-          issueUpdates.maintainerResolution = null;
-        }
+        const issueUpdates = buildIssueRecurrenceUpdates({
+          issueData,
+          inspectionId,
+          nowIso,
+          osNumeroItem: item.osNumeroItem,
+          fotos: item.fotos,
+          descricao: item.observacaoItem?.trim() ?? null,
+        });
         await existingActiveIssue.ref.update(issueUpdates);
         continue;
       }
@@ -395,6 +384,8 @@ export async function POST(req: NextRequest) {
         status: "aberta",
         abertaEmInspecaoId: inspectionId,
         createdAt: nowIso,
+        updatedAt: nowIso,
+        ultimaOcorrenciaEm: nowIso,
         reabertaDe: latestResolvedIssue?.id ?? null,
         reincidenciaCount: 0,
       });
