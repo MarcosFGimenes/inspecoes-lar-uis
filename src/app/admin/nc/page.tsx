@@ -161,30 +161,8 @@ function normalizeAnswers(
   data: Record<string, unknown>,
   templateItems: Map<string, TemplateItemData>
 ): ChecklistAnswer[] {
-  const answers = Array.isArray(data.answers) ? (data.answers as ChecklistAnswer[]) : [];
-  if (answers.length > 0) {
-    return dedupeAnswers(
-      answers
-        .filter(item => item?.questionId)
-        .map(item => ({
-          questionId: item.questionId,
-          questionText:
-            item.questionText ||
-            templateItems.get(item.questionId)?.oQueChecar ||
-            templateItems.get(item.questionId)?.criterio ||
-            templateItems.get(item.questionId)?.componente ||
-            `Item ${item.questionId}`,
-          response: item.response === "nc" || item.response === "na" ? item.response : "c",
-          observation: item.observation ?? null,
-          photoUrls: normalizeStoredImages(item.photoUrls ?? []),
-          recurrence: item.recurrence === true,
-          itemOsNumero: item.itemOsNumero ?? null,
-        }))
-    );
-  }
-
   const itens = Array.isArray(data.itens) ? (data.itens as Array<Record<string, unknown>>) : [];
-  return dedupeAnswers(
+  const answersFromItens = dedupeAnswers(
     itens
       .filter(item => item?.templateItemId)
       .map(item => {
@@ -209,6 +187,41 @@ function normalizeAnswers(
         } satisfies ChecklistAnswer;
       })
   );
+
+  const answers = Array.isArray(data.answers) ? (data.answers as ChecklistAnswer[]) : [];
+  if (answers.length === 0) {
+    return answersFromItens;
+  }
+
+  const answersFromItensByQuestionId = new Map(
+    answersFromItens.map(answer => [answer.questionId, answer] as const)
+  );
+  const answersFromPayload = dedupeAnswers(
+    answers
+      .filter(item => item?.questionId)
+      .map(item => {
+        const fallbackFromItens = answersFromItensByQuestionId.get(item.questionId);
+        return {
+          questionId: item.questionId,
+          questionText:
+            item.questionText ||
+            templateItems.get(item.questionId)?.oQueChecar ||
+            templateItems.get(item.questionId)?.criterio ||
+            templateItems.get(item.questionId)?.componente ||
+            fallbackFromItens?.questionText ||
+            `Item ${item.questionId}`,
+          response: item.response === "nc" || item.response === "na" ? item.response : "c",
+          observation: item.observation ?? fallbackFromItens?.observation ?? null,
+          photoUrls: mergeStoredImageCollections(item.photoUrls, fallbackFromItens?.photoUrls),
+          recurrence: item.recurrence === true || fallbackFromItens?.recurrence === true,
+          itemOsNumero: item.itemOsNumero ?? fallbackFromItens?.itemOsNumero ?? null,
+        } satisfies ChecklistAnswer;
+      })
+  );
+
+  const questionIdsFromPayload = new Set(answersFromPayload.map(item => item.questionId));
+  const missingFromPayload = answersFromItens.filter(item => !questionIdsFromPayload.has(item.questionId));
+  return dedupeAnswers([...answersFromPayload, ...missingFromPayload]);
 }
 
 function buildMachineLabel(machine: Record<string, unknown>) {
