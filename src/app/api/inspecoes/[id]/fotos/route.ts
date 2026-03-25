@@ -106,15 +106,14 @@ export async function POST(req: NextRequest, context: RouteContext) {
 
     const machineId = (data.machine as { machineId?: string } | undefined)?.machineId;
     if (machineId) {
-      const openIssuesSnap = await adminDb
+      const issuesSnap = await adminDb
         .collection("issues")
         .where("machineId", "==", machineId)
         .where("templateItemId", "==", payload.templateItemId)
-        .where("status", "in", ["aberta", "concluida"])
         .get();
 
       await Promise.all(
-        openIssuesSnap.docs.map(async doc => {
+        issuesSnap.docs.map(async doc => {
           const issueData = doc.data() ?? {};
           const fotos = normalizeStoredImages(issueData.fotos ?? []);
           const nextFotos = [...fotos, storedImage].slice(0, 3);
@@ -130,4 +129,3 @@ export async function POST(req: NextRequest, context: RouteContext) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
-

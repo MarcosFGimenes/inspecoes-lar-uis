@@ -143,6 +143,20 @@ function dedupeAnswers(answers: ChecklistAnswer[]) {
   return unique;
 }
 
+function mergeStoredImageCollections(...collections: unknown[]): StoredImage[] {
+  const seen = new Set<string>();
+  const merged: StoredImage[] = [];
+  collections.forEach(collection => {
+    normalizeStoredImages(collection).forEach(image => {
+      const key = `${image.provider}:${image.url}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      merged.push(image);
+    });
+  });
+  return merged;
+}
+
 function normalizeAnswers(
   data: Record<string, unknown>,
   templateItems: Map<string, TemplateItemData>
@@ -227,9 +241,8 @@ export default function AdminNonConformitiesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<NonConformityItem[]>([]);
-  const [machines, setMachines] = useState<MachineOption[]>([]);
   const [treatmentsByResponse, setTreatmentsByResponse] = useState<Record<string, ChecklistNonConformityTreatment[]>>({});
-  const [machineFilter, setMachineFilter] = useState("all");
+  const [machineFilter, setMachineFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [savingId, setSavingId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<Record<string, FeedbackState>>({});
@@ -461,7 +474,7 @@ export default function AdminNonConformitiesPage() {
             typeof issueData.descricao === "string"
               ? issueData.descricao
               : answerData?.observation ?? null,
-          photos: normalizeStoredImages(issueData.fotos ?? answerData?.photoUrls ?? []),
+          photos: mergeStoredImageCollections(issueData.fotos, answerData?.photoUrls),
           itemOsNumero:
             typeof issueData.osNumero === "string"
               ? issueData.osNumero
@@ -479,7 +492,6 @@ export default function AdminNonConformitiesPage() {
         });
       });
 
-      setMachines(machineOptions);
       setItems(sortByLastActivityDesc(builtItems));
       setTreatmentsByResponse(treatmentsRecord);
     } catch (err: unknown) {
@@ -494,10 +506,26 @@ export default function AdminNonConformitiesPage() {
     loadData();
   }, [loadData]);
 
+  const machineOptionsForFilter = useMemo(() => {
+    return Array.from(new Set(items.map(item => item.machineLabel.trim()).filter(Boolean))).sort((a, b) =>
+      a.localeCompare(b, "pt-BR")
+    );
+  }, [items]);
+
   const filteredItems = useMemo(() => {
+    const machineSearch = machineFilter.trim().toLowerCase();
     return items.filter(item => {
-      if (machineFilter !== "all" && item.machineId !== machineFilter) {
-        return false;
+      if (machineSearch) {
+        const machineLabel = item.machineLabel.toLowerCase();
+        const machineTag = (item.machineTag ?? "").toLowerCase();
+        const machineId = (item.machineId ?? "").toLowerCase();
+        if (
+          !machineLabel.includes(machineSearch) &&
+          !machineTag.includes(machineSearch) &&
+          !machineId.includes(machineSearch)
+        ) {
+          return false;
+        }
       }
       if (statusFilter === "pending") {
         return item.status !== "resolved";
@@ -724,16 +752,18 @@ export default function AdminNonConformitiesPage() {
         <CardContent className="grid gap-4 md:grid-cols-2">
           <label className="space-y-1 text-sm">
             <span className="text-[var(--muted)]">Máquina</span>
-            <Select value={machineFilter} onChange={event => setMachineFilter(event.target.value)}>
-              <option value="all">Todas</option>
-              {machines
-                .filter(machine => machine.ativo !== false)
-                .map(machine => (
-                  <option key={machine.id} value={machine.id}>
-                    {machine.tag ? `${machine.nome} (${machine.tag})` : machine.nome}
-                  </option>
-                ))}
-            </Select>
+            <Input
+              type="text"
+              value={machineFilter}
+              onChange={event => setMachineFilter(event.target.value)}
+              list="machine-filter-options"
+              placeholder="Digite nome, tag ou ID"
+            />
+            <datalist id="machine-filter-options">
+              {machineOptionsForFilter.map(option => (
+                <option key={option} value={option} />
+              ))}
+            </datalist>
           </label>
           <label className="space-y-1 text-sm">
             <span className="text-[var(--muted)]">Status</span>
