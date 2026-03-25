@@ -7,6 +7,7 @@ import { requireMaint } from "@/lib/guards";
 import { fromDataUrl } from "@/lib/storage/dataUrl";
 import { normalizeStoredImages } from "@/lib/storage/images";
 import { r2Provider } from "@/lib/storage/r2Provider";
+import type { StoredImage } from "@/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,6 +33,20 @@ function buildUploadName(prefixes: Array<string | null | undefined>) {
     .filter(Boolean);
   const base = parts.join("-") || "inspecao";
   return `${base}-${randomUUID()}`.slice(0, 100);
+}
+
+function mergeStoredImageCollections(...collections: unknown[]) {
+  const seen = new Set<string>();
+  const merged: StoredImage[] = [];
+  collections.forEach(collection => {
+    normalizeStoredImages(collection).forEach(image => {
+      const dedupeKey = `${image.provider}:${image.url}`;
+      if (seen.has(dedupeKey)) return;
+      seen.add(dedupeKey);
+      merged.push(image);
+    });
+  });
+  return merged.slice(0, 3);
 }
 
 type RouteContext = { params: Promise<{ id?: string }> };
@@ -86,7 +101,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
 
     const itensArray = Array.isArray(data.itens) ? (data.itens as Array<Record<string, unknown>>) : [];
     const updatedItens = itensArray.map(item => {
-      if (item.templateItemId !== payload.templateItemId) return item;
+      if (String(item.templateItemId ?? "") !== payload.templateItemId) return item;
       const fotos = normalizeStoredImages(item.fotos ?? []);
       const nextFotos = [...fotos, storedImage].slice(0, 3);
       return { ...item, fotos: nextFotos };
@@ -96,7 +111,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
       ? (data.answers as Array<Record<string, unknown>>)
       : [];
     const updatedAnswers = answersArray.map(answer => {
-      if (answer.questionId !== payload.templateItemId) return answer;
+      if (String(answer.questionId ?? "") !== payload.templateItemId) return answer;
       const photoUrls = normalizeStoredImages(answer.photoUrls ?? []);
       const nextPhotoUrls = [...photoUrls, storedImage].slice(0, 3);
       return { ...answer, photoUrls: nextPhotoUrls };
@@ -106,19 +121,21 @@ export async function POST(req: NextRequest, context: RouteContext) {
 
     const machineId = (data.machine as { machineId?: string } | undefined)?.machineId;
     if (machineId) {
-      const openIssuesSnap = await adminDb
+      const issuesSnap = await adminDb
         .collection("issues")
         .where("machineId", "==", machineId)
         .where("templateItemId", "==", payload.templateItemId)
-        .where("status", "in", ["aberta", "concluida"])
         .get();
 
       await Promise.all(
-        openIssuesSnap.docs.map(async doc => {
-          const issueData = doc.data() ?? {};
-          const fotos = normalizeStoredImages(issueData.fotos ?? []);
-          const nextFotos = [...fotos, storedImage].slice(0, 3);
-          await doc.ref.update({ fotos: nextFotos });
+        issuesSnap.docs.map(async doc => {
+          await adminDb.runTransaction(async transaction => {
+            const issueSnap = await transaction.get(doc.ref);
+            if (!issueSnap.exists) return;
+            const issueData = issueSnap.data() ?? {};
+            const nextFotos = mergeStoredImageCollections(issueData.fotos, [storedImage]);
+            transaction.update(doc.ref, { fotos: nextFotos });
+          });
         })
       );
     }
@@ -130,4 +147,3 @@ export async function POST(req: NextRequest, context: RouteContext) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
-
