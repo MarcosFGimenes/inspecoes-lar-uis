@@ -4,6 +4,7 @@ import { adminDb } from "@/lib/firebase-admin";
 import { requireAdminFromRequest, requireMaint } from "@/lib/guards";
 import { fromDataUrl } from "@/lib/storage/dataUrl";
 import { normalizeStoredImages } from "@/lib/storage/images";
+import { normalizeInspectionAnswers } from "@/lib/storage/inspection-answers";
 import { r2Provider } from "@/lib/storage/r2Provider";
 import type {
   ChecklistAnswer,
@@ -68,49 +69,7 @@ function resolveId(params: Record<string, string | string[] | undefined>) {
 }
 
 function normalizeAnswers(data: Record<string, unknown>, templateItemsMap: Map<string, TemplateItem>) {
-  const answers = Array.isArray(data.answers) ? (data.answers as ChecklistAnswer[]) : [];
-  if (answers.length > 0) {
-    return answers
-      .filter(item => item?.questionId)
-      .map(item => ({
-        questionId: item.questionId,
-        questionText:
-          item.questionText ??
-          templateItemsMap.get(item.questionId)?.oQueChecar ??
-          templateItemsMap.get(item.questionId)?.criterio ??
-          null,
-        response: item.response === "nc" || item.response === "na" ? item.response : "c",
-        observation: item.observation ?? null,
-        photoUrls: normalizeStoredImages(
-          (item as unknown as Record<string, unknown>).photoUrls ??
-            (item as unknown as Record<string, unknown>).photos ??
-            []
-        ),
-        recurrence: item.recurrence ?? false,
-        itemOsNumero: item.itemOsNumero ?? null,
-      }));
-  }
-
-  const itens = Array.isArray(data.itens) ? (data.itens as Array<Record<string, unknown>>) : [];
-  return itens
-    .filter(item => item?.templateItemId)
-    .map(item => {
-      const questionId = String(item.templateItemId);
-      const templateItem = templateItemsMap.get(questionId) ?? {};
-      const resultado = String(item.resultado || "C").toLowerCase();
-      const response: "c" | "nc" | "na" = resultado === "nc" ? "nc" : resultado === "na" ? "na" : "c";
-      return {
-        questionId,
-        questionText: templateItem.oQueChecar ?? templateItem.criterio ?? (typeof item.componente === "string" ? item.componente : null),
-        response,
-        observation: typeof item.observacaoItem === "string" ? item.observacaoItem : null,
-        photoUrls: normalizeStoredImages(item.fotos ?? []),
-        recurrence: false,
-        itemOsNumero: typeof item.osNumeroItem === "string" && item.osNumeroItem.trim()
-          ? item.osNumeroItem.trim().toUpperCase()
-          : null,
-      } satisfies ChecklistAnswer;
-    });
+  return normalizeInspectionAnswers(data, templateItemsMap);
 }
 
 function mapTemplateItems(templateData: Record<string, unknown>) {

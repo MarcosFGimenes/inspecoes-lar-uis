@@ -36,6 +36,7 @@ interface ApiAnswer {
 interface ApiInspection {
   id: string;
   answers?: ApiAnswer[];
+  itens?: Array<Record<string, unknown>>;
   observacoes?: string | null;
   osNumero?: string | null;
   createdAt?: string | null;
@@ -134,6 +135,20 @@ function readFileAsDataUrl(file: File) {
   });
 }
 
+function mergeStoredImageCollections(...collections: unknown[]): StoredImage[] {
+  const seen = new Set<string>();
+  const merged: StoredImage[] = [];
+  collections.forEach(collection => {
+    normalizeStoredImages(collection).forEach(image => {
+      const dedupeKey = `${image.provider ?? "imgbb"}:${image.url}`;
+      if (seen.has(dedupeKey)) return;
+      seen.add(dedupeKey);
+      merged.push(image);
+    });
+  });
+  return merged;
+}
+
 export default function EditInspectionPage() {
   const params = useParams();
   const idParam = normalizeId(params?.id as string | string[] | undefined);
@@ -177,6 +192,7 @@ export default function EditInspectionPage() {
       const template = data.template ?? null;
       const machineData = inspection.machine ?? data.machine ?? null;
       const answers = Array.isArray(inspection.answers) ? inspection.answers : [];
+      const itens = Array.isArray(inspection.itens) ? inspection.itens : [];
 
       const templateItems = Array.isArray(template?.itens) ? template.itens : [];
       const templateMap = new Map<string, TemplateItemData>();
@@ -188,12 +204,21 @@ export default function EditInspectionPage() {
       answers.forEach(answer => {
         if (answer?.questionId) answersMap.set(answer.questionId, answer);
       });
+      const itensMap = new Map<string, Record<string, unknown>>();
+      itens.forEach(item => {
+        const templateItemId = typeof item?.templateItemId === "string" ? item.templateItemId : null;
+        if (templateItemId) itensMap.set(templateItemId, item);
+      });
 
       const formItems: FormItem[] = templateItems.map((item, index) => {
-        const answer = item.id ? answersMap.get(String(item.id)) : undefined;
-        const response = answer?.response ?? "c";
+        const questionId = item.id ? String(item.id) : `template-${index}`;
+        const answer = item.id ? answersMap.get(questionId) : undefined;
+        const itemData = item.id ? itensMap.get(questionId) : undefined;
+        const rawResultado = typeof itemData?.resultado === "string" ? itemData.resultado.toLowerCase() : null;
+        const responseFromItem: "c" | "nc" | "na" = rawResultado === "nc" ? "nc" : rawResultado === "na" ? "na" : "c";
+        const response = answer?.response ?? responseFromItem;
         return {
-          questionId: item.id ? String(item.id) : `template-${index}`,
+          questionId,
           questionText:
             answer?.questionText ||
             item.oQueChecar ||
@@ -208,15 +233,22 @@ export default function EditInspectionPage() {
           order: typeof item.ordem === "number" ? item.ordem : index,
           previousResponse: response,
           response,
-          observation: answer?.observation ?? "",
-          itemOsNumero: answer?.itemOsNumero ? String(answer.itemOsNumero).toUpperCase() : "",
-          existingPhotos: normalizeStoredImages(answer?.photoUrls ?? []),
+          observation:
+            answer?.observation ??
+            (typeof itemData?.observacaoItem === "string" ? itemData.observacaoItem : ""),
+          itemOsNumero: answer?.itemOsNumero
+            ? String(answer.itemOsNumero).toUpperCase()
+            : typeof itemData?.osNumeroItem === "string"
+            ? itemData.osNumeroItem.toUpperCase()
+            : "",
+          existingPhotos: mergeStoredImageCollections(answer?.photoUrls, itemData?.fotos),
           newPhotos: [],
         };
       });
 
       answers.forEach(answer => {
         if (answer?.questionId && !templateMap.has(answer.questionId)) {
+          const itemData = itensMap.get(answer.questionId);
           formItems.push({
             questionId: answer.questionId,
             questionText: answer.questionText ?? `Item ${answer.questionId}`,
@@ -228,12 +260,41 @@ export default function EditInspectionPage() {
             order: Number.MAX_SAFE_INTEGER,
             previousResponse: answer.response,
             response: answer.response,
-            observation: answer.observation ?? "",
-            itemOsNumero: answer.itemOsNumero ? String(answer.itemOsNumero).toUpperCase() : "",
-            existingPhotos: normalizeStoredImages(answer.photoUrls ?? []),
+            observation:
+              answer.observation ??
+              (typeof itemData?.observacaoItem === "string" ? itemData.observacaoItem : ""),
+            itemOsNumero: answer.itemOsNumero
+              ? String(answer.itemOsNumero).toUpperCase()
+              : typeof itemData?.osNumeroItem === "string"
+              ? itemData.osNumeroItem.toUpperCase()
+              : "",
+            existingPhotos: mergeStoredImageCollections(answer.photoUrls, itemData?.fotos),
             newPhotos: [],
           });
         }
+      });
+
+      itens.forEach(item => {
+        const questionId = typeof item?.templateItemId === "string" ? item.templateItemId : null;
+        if (!questionId || answersMap.has(questionId) || templateMap.has(questionId)) return;
+        const rawResultado = typeof item.resultado === "string" ? item.resultado.toLowerCase() : null;
+        const response: "c" | "nc" | "na" = rawResultado === "nc" ? "nc" : rawResultado === "na" ? "na" : "c";
+        formItems.push({
+          questionId,
+          questionText: `Item ${questionId}`,
+          componente: undefined,
+          oQueChecar: undefined,
+          instrumento: undefined,
+          criterio: undefined,
+          oQueFazer: undefined,
+          order: Number.MAX_SAFE_INTEGER,
+          previousResponse: response,
+          response,
+          observation: typeof item.observacaoItem === "string" ? item.observacaoItem : "",
+          itemOsNumero: typeof item.osNumeroItem === "string" ? item.osNumeroItem.toUpperCase() : "",
+          existingPhotos: mergeStoredImageCollections(item.fotos),
+          newPhotos: [],
+        });
       });
 
       formItems.sort((a, b) => a.order - b.order);
