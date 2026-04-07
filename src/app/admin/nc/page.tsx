@@ -17,6 +17,7 @@ import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import type {
   ChecklistNonConformityTreatment,
   NonConformityStatus,
@@ -108,6 +109,9 @@ export default function AdminNonConformitiesPage() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkSaving, setBulkSaving] = useState(false);
   const [expandedResolutions, setExpandedResolutions] = useState<Set<string>>(new Set());
+  const [expandedHistory, setExpandedHistory] = useState<Set<string>>(new Set());
+  const [deleteDialogItemId, setDeleteDialogItemId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     setSelectedIds(prev => prev.filter(id => items.some(item => item.id === id)));
@@ -319,6 +323,40 @@ export default function AdminNonConformitiesPage() {
     });
   }, []);
 
+  const handleToggleHistory = useCallback((itemId: string) => {
+    setExpandedHistory(prev => {
+      const next = new Set(prev);
+      if (next.has(itemId)) {
+        next.delete(itemId);
+      } else {
+        next.add(itemId);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleDeleteItem = useCallback(async () => {
+    if (!deleteDialogItemId) return;
+    setDeletingId(deleteDialogItemId);
+    try {
+      const response = await fetch(`/api/admin/nc/${deleteDialogItemId}`, {
+        method: "DELETE",
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload?.error || "Não foi possível excluir a não conformidade.");
+      }
+      setItems(prev => prev.filter(item => item.id !== deleteDialogItemId));
+      setSelectedIds(prev => prev.filter(id => id !== deleteDialogItemId));
+      setDeleteDialogItemId(null);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Erro ao excluir não conformidade";
+      setError(message);
+    } finally {
+      setDeletingId(null);
+    }
+  }, [deleteDialogItemId]);
+
   const allVisibleSelected =
     filteredItems.length > 0 && filteredItems.every(item => selectedIds.includes(item.id));
   const selectedCount = selectedIds.length;
@@ -476,6 +514,8 @@ export default function AdminNonConformitiesPage() {
             const reincidenciaCount = item.reincidenciaCount;
             const isResolutionExpanded = expandedResolutions.has(item.id);
             const hasHistory = item.recurrenceHistory.length > 0;
+            const isHistoryExpanded = expandedHistory.has(item.id);
+            const visibleHistory = isHistoryExpanded ? item.recurrenceHistory : item.recurrenceHistory.slice(0, 3);
             return (
               <article key={item.id}>
                 <Card>
@@ -646,7 +686,7 @@ export default function AdminNonConformitiesPage() {
                         <p className="text-sm text-[var(--muted)]">Sem histórico anterior.</p>
                       ) : (
                         <div className="divide-y divide-[var(--border)] rounded-lg border border-[var(--border)] bg-white">
-                          {item.recurrenceHistory.map(historyItem => (
+                          {visibleHistory.map(historyItem => (
                             <div key={`${item.id}-${historyItem.inspectionId}`} className="space-y-1 px-3 py-2">
                               <p className="text-xs text-[var(--muted)]">
                                 {formatDateTime(historyItem.checklistDate)}
@@ -661,6 +701,16 @@ export default function AdminNonConformitiesPage() {
                           ))}
                         </div>
                       )}
+                      {item.recurrenceHistory.length > 3 && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          className="h-auto px-0 py-1 text-xs"
+                          onClick={() => handleToggleHistory(item.id)}
+                        >
+                          {isHistoryExpanded ? "Exibir apenas 3 últimas" : "Exibir histórico completo"}
+                        </Button>
+                      )}
                     </section>
 
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -668,6 +718,14 @@ export default function AdminNonConformitiesPage() {
                         {item.updatedAt ? `Atualizado em ${formatDateTime(item.updatedAt)}` : "Tratativa ainda não salva"}
                       </div>
                       <div className="flex items-center gap-3">
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          onClick={() => setDeleteDialogItemId(item.id)}
+                          disabled={bulkSaving || deletingId === item.id}
+                        >
+                          Excluir NC
+                        </Button>
                         <Button
                           onClick={() => handleSave(item)}
                           loading={savingId === item.id}
@@ -695,6 +753,19 @@ export default function AdminNonConformitiesPage() {
           })}
         </div>
       )}
+      <ConfirmDialog
+        open={deleteDialogItemId != null}
+        title="Excluir não conformidade?"
+        description="Essa ação remove o card da NC e não poderá ser desfeita."
+        confirmLabel="Excluir NC"
+        cancelLabel="Cancelar"
+        busy={deletingId != null}
+        onCancel={() => {
+          if (deletingId) return;
+          setDeleteDialogItemId(null);
+        }}
+        onConfirm={handleDeleteItem}
+      />
     </div>
   );
 }
