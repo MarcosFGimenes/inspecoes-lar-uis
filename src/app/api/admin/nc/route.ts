@@ -310,20 +310,16 @@ export async function GET(req: NextRequest) {
 
     treatmentsByResponse[inspectionDoc.id] = treatments;
 
-    const rawItems = Array.isArray(inspectionData.itens) ? (inspectionData.itens as Array<Record<string, unknown>>) : [];
-    rawItems.forEach(rawItem => {
-      if (!rawItem?.templateItemId) return;
-      if (String(rawItem.resultado || "").toUpperCase() !== "NC") return;
-      const questionId = String(rawItem.templateItemId);
+    answers.forEach(answer => {
+      if (!answer?.questionId || answer.response !== "nc") return;
+      const questionId = String(answer.questionId);
       const logicalId = `${machineId ?? "sem-maquina"}::${questionId}`;
       const inspectionDate = resolveInspectionDate(inspectionData);
       const itemOsNumero =
-        typeof rawItem.osNumeroItem === "string" && rawItem.osNumeroItem.trim()
-          ? rawItem.osNumeroItem.trim().toUpperCase()
+        typeof answer.itemOsNumero === "string" && answer.itemOsNumero.trim()
+          ? answer.itemOsNumero.trim().toUpperCase()
           : null;
-      const answer = answersMap.get(questionId);
-      const observation =
-        typeof rawItem.observacaoItem === "string" ? rawItem.observacaoItem : answer?.observation ?? null;
+      const observation = answer.observation ?? null;
       const currentHistory = ncHistoryByLogicalId.get(logicalId) ?? [];
       currentHistory.push({
         inspectionId: inspectionDoc.id,
@@ -382,8 +378,15 @@ export async function GET(req: NextRequest) {
 
     const reincidenciaCount = typeof issueData.reincidenciaCount === "number" ? issueData.reincidenciaCount : 0;
     const logicalId = `${machineId ?? sourceInspection?.machineId ?? "sem-maquina"}::${questionId}`;
+    const currentChecklistTs = Date.parse(sourceInspection?.checklistDate ?? "");
     const historyList = (ncHistoryByLogicalId.get(logicalId) ?? [])
-      .filter(entry => entry.inspectionId !== responseId)
+      .filter(entry => {
+        if (entry.inspectionId === responseId) return false;
+        if (Number.isNaN(currentChecklistTs)) return true;
+        const entryTs = Date.parse(entry.checklistDate ?? "");
+        if (Number.isNaN(entryTs)) return true;
+        return entryTs < currentChecklistTs;
+      })
       .sort((a, b) => {
         const aTs = Date.parse(a.checklistDate ?? "");
         const bTs = Date.parse(b.checklistDate ?? "");

@@ -108,7 +108,6 @@ export default function AdminNonConformitiesPage() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkSaving, setBulkSaving] = useState(false);
   const [expandedResolutions, setExpandedResolutions] = useState<Set<string>>(new Set());
-  const [expandedHistory, setExpandedHistory] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     setSelectedIds(prev => prev.filter(id => items.some(item => item.id === id)));
@@ -320,18 +319,6 @@ export default function AdminNonConformitiesPage() {
     });
   }, []);
 
-  const handleToggleHistory = useCallback((itemId: string) => {
-    setExpandedHistory(prev => {
-      const next = new Set(prev);
-      if (next.has(itemId)) {
-        next.delete(itemId);
-      } else {
-        next.add(itemId);
-      }
-      return next;
-    });
-  }, []);
-
   const allVisibleSelected =
     filteredItems.length > 0 && filteredItems.every(item => selectedIds.includes(item.id));
   const selectedCount = selectedIds.length;
@@ -489,7 +476,6 @@ export default function AdminNonConformitiesPage() {
             const reincidenciaCount = item.reincidenciaCount;
             const isResolutionExpanded = expandedResolutions.has(item.id);
             const hasHistory = item.recurrenceHistory.length > 0;
-            const isHistoryExpanded = expandedHistory.has(item.id);
             return (
               <article key={item.id}>
                 <Card>
@@ -655,22 +641,10 @@ export default function AdminNonConformitiesPage() {
                     </section>
 
                     <section className="space-y-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <h3 className="text-sm font-semibold text-[var(--text)]">Histórico de reincidências</h3>
-                        {hasHistory && (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            className="h-auto px-2 py-1 text-xs"
-                            onClick={() => handleToggleHistory(item.id)}
-                          >
-                            {isHistoryExpanded ? "Recolher" : "Expandir"}
-                          </Button>
-                        )}
-                      </div>
+                      <h3 className="text-sm font-semibold text-[var(--text)]">Histórico de reincidências</h3>
                       {!hasHistory ? (
                         <p className="text-sm text-[var(--muted)]">Sem histórico anterior.</p>
-                      ) : isHistoryExpanded ? (
+                      ) : (
                         <div className="divide-y divide-[var(--border)] rounded-lg border border-[var(--border)] bg-white">
                           {item.recurrenceHistory.map(historyItem => (
                             <div key={`${item.id}-${historyItem.inspectionId}`} className="space-y-1 px-3 py-2">
@@ -686,11 +660,6 @@ export default function AdminNonConformitiesPage() {
                             </div>
                           ))}
                         </div>
-                      ) : (
-                        <p className="text-sm text-[var(--muted)]">
-                          {item.recurrenceHistory.length} ocorrência{item.recurrenceHistory.length === 1 ? "" : "s"} anterior
-                          {item.recurrenceHistory.length === 1 ? "" : "es"}.
-                        </p>
                       )}
                     </section>
 
