@@ -378,15 +378,8 @@ export async function GET(req: NextRequest) {
 
     const reincidenciaCount = typeof issueData.reincidenciaCount === "number" ? issueData.reincidenciaCount : 0;
     const logicalId = `${machineId ?? sourceInspection?.machineId ?? "sem-maquina"}::${questionId}`;
-    const currentChecklistTs = Date.parse(sourceInspection?.checklistDate ?? "");
     const historyList = (ncHistoryByLogicalId.get(logicalId) ?? [])
-      .filter(entry => {
-        if (entry.inspectionId === responseId) return false;
-        if (Number.isNaN(currentChecklistTs)) return true;
-        const entryTs = Date.parse(entry.checklistDate ?? "");
-        if (Number.isNaN(entryTs)) return true;
-        return entryTs < currentChecklistTs;
-      })
+      .filter(entry => entry.inspectionId !== responseId)
       .sort((a, b) => {
         const aTs = Date.parse(a.checklistDate ?? "");
         const bTs = Date.parse(b.checklistDate ?? "");
