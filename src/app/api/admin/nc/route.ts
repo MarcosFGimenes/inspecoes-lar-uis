@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminFromRequest } from "@/lib/guards";
 import { adminDb } from "@/lib/firebase-admin";
-import { resolveIssueLastActivityAt, sortByLastActivityDesc } from "@/lib/non-conformity-priority";
+import {
+  resolveIssueLastActivityAt,
+  resolveIssueLastReincidenciaAt,
+  sortByLastActivityDesc,
+} from "@/lib/non-conformity-priority";
 import { normalizeStoredImages } from "@/lib/storage/images";
 import type { ChecklistAnswer, ChecklistNonConformityTreatment, NonConformityStatus, StoredImage } from "@/types";
 
@@ -25,6 +29,7 @@ interface SourceInspectionData {
   machineId: string | null;
   machineLabel: string;
   machineTag: string | null;
+  maintainerId: string | null;
   templateId: string | null;
   templateLabel: string;
   templateVersion: string | null;
@@ -75,6 +80,7 @@ interface NonConformityItemResponse {
   checklistDate: string | null;
   operatorNome: string | null;
   operatorMatricula: string | null;
+  maintainerId: string | null;
   observation: string | null;
   photos: StoredImage[];
   itemOsNumero: string | null;
@@ -89,6 +95,7 @@ interface NonConformityItemResponse {
   recurrenceHistory: NonConformityRecurrenceHistoryItem[];
   maintainerResolution: MaintainerResolutionInfo | null;
   updatedAt: string | null;
+  lastReincidenciaAt: string | null;
 }
 
 function formatDateInput(value: string | null | undefined) {
@@ -223,16 +230,53 @@ function resolveMachineIdFromInspection(data: Record<string, unknown>): string |
   return null;
 }
 
+function resolveMachineLogicalKeyFromInspection(data: Record<string, unknown>) {
+  const machine = (data.machine ?? {}) as Record<string, unknown>;
+  const machineId = resolveMachineIdFromInspection(data);
+  if (machineId) return `id:${machineId}`.toLowerCase();
+  if (typeof machine.tag === "string" && machine.tag.trim()) {
+    return `tag:${machine.tag.trim()}`.toLowerCase();
+  }
+  return "sem-maquina";
+}
+
+function resolveMachineLogicalKeyFromIssue(data: Record<string, unknown>, fallbackTag?: string | null) {
+  if (typeof data.machineId === "string" && data.machineId.trim()) {
+    return `id:${data.machineId.trim()}`.toLowerCase();
+  }
+  if (typeof data.tag === "string" && data.tag.trim()) {
+    return `tag:${data.tag.trim()}`.toLowerCase();
+  }
+  if (fallbackTag && fallbackTag.trim()) {
+    return `tag:${fallbackTag.trim()}`.toLowerCase();
+  }
+  return "sem-maquina";
+}
+
 export async function GET(req: NextRequest) {
   const isAdmin = await requireAdminFromRequest(req);
   if (!isAdmin) {
     return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 });
   }
 
+  const queryParams = req.nextUrl.searchParams;
+  const rawLimit = Number(queryParams.get("limit") ?? "20");
+  const rawOffset = Number(queryParams.get("offset") ?? "0");
+  const includeAll = queryParams.get("all") === "1";
+  const issueStatusFilter = (queryParams.get("status") ?? "aberta").trim().toLowerCase();
+  const maintainerIdFilter = queryParams.get("mantenedor_id")?.trim() ?? "";
+
+  const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(Math.floor(rawLimit), 500) : 20;
+  const offset = Number.isFinite(rawOffset) && rawOffset >= 0 ? Math.floor(rawOffset) : 0;
+  const allowedStatuses = new Set(["aberta", "concluida", "resolvida"]);
+  const normalizedIssueStatus = allowedStatuses.has(issueStatusFilter) ? issueStatusFilter : "aberta";
+
+  const issuesQuery = adminDb.collection("issues").where("status", "==", normalizedIssueStatus);
+
   const [machinesSnap, templatesSnap, issuesSnap, inspectionsSnap] = await Promise.all([
     adminDb.collection("machines").get(),
     adminDb.collection("templates").get(),
-    adminDb.collection("issues").where("status", "in", ["aberta", "concluida", "resolvida"]).get(),
+    issuesQuery.get(),
     adminDb.collection("inspecoes").get(),
   ]);
 
@@ -295,6 +339,12 @@ export async function GET(req: NextRequest) {
       machineId,
       machineLabel: buildMachineLabel(machine),
       machineTag: typeof machine.tag === "string" ? machine.tag : null,
+      maintainerId:
+        typeof maintainer.maintId === "string"
+          ? maintainer.maintId
+          : typeof maintainer.id === "string"
+            ? maintainer.id
+            : null,
       templateId,
       templateLabel:
         templateMeta?.nome ?? (typeof templateInfo.nome === "string" ? String(templateInfo.nome) : "Template"),
@@ -313,7 +363,8 @@ export async function GET(req: NextRequest) {
     answers.forEach(answer => {
       if (!answer?.questionId || answer.response !== "nc") return;
       const questionId = String(answer.questionId);
-      const logicalId = `${machineId ?? "sem-maquina"}::${questionId}`;
+      const machineLogicalKey = resolveMachineLogicalKeyFromInspection(inspectionData);
+      const logicalId = `${machineLogicalKey}::${questionId}`;
       const inspectionDate = resolveInspectionDate(inspectionData);
       const itemOsNumero =
         typeof answer.itemOsNumero === "string" && answer.itemOsNumero.trim()
@@ -334,6 +385,7 @@ export async function GET(req: NextRequest) {
   });
 
   const builtItems: NonConformityItemResponse[] = [];
+  const issuesToMigrate: Array<{ id: string; lastReincidenciaAt: string }> = [];
   issuesSnap.docs.forEach(issueDoc => {
     const issueData = issueDoc.data() ?? {};
     const machineId = typeof issueData.machineId === "string" ? issueData.machineId : null;
@@ -363,6 +415,10 @@ export async function GET(req: NextRequest) {
       typeof rawIssueTreatment?.responsible === "string" ? rawIssueTreatment.responsible : sourceTreatment?.responsible ?? null;
     const dueDateIsoValue = typeof rawIssueTreatment?.dueDate === "string" ? rawIssueTreatment.dueDate : sourceTreatment?.dueDate ?? null;
     const updatedAtValue = resolveIssueLastActivityAt({ issueData, rawIssueTreatment, sourceTreatment });
+    const lastReincidenciaAtValue = resolveIssueLastReincidenciaAt(issueData);
+    if (!issueData.last_reincidencia_at && !issueData.lastReincidenciaAt && lastReincidenciaAtValue) {
+      issuesToMigrate.push({ id: issueDoc.id, lastReincidenciaAt: lastReincidenciaAtValue });
+    }
 
     const rawResolution = issueData.maintainerResolution ?? null;
     const maintainerResolution = rawResolution && typeof rawResolution === "object"
@@ -377,7 +433,8 @@ export async function GET(req: NextRequest) {
       : null;
 
     const reincidenciaCount = typeof issueData.reincidenciaCount === "number" ? issueData.reincidenciaCount : 0;
-    const logicalId = `${machineId ?? sourceInspection?.machineId ?? "sem-maquina"}::${questionId}`;
+    const machineLogicalKey = resolveMachineLogicalKeyFromIssue(issueData, sourceInspection?.machineTag ?? issueTag);
+    const logicalId = `${machineLogicalKey}::${questionId}`;
     const historyList = (ncHistoryByLogicalId.get(logicalId) ?? [])
       .filter(entry => entry.inspectionId !== responseId)
       .sort((a, b) => {
@@ -407,6 +464,7 @@ export async function GET(req: NextRequest) {
       checklistDate: sourceInspection?.checklistDate ?? (typeof issueData.createdAt === "string" ? issueData.createdAt : null),
       operatorNome: sourceInspection?.operatorNome ?? null,
       operatorMatricula: sourceInspection?.operatorMatricula ?? null,
+      maintainerId: sourceInspection?.maintainerId ?? null,
       observation: typeof issueData.descricao === "string" ? issueData.descricao : answerData?.observation ?? null,
       photos: mergeStoredImageCollections(issueData.fotos, answerData?.photoUrls),
       itemOsNumero: typeof issueData.osNumero === "string" ? issueData.osNumero : answerData?.itemOsNumero ?? null,
@@ -421,11 +479,41 @@ export async function GET(req: NextRequest) {
       recurrenceHistory: historyList,
       maintainerResolution,
       updatedAt: updatedAtValue,
+      lastReincidenciaAt: lastReincidenciaAtValue,
     });
   });
 
+  if (issuesToMigrate.length > 0) {
+    const chunkSize = 400;
+    for (let index = 0; index < issuesToMigrate.length; index += chunkSize) {
+      const batch = adminDb.batch();
+      const chunk = issuesToMigrate.slice(index, index + chunkSize);
+      chunk.forEach(item => {
+        const ref = adminDb.collection("issues").doc(item.id);
+        batch.update(ref, {
+          lastReincidenciaAt: item.lastReincidenciaAt,
+          last_reincidencia_at: item.lastReincidenciaAt,
+        });
+      });
+      await batch.commit();
+    }
+  }
+
+  const sortedItems = sortByLastActivityDesc(
+    maintainerIdFilter
+      ? builtItems.filter(item => item.maintainerId === maintainerIdFilter)
+      : builtItems
+  );
+  const total = sortedItems.length;
+  const paginatedItems = includeAll ? sortedItems : sortedItems.slice(offset, offset + limit);
+  const returnedCount = includeAll ? total : Math.min(limit, Math.max(total - offset, 0));
+  const nextOffset = includeAll ? total : offset + returnedCount;
+
   return NextResponse.json({
-    items: sortByLastActivityDesc(builtItems),
+    items: paginatedItems,
+    total,
+    hasMore: nextOffset < total,
+    nextOffset,
     treatmentsByResponse,
   });
 }
