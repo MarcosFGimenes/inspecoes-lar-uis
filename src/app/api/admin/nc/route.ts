@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminFromRequest } from "@/lib/guards";
 import { adminDb } from "@/lib/firebase-admin";
-import { resolveIssueLastActivityAt, sortByLastActivityDesc } from "@/lib/non-conformity-priority";
+import {
+  resolveIssueLastActivityAt,
+  resolveIssueLastReincidenciaAt,
+  sortByLastActivityDesc,
+} from "@/lib/non-conformity-priority";
 import { normalizeStoredImages } from "@/lib/storage/images";
 import type { ChecklistAnswer, ChecklistNonConformityTreatment, NonConformityStatus, StoredImage } from "@/types";
 
@@ -91,6 +95,7 @@ interface NonConformityItemResponse {
   recurrenceHistory: NonConformityRecurrenceHistoryItem[];
   maintainerResolution: MaintainerResolutionInfo | null;
   updatedAt: string | null;
+  lastReincidenciaAt: string | null;
 }
 
 function formatDateInput(value: string | null | undefined) {
@@ -356,6 +361,7 @@ export async function GET(req: NextRequest) {
   });
 
   const builtItems: NonConformityItemResponse[] = [];
+  const issuesToMigrate: Array<{ id: string; lastReincidenciaAt: string }> = [];
   issuesSnap.docs.forEach(issueDoc => {
     const issueData = issueDoc.data() ?? {};
     const machineId = typeof issueData.machineId === "string" ? issueData.machineId : null;
@@ -385,6 +391,10 @@ export async function GET(req: NextRequest) {
       typeof rawIssueTreatment?.responsible === "string" ? rawIssueTreatment.responsible : sourceTreatment?.responsible ?? null;
     const dueDateIsoValue = typeof rawIssueTreatment?.dueDate === "string" ? rawIssueTreatment.dueDate : sourceTreatment?.dueDate ?? null;
     const updatedAtValue = resolveIssueLastActivityAt({ issueData, rawIssueTreatment, sourceTreatment });
+    const lastReincidenciaAtValue = resolveIssueLastReincidenciaAt(issueData);
+    if (!issueData.last_reincidencia_at && !issueData.lastReincidenciaAt && lastReincidenciaAtValue) {
+      issuesToMigrate.push({ id: issueDoc.id, lastReincidenciaAt: lastReincidenciaAtValue });
+    }
 
     const rawResolution = issueData.maintainerResolution ?? null;
     const maintainerResolution = rawResolution && typeof rawResolution === "object"
@@ -444,8 +454,25 @@ export async function GET(req: NextRequest) {
       recurrenceHistory: historyList,
       maintainerResolution,
       updatedAt: updatedAtValue,
+      lastReincidenciaAt: lastReincidenciaAtValue,
     });
   });
+
+  if (issuesToMigrate.length > 0) {
+    const chunkSize = 400;
+    for (let index = 0; index < issuesToMigrate.length; index += chunkSize) {
+      const batch = adminDb.batch();
+      const chunk = issuesToMigrate.slice(index, index + chunkSize);
+      chunk.forEach(item => {
+        const ref = adminDb.collection("issues").doc(item.id);
+        batch.update(ref, {
+          lastReincidenciaAt: item.lastReincidenciaAt,
+          last_reincidencia_at: item.lastReincidenciaAt,
+        });
+      });
+      await batch.commit();
+    }
+  }
 
   const sortedItems = sortByLastActivityDesc(
     maintainerIdFilter

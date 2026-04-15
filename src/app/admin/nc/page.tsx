@@ -54,6 +54,7 @@ interface NonConformityItem {
   recurrenceHistory: NonConformityRecurrenceHistoryItem[];
   maintainerResolution: MaintainerResolutionInfo | null;
   updatedAt: string | null;
+  lastReincidenciaAt: string | null;
 }
 
 interface NonConformityRecurrenceHistoryItem {
