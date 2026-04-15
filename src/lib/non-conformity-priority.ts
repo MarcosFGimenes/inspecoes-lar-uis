@@ -21,6 +21,8 @@ export function buildIssueRecurrenceUpdates({
   const updates: Record<string, unknown> = {
     reincidenciaCount: currentReincidencia + 1,
     ultimaReincidenciaEm: nowIso,
+    lastReincidenciaAt: nowIso,
+    last_reincidencia_at: nowIso,
     ultimaReincidenciaInspecaoId: inspectionId,
     ultimaOcorrenciaEm: nowIso,
     updatedAt: nowIso,
@@ -74,10 +76,28 @@ export function resolveIssueLastActivityAt({
   return null;
 }
 
-export function sortByLastActivityDesc<T extends { updatedAt: string | null; checklistDate: string | null }>(items: T[]): T[] {
+export function resolveIssueLastReincidenciaAt(issueData: Record<string, unknown>): string | null {
+  const candidates: Array<unknown> = [
+    issueData.last_reincidencia_at,
+    issueData.lastReincidenciaAt,
+    issueData.ultimaReincidenciaEm,
+    issueData.ultimaOcorrenciaEm,
+    issueData.createdAt,
+  ];
+
+  for (const value of candidates) {
+    if (typeof value === "string" && value.trim()) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+export function sortByLastActivityDesc<T extends { lastReincidenciaAt?: string | null; updatedAt: string | null; checklistDate: string | null }>(items: T[]): T[] {
   return [...items].sort((a, b) => {
-    const aTs = Date.parse(a.updatedAt ?? a.checklistDate ?? "");
-    const bTs = Date.parse(b.updatedAt ?? b.checklistDate ?? "");
+    const aTs = Date.parse(a.lastReincidenciaAt ?? a.checklistDate ?? "");
+    const bTs = Date.parse(b.lastReincidenciaAt ?? b.checklistDate ?? "");
     const normalizedA = Number.isNaN(aTs) ? 0 : aTs;
     const normalizedB = Number.isNaN(bTs) ? 0 : bTs;
     return normalizedB - normalizedA;

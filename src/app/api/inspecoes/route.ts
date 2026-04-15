@@ -384,6 +384,8 @@ export async function POST(req: NextRequest) {
         status: "aberta",
         abertaEmInspecaoId: inspectionId,
         createdAt: nowIso,
+        lastReincidenciaAt: nowIso,
+        last_reincidencia_at: nowIso,
         updatedAt: nowIso,
         ultimaOcorrenciaEm: nowIso,
         reabertaDe: latestResolvedIssue?.id ?? null,

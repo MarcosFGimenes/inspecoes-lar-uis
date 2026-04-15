@@ -431,6 +431,10 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
             if (observation && activeIssueDoc.data()?.descricao !== observation) {
               updatesIssue.descricao = observation;
             }
+            updatesIssue.lastReincidenciaAt = nowIso;
+            updatesIssue.last_reincidencia_at = nowIso;
+            updatesIssue.ultimaReincidenciaEm = nowIso;
+            updatesIssue.ultimaOcorrenciaEm = nowIso;
             if (Object.keys(updatesIssue).length > 0) {
               await activeIssueDoc.ref.update(updatesIssue);
             }
@@ -459,6 +463,8 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
               status: "aberta",
               abertaEmInspecaoId: id,
               createdAt: nowIso,
+              lastReincidenciaAt: nowIso,
+              last_reincidencia_at: nowIso,
               reabertaDe: latestResolvedIssue?.id ?? null,
             });
             issuesCriadas.push(issueRef.id);

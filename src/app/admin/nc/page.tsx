@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import {
   collection,
@@ -39,6 +39,7 @@ interface NonConformityItem {
   checklistDate: string | null;
   operatorNome: string | null;
   operatorMatricula: string | null;
+  maintainerId: string | null;
   observation: string | null;
   photos: StoredImage[];
   itemOsNumero: string | null;
@@ -53,6 +54,7 @@ interface NonConformityItem {
   recurrenceHistory: NonConformityRecurrenceHistoryItem[];
   maintainerResolution: MaintainerResolutionInfo | null;
   updatedAt: string | null;
+  lastReincidenciaAt: string | null;
 }
 
 interface NonConformityRecurrenceHistoryItem {
@@ -78,6 +80,12 @@ interface FeedbackState {
   message: string;
 }
 
+interface MaintainerOption {
+  id: string;
+  nome: string | null;
+  matricula: string | null;
+}
+
 function formatDateTime(value: string | null | undefined) {
   if (!value) return "-";
   const date = new Date(value);
@@ -97,13 +105,21 @@ const STATUS_OPTIONS: Array<{ value: NonConformityStatus; label: string }> = [
   { value: "resolved", label: "Resolvida" },
 ];
 
+const NC_PAGE_SIZE = 20;
+
 export default function AdminNonConformitiesPage() {
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<NonConformityItem[]>([]);
   const [treatmentsByResponse, setTreatmentsByResponse] = useState<Record<string, ChecklistNonConformityTreatment[]>>({});
   const [machineFilter, setMachineFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("aberta");
+  const [maintainerFilter, setMaintainerFilter] = useState("");
+  const [maintainers, setMaintainers] = useState<MaintainerOption[]>([]);
+  const [offset, setOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [totalItems, setTotalItems] = useState(0);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<Record<string, FeedbackState>>({});
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -112,16 +128,34 @@ export default function AdminNonConformitiesPage() {
   const [expandedHistory, setExpandedHistory] = useState<Set<string>>(new Set());
   const [deleteDialogItemId, setDeleteDialogItemId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const loadingMoreRef = useRef(false);
 
   useEffect(() => {
     setSelectedIds(prev => prev.filter(id => items.some(item => item.id === id)));
   }, [items]);
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
+  const loadData = useCallback(async (reset = true, fetchAll = false, requestOffset = 0) => {
+    if (!reset && loadingMoreRef.current) return;
+    if (reset) setLoading(true);
+    else {
+      loadingMoreRef.current = true;
+      setLoadingMore(true);
+    }
     setError(null);
     try {
-      const session = await fetch("/api/admin/nc", { cache: "no-store" });
+      const params = new URLSearchParams();
+      params.set("status", statusFilter);
+      if (maintainerFilter) {
+        params.set("mantenedor_id", maintainerFilter);
+      }
+      if (fetchAll) {
+        params.set("all", "1");
+      } else {
+        params.set("limit", String(NC_PAGE_SIZE));
+        params.set("offset", String(reset ? 0 : requestOffset));
+      }
+
+      const session = await fetch(`/api/admin/nc?${params.toString()}`, { cache: "no-store" });
       if (session.status === 401) {
         window.location.href = "/admin/login";
         return;
@@ -132,20 +166,58 @@ export default function AdminNonConformitiesPage() {
       const payload = (await session.json()) as {
         items?: NonConformityItem[];
         treatmentsByResponse?: Record<string, ChecklistNonConformityTreatment[]>;
+        total?: number;
+        hasMore?: boolean;
+        nextOffset?: number;
       };
-      setItems(sortByLastActivityDesc(payload.items ?? []));
+      const nextItems = sortByLastActivityDesc(payload.items ?? []);
+      setItems(prev => (reset || fetchAll ? nextItems : sortByLastActivityDesc([...prev, ...nextItems])));
       setTreatmentsByResponse(payload.treatmentsByResponse ?? {});
+      setHasMore(Boolean(payload.hasMore));
+      setTotalItems(typeof payload.total === "number" ? payload.total : nextItems.length);
+      setOffset(typeof payload.nextOffset === "number" ? payload.nextOffset : nextItems.length);
     } catch (err: unknown) {
       const message = err instanceof Error && err.message ? err.message : "Erro ao carregar dados";
       setError(message);
     } finally {
-      setLoading(false);
+      if (reset) setLoading(false);
+      else {
+        loadingMoreRef.current = false;
+        setLoadingMore(false);
+      }
     }
+  }, [maintainerFilter, statusFilter]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadMaintainers() {
+      try {
+        const response = await fetch("/api/mantenedores", { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = (await response.json()) as Array<Record<string, unknown>>;
+        if (cancelled) return;
+        const options = payload
+          .map(item => ({
+            id: String(item.id ?? ""),
+            nome: typeof item.nome === "string" ? item.nome : null,
+            matricula: typeof item.matricula === "string" ? item.matricula : null,
+          }))
+          .filter(item => item.id)
+          .sort((a, b) => `${a.matricula ?? ""} ${a.nome ?? ""}`.localeCompare(`${b.matricula ?? ""} ${b.nome ?? ""}`, "pt-BR"));
+        setMaintainers(options);
+      } catch {
+        // Falha de carregamento dos mantenedores não bloqueia a página.
+      }
+    }
+    loadMaintainers();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    loadData(true);
+  }, [statusFilter, maintainerFilter, loadData]);
 
   const machineOptionsForFilter = useMemo(() => {
     return Array.from(new Set(items.map(item => item.machineLabel.trim()).filter(Boolean))).sort((a, b) =>
@@ -168,18 +240,9 @@ export default function AdminNonConformitiesPage() {
           return false;
         }
       }
-      if (statusFilter === "pending") {
-        return item.status !== "resolved";
-      }
-      if (statusFilter === "planned") {
-        return Boolean(item.summary.trim() || item.responsible.trim() || item.dueDate);
-      }
-      if (statusFilter === "all") {
-        return true;
-      }
-      return item.status === statusFilter;
+      return true;
     });
-  }, [items, machineFilter, statusFilter]);
+  }, [items, machineFilter]);
 
   const handleUpdateItem = useCallback((id: string, updates: Partial<NonConformityItem>) => {
     setItems(prev =>
@@ -397,7 +460,7 @@ export default function AdminNonConformitiesPage() {
             <h1 className="text-2xl font-semibold text-[var(--text)]">Não conformidades</h1>
             <p className="text-sm text-[var(--muted)]">Visualize e trate as respostas marcadas como NC.</p>
           </div>
-          <Button variant="secondary" onClick={() => loadData()}>
+          <Button variant="secondary" onClick={() => loadData(true)}>
             Recarregar
           </Button>
         </header>
@@ -415,7 +478,7 @@ export default function AdminNonConformitiesPage() {
           <h1 className="text-2xl font-semibold text-[var(--text)]">Não conformidades</h1>
           <p className="text-sm text-[var(--muted)]">Somente respostas &quot;NC&quot; aparecem nesta lista para tratativa.</p>
         </div>
-        <Button variant="secondary" onClick={() => loadData()}>
+        <Button variant="secondary" onClick={() => loadData(true)}>
           Recarregar
         </Button>
       </header>
@@ -424,7 +487,7 @@ export default function AdminNonConformitiesPage() {
         <CardHeader className="pb-4">
           <CardTitle className="text-base text-[var(--text)]">Filtros</CardTitle>
         </CardHeader>
-        <CardContent className="grid gap-4 md:grid-cols-2">
+        <CardContent className="grid gap-4 md:grid-cols-3">
           <label className="space-y-1 text-sm">
             <span className="text-[var(--muted)]">Máquina</span>
             <Input
@@ -443,16 +506,29 @@ export default function AdminNonConformitiesPage() {
           <label className="space-y-1 text-sm">
             <span className="text-[var(--muted)]">Status</span>
             <Select value={statusFilter} onChange={event => setStatusFilter(event.target.value)}>
-              <option value="pending">Pendentes</option>
-              <option value="planned">Com tratativa planejada</option>
-              <option value="all">Todos</option>
-              <option value="open">Abertas</option>
-              <option value="in_progress">Em andamento</option>
-              <option value="resolved">Resolvidas</option>
+              <option value="aberta">Abertas</option>
+              <option value="concluida">Concluídas</option>
+              <option value="resolvida">Resolvidas</option>
+            </Select>
+          </label>
+          <label className="space-y-1 text-sm">
+            <span className="text-[var(--muted)]">Mantenedor</span>
+            <Select value={maintainerFilter} onChange={event => setMaintainerFilter(event.target.value)}>
+              <option value="">Todos</option>
+              {maintainers.map(maintainer => (
+                <option key={maintainer.id} value={maintainer.id}>
+                  {maintainer.matricula ? `${maintainer.matricula} — ` : ""}
+                  {maintainer.nome ?? maintainer.id}
+                </option>
+              ))}
             </Select>
           </label>
         </CardContent>
       </Card>
+
+      <div className="text-sm text-[var(--muted)]">
+        Mostrando {items.length} de {totalItems} não conformidades.
+      </div>
 
       {filteredItems.length > 0 && (
         <Card>
@@ -753,6 +829,32 @@ export default function AdminNonConformitiesPage() {
           })}
         </div>
       )}
+
+      <Card>
+        <CardContent className="flex flex-wrap items-center justify-between gap-3 py-5">
+          <div className="text-sm text-[var(--muted)]">
+            {hasMore ? "Há mais registros disponíveis." : "Todos os registros carregados."}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              disabled={!hasMore || loadingMore || loading}
+              loading={loadingMore}
+              onClick={() => loadData(false, false, offset)}
+            >
+              Mostrar mais 20
+            </Button>
+            <Button
+              variant="secondary"
+              disabled={!hasMore || loadingMore || loading}
+              loading={loadingMore}
+              onClick={() => loadData(false, true, offset)}
+            >
+              Mostrar todas
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
       <ConfirmDialog
         open={deleteDialogItemId != null}
         title="Excluir não conformidade?"
