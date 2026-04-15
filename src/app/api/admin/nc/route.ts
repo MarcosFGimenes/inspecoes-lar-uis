@@ -25,6 +25,7 @@ interface SourceInspectionData {
   machineId: string | null;
   machineLabel: string;
   machineTag: string | null;
+  maintainerId: string | null;
   templateId: string | null;
   templateLabel: string;
   templateVersion: string | null;
@@ -75,6 +76,7 @@ interface NonConformityItemResponse {
   checklistDate: string | null;
   operatorNome: string | null;
   operatorMatricula: string | null;
+  maintainerId: string | null;
   observation: string | null;
   photos: StoredImage[];
   itemOsNumero: string | null;
@@ -229,10 +231,24 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 });
   }
 
+  const queryParams = req.nextUrl.searchParams;
+  const rawLimit = Number(queryParams.get("limit") ?? "20");
+  const rawOffset = Number(queryParams.get("offset") ?? "0");
+  const includeAll = queryParams.get("all") === "1";
+  const issueStatusFilter = (queryParams.get("status") ?? "aberta").trim().toLowerCase();
+  const maintainerIdFilter = queryParams.get("mantenedor_id")?.trim() ?? "";
+
+  const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(Math.floor(rawLimit), 500) : 20;
+  const offset = Number.isFinite(rawOffset) && rawOffset >= 0 ? Math.floor(rawOffset) : 0;
+  const allowedStatuses = new Set(["aberta", "concluida", "resolvida"]);
+  const normalizedIssueStatus = allowedStatuses.has(issueStatusFilter) ? issueStatusFilter : "aberta";
+
+  const issuesQuery = adminDb.collection("issues").where("status", "==", normalizedIssueStatus);
+
   const [machinesSnap, templatesSnap, issuesSnap, inspectionsSnap] = await Promise.all([
     adminDb.collection("machines").get(),
     adminDb.collection("templates").get(),
-    adminDb.collection("issues").where("status", "in", ["aberta", "concluida", "resolvida"]).get(),
+    issuesQuery.get(),
     adminDb.collection("inspecoes").get(),
   ]);
 
@@ -295,6 +311,12 @@ export async function GET(req: NextRequest) {
       machineId,
       machineLabel: buildMachineLabel(machine),
       machineTag: typeof machine.tag === "string" ? machine.tag : null,
+      maintainerId:
+        typeof maintainer.maintId === "string"
+          ? maintainer.maintId
+          : typeof maintainer.id === "string"
+            ? maintainer.id
+            : null,
       templateId,
       templateLabel:
         templateMeta?.nome ?? (typeof templateInfo.nome === "string" ? String(templateInfo.nome) : "Template"),
@@ -407,6 +429,7 @@ export async function GET(req: NextRequest) {
       checklistDate: sourceInspection?.checklistDate ?? (typeof issueData.createdAt === "string" ? issueData.createdAt : null),
       operatorNome: sourceInspection?.operatorNome ?? null,
       operatorMatricula: sourceInspection?.operatorMatricula ?? null,
+      maintainerId: sourceInspection?.maintainerId ?? null,
       observation: typeof issueData.descricao === "string" ? issueData.descricao : answerData?.observation ?? null,
       photos: mergeStoredImageCollections(issueData.fotos, answerData?.photoUrls),
       itemOsNumero: typeof issueData.osNumero === "string" ? issueData.osNumero : answerData?.itemOsNumero ?? null,
@@ -424,8 +447,21 @@ export async function GET(req: NextRequest) {
     });
   });
 
+  const sortedItems = sortByLastActivityDesc(
+    maintainerIdFilter
+      ? builtItems.filter(item => item.maintainerId === maintainerIdFilter)
+      : builtItems
+  );
+  const total = sortedItems.length;
+  const paginatedItems = includeAll ? sortedItems : sortedItems.slice(offset, offset + limit);
+  const returnedCount = includeAll ? total : Math.min(limit, Math.max(total - offset, 0));
+  const nextOffset = includeAll ? total : offset + returnedCount;
+
   return NextResponse.json({
-    items: sortByLastActivityDesc(builtItems),
+    items: paginatedItems,
+    total,
+    hasMore: nextOffset < total,
+    nextOffset,
     treatmentsByResponse,
   });
 }
