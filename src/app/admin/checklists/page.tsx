@@ -288,54 +288,6 @@ export default function AdminChecklistsPage() {
     });
   }, [machineById, maintainerById, templateById]);
 
-  const applyFilters = useCallback((allRows: ChecklistRow[]) => {
-    const machineQuery = filter.machineTag?.trim().toLowerCase();
-    return allRows.filter(row => {
-      if (machineQuery) {
-        const tag = row.machineTag?.toLowerCase() ?? "";
-        const name = row.machineNome?.toLowerCase() ?? "";
-        const setor = row.machineSetor?.toLowerCase() ?? "";
-        if (!tag.includes(machineQuery) && !name.includes(machineQuery) && !setor.includes(machineQuery)) {
-          return false;
-        }
-      }
-      if (filter.maintainerId !== "all" && row.maintainerId !== filter.maintainerId) {
-        return false;
-      }
-      if (filter.templateId !== "all" && row.templateId !== filter.templateId) {
-        return false;
-      }
-      if (filter.hasNc === "yes" && !row.hasNc) {
-        return false;
-      }
-      if (filter.hasNc === "no" && row.hasNc) {
-        return false;
-      }
-      if (filter.matricula?.trim()) {
-        const wanted = filter.matricula.trim().toLowerCase();
-        const matricula = row.maintainerMatricula?.toLowerCase() ?? "";
-        if (!matricula.includes(wanted)) {
-          return false;
-        }
-      }
-      if (filter.from) {
-        const fromDate = new Date(`${filter.from}T00:00:00`);
-        const createdAt = normalizeDate(row.createdAt);
-        if (!createdAt || createdAt < fromDate) {
-          return false;
-        }
-      }
-      if (filter.to) {
-        const toDate = new Date(`${filter.to}T23:59:59`);
-        const createdAt = normalizeDate(row.createdAt);
-        if (!createdAt || createdAt > toDate) {
-          return false;
-        }
-      }
-      return true;
-    });
-  }, [filter]);
-
   const fetchRows = useCallback(async (reset = true, fetchAll = false, requestOffset = 0) => {
     if (!reset && loadingMoreRef.current) return;
     if (reset) setLoadingRows(true);
@@ -352,6 +304,13 @@ export default function AdminChecklistsPage() {
         params.set("limit", String(CHECKLISTS_PAGE_SIZE));
         params.set("offset", String(reset ? 0 : requestOffset));
       }
+      if (filter.machineTag?.trim()) params.set("machine_q", filter.machineTag.trim());
+      if (filter.maintainerId !== "all") params.set("maintainer_id", filter.maintainerId);
+      if (filter.templateId !== "all") params.set("template_id", filter.templateId);
+      if (filter.hasNc !== "all") params.set("has_nc", filter.hasNc);
+      if (filter.matricula?.trim()) params.set("matricula", filter.matricula.trim());
+      if (filter.from) params.set("from", filter.from);
+      if (filter.to) params.set("to", filter.to);
       const response = await fetch(`/api/admin/checklists?${params.toString()}`, { cache: "no-store" });
       if (!response.ok) {
         throw new Error("Erro ao carregar checklists");
@@ -366,7 +325,7 @@ export default function AdminChecklistsPage() {
       let mergedRows: ChecklistRow[] = [];
       setRows(prev => {
         mergedRows = reset || fetchAll ? fetchedRows : [...prev, ...fetchedRows];
-        return applyFilters(mergedRows);
+        return mergedRows;
       });
       setHasMore(Boolean(payload.hasMore));
       setTotalRows(typeof payload.total === "number" ? payload.total : mergedRows.length);
@@ -381,7 +340,7 @@ export default function AdminChecklistsPage() {
         setLoadingMore(false);
       }
     }
-  }, [applyFilters, mapRows]);
+  }, [filter, mapRows]);
 
   useEffect(() => {
     if (loadingLookups || didInitialFetchRef.current) return;

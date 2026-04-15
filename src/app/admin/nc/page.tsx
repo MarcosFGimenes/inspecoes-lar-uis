@@ -148,6 +148,9 @@ export default function AdminNonConformitiesPage() {
       if (maintainerFilter) {
         params.set("mantenedor_id", maintainerFilter);
       }
+      if (machineFilter.trim()) {
+        params.set("machine_q", machineFilter.trim());
+      }
       if (fetchAll) {
         params.set("all", "1");
       } else {
@@ -186,7 +189,7 @@ export default function AdminNonConformitiesPage() {
         setLoadingMore(false);
       }
     }
-  }, [maintainerFilter, statusFilter]);
+  }, [machineFilter, maintainerFilter, statusFilter]);
 
   useEffect(() => {
     let cancelled = false;
@@ -217,7 +220,7 @@ export default function AdminNonConformitiesPage() {
 
   useEffect(() => {
     loadData(true);
-  }, [statusFilter, maintainerFilter, loadData]);
+  }, [machineFilter, statusFilter, maintainerFilter, loadData]);
 
   const machineOptionsForFilter = useMemo(() => {
     return Array.from(new Set(items.map(item => item.machineLabel.trim()).filter(Boolean))).sort((a, b) =>
@@ -225,24 +228,7 @@ export default function AdminNonConformitiesPage() {
     );
   }, [items]);
 
-  const filteredItems = useMemo(() => {
-    const machineSearch = machineFilter.trim().toLowerCase();
-    return items.filter(item => {
-      if (machineSearch) {
-        const machineLabel = item.machineLabel.toLowerCase();
-        const machineTag = (item.machineTag ?? "").toLowerCase();
-        const machineId = (item.machineId ?? "").toLowerCase();
-        if (
-          !machineLabel.includes(machineSearch) &&
-          !machineTag.includes(machineSearch) &&
-          !machineId.includes(machineSearch)
-        ) {
-          return false;
-        }
-      }
-      return true;
-    });
-  }, [items, machineFilter]);
+  const filteredItems = useMemo(() => items, [items]);
 
   const handleUpdateItem = useCallback((id: string, updates: Partial<NonConformityItem>) => {
     setItems(prev =>
@@ -506,6 +492,7 @@ export default function AdminNonConformitiesPage() {
           <label className="space-y-1 text-sm">
             <span className="text-[var(--muted)]">Status</span>
             <Select value={statusFilter} onChange={event => setStatusFilter(event.target.value)}>
+              <option value="all">Todos</option>
               <option value="aberta">Abertas</option>
               <option value="concluida">Concluídas</option>
               <option value="resolvida">Resolvidas</option>

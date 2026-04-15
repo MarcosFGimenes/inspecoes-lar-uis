@@ -265,13 +265,17 @@ export async function GET(req: NextRequest) {
   const includeAll = queryParams.get("all") === "1";
   const issueStatusFilter = (queryParams.get("status") ?? "aberta").trim().toLowerCase();
   const maintainerIdFilter = queryParams.get("mantenedor_id")?.trim() ?? "";
+  const machineQueryFilter = queryParams.get("machine_q")?.trim().toLowerCase() ?? "";
 
   const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(Math.floor(rawLimit), 500) : 20;
   const offset = Number.isFinite(rawOffset) && rawOffset >= 0 ? Math.floor(rawOffset) : 0;
-  const allowedStatuses = new Set(["aberta", "concluida", "resolvida"]);
+  const allowedStatuses = new Set(["all", "aberta", "concluida", "resolvida"]);
   const normalizedIssueStatus = allowedStatuses.has(issueStatusFilter) ? issueStatusFilter : "aberta";
 
-  const issuesQuery = adminDb.collection("issues").where("status", "==", normalizedIssueStatus);
+  const issuesQuery =
+    normalizedIssueStatus === "all"
+      ? adminDb.collection("issues").where("status", "in", ["aberta", "concluida", "resolvida"])
+      : adminDb.collection("issues").where("status", "==", normalizedIssueStatus);
 
   const [machinesSnap, templatesSnap, issuesSnap, inspectionsSnap] = await Promise.all([
     adminDb.collection("machines").get(),
@@ -500,9 +504,22 @@ export async function GET(req: NextRequest) {
   }
 
   const sortedItems = sortByLastActivityDesc(
-    maintainerIdFilter
-      ? builtItems.filter(item => item.maintainerId === maintainerIdFilter)
-      : builtItems
+    builtItems.filter(item => {
+      if (maintainerIdFilter && item.maintainerId !== maintainerIdFilter) {
+        return false;
+      }
+      if (machineQueryFilter) {
+        const machineLabel = item.machineLabel.toLowerCase();
+        const machineTag = (item.machineTag ?? "").toLowerCase();
+        const machineId = (item.machineId ?? "").toLowerCase();
+        return (
+          machineLabel.includes(machineQueryFilter) ||
+          machineTag.includes(machineQueryFilter) ||
+          machineId.includes(machineQueryFilter)
+        );
+      }
+      return true;
+    })
   );
   const total = sortedItems.length;
   const paginatedItems = includeAll ? sortedItems : sortedItems.slice(offset, offset + limit);
