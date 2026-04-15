@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   collection,
@@ -149,6 +149,8 @@ export default function AdminChecklistsPage() {
   const [offset, setOffset] = useState(0);
   const [totalRows, setTotalRows] = useState(0);
   const [hasMore, setHasMore] = useState(false);
+  const loadingMoreRef = useRef(false);
+  const didInitialFetchRef = useRef(false);
 
   const machinesCol = useMemo(() => collection(firebaseDb, "machines"), []);
   const maintainersCol = useMemo(() => collection(firebaseDb, "mantenedores"), []);
@@ -335,9 +337,12 @@ export default function AdminChecklistsPage() {
   }, [filter]);
 
   const fetchRows = useCallback(async (reset = true, fetchAll = false, requestOffset = 0) => {
-    if (loadingMore) return;
+    if (!reset && loadingMoreRef.current) return;
     if (reset) setLoadingRows(true);
-    else setLoadingMore(true);
+    else {
+      loadingMoreRef.current = true;
+      setLoadingMore(true);
+    }
     setError(null);
     try {
       const params = new URLSearchParams();
@@ -371,14 +376,17 @@ export default function AdminChecklistsPage() {
       setError(message);
     } finally {
       if (reset) setLoadingRows(false);
-      else setLoadingMore(false);
+      else {
+        loadingMoreRef.current = false;
+        setLoadingMore(false);
+      }
     }
-  }, [applyFilters, loadingMore, mapRows]);
+  }, [applyFilters, mapRows]);
 
   useEffect(() => {
-    if (!loadingLookups) {
-      fetchRows();
-    }
+    if (loadingLookups || didInitialFetchRef.current) return;
+    didInitialFetchRef.current = true;
+    fetchRows(true);
   }, [loadingLookups, fetchRows]);
 
   const onFilterChange = (patch: Partial<FilterState>) => {

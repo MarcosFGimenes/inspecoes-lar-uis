@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import {
   collection,
@@ -128,15 +128,19 @@ export default function AdminNonConformitiesPage() {
   const [expandedHistory, setExpandedHistory] = useState<Set<string>>(new Set());
   const [deleteDialogItemId, setDeleteDialogItemId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const loadingMoreRef = useRef(false);
 
   useEffect(() => {
     setSelectedIds(prev => prev.filter(id => items.some(item => item.id === id)));
   }, [items]);
 
   const loadData = useCallback(async (reset = true, fetchAll = false, requestOffset = 0) => {
-    if (loadingMore) return;
+    if (!reset && loadingMoreRef.current) return;
     if (reset) setLoading(true);
-    else setLoadingMore(true);
+    else {
+      loadingMoreRef.current = true;
+      setLoadingMore(true);
+    }
     setError(null);
     try {
       const params = new URLSearchParams();
@@ -177,9 +181,12 @@ export default function AdminNonConformitiesPage() {
       setError(message);
     } finally {
       if (reset) setLoading(false);
-      else setLoadingMore(false);
+      else {
+        loadingMoreRef.current = false;
+        setLoadingMore(false);
+      }
     }
-  }, [loadingMore, maintainerFilter, statusFilter]);
+  }, [maintainerFilter, statusFilter]);
 
   useEffect(() => {
     let cancelled = false;
