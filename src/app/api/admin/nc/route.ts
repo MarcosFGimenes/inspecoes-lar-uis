@@ -91,6 +91,18 @@ interface NonConformityItemResponse {
   updatedAt: string | null;
 }
 
+function buildNcLogicalId(machineId: string | null | undefined, machineTag: string | null | undefined, questionId: string) {
+  const normalizedMachineId = typeof machineId === "string" ? machineId.trim() : "";
+  if (normalizedMachineId) {
+    return `${normalizedMachineId}::${questionId}`;
+  }
+  const normalizedTag = typeof machineTag === "string" ? machineTag.trim().toUpperCase() : "";
+  if (normalizedTag) {
+    return `tag:${normalizedTag}::${questionId}`;
+  }
+  return `sem-maquina::${questionId}`;
+}
+
 function formatDateInput(value: string | null | undefined) {
   if (!value) return "";
   const date = new Date(value);
@@ -103,6 +115,13 @@ function normalizeStatus(value: unknown): NonConformityStatus | null {
     return value;
   }
   return null;
+}
+
+function normalizeIssueStatus(value: unknown): "aberta" | "concluida" | "resolvida" {
+  const raw = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (raw === "resolvida" || raw === "resolved") return "resolvida";
+  if (raw === "concluida" || raw === "concluída" || raw === "closed") return "concluida";
+  return "aberta";
 }
 
 function dedupeAnswers(answers: ChecklistAnswer[]) {
@@ -232,7 +251,7 @@ export async function GET(req: NextRequest) {
   const [machinesSnap, templatesSnap, issuesSnap, inspectionsSnap] = await Promise.all([
     adminDb.collection("machines").get(),
     adminDb.collection("templates").get(),
-    adminDb.collection("issues").where("status", "in", ["aberta", "concluida", "resolvida"]).get(),
+    adminDb.collection("issues").get(),
     adminDb.collection("inspecoes").get(),
   ]);
 
@@ -273,6 +292,8 @@ export async function GET(req: NextRequest) {
     const templateInfo = (inspectionData.template ?? {}) as Record<string, unknown>;
     const machineId = resolveMachineIdFromInspection(inspectionData);
     const machineOption = machineId ? machinesById.get(machineId) : undefined;
+    const machineTag =
+      typeof machine.tag === "string" ? machine.tag : typeof machineOption?.tag === "string" ? machineOption.tag : null;
     const templateId =
       typeof templateInfo.id === "string"
         ? templateInfo.id
@@ -294,7 +315,7 @@ export async function GET(req: NextRequest) {
     sourceInspectionMap.set(inspectionDoc.id, {
       machineId,
       machineLabel: buildMachineLabel(machine),
-      machineTag: typeof machine.tag === "string" ? machine.tag : null,
+      machineTag,
       templateId,
       templateLabel:
         templateMeta?.nome ?? (typeof templateInfo.nome === "string" ? String(templateInfo.nome) : "Template"),
@@ -313,7 +334,7 @@ export async function GET(req: NextRequest) {
     answers.forEach(answer => {
       if (!answer?.questionId || answer.response !== "nc") return;
       const questionId = String(answer.questionId);
-      const logicalId = `${machineId ?? "sem-maquina"}::${questionId}`;
+      const logicalId = buildNcLogicalId(machineId, machineTag, questionId);
       const inspectionDate = resolveInspectionDate(inspectionData);
       const itemOsNumero =
         typeof answer.itemOsNumero === "string" && answer.itemOsNumero.trim()
@@ -354,7 +375,7 @@ export async function GET(req: NextRequest) {
         ? (issueData.pcmTreatment as Record<string, unknown>)
         : null;
     const sourceTreatment = sourceInspection?.treatmentMap.get(questionId);
-    const issueStatus = issueData.status === "resolvida" ? "resolvida" : issueData.status === "concluida" ? "concluida" : "aberta";
+    const issueStatus = normalizeIssueStatus(issueData.status);
     const statusFromTreatment = normalizeStatus(rawIssueTreatment?.status ?? sourceTreatment?.status);
     const status: NonConformityStatus = issueStatus === "aberta" ? statusFromTreatment ?? "open" : "resolved";
 
@@ -377,7 +398,11 @@ export async function GET(req: NextRequest) {
       : null;
 
     const reincidenciaCount = typeof issueData.reincidenciaCount === "number" ? issueData.reincidenciaCount : 0;
-    const logicalId = `${machineId ?? sourceInspection?.machineId ?? "sem-maquina"}::${questionId}`;
+    const logicalId = buildNcLogicalId(
+      machineId ?? sourceInspection?.machineId ?? null,
+      issueTag ?? sourceInspection?.machineTag ?? machineOption?.tag ?? null,
+      questionId
+    );
     const historyList = (ncHistoryByLogicalId.get(logicalId) ?? [])
       .filter(entry => entry.inspectionId !== responseId)
       .sort((a, b) => {
