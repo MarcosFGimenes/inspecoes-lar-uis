@@ -299,6 +299,10 @@ export default function AdminChecklistsPage() {
       if (filter.to) params.set("to", filter.to);
 
       const response = await fetch(`/api/admin/checklists?${params.toString()}`, { cache: "no-store" });
+      if (response.status === 401) {
+        window.location.href = "/admin/login";
+        return;
+      }
       if (!response.ok) {
         throw new Error("Erro ao carregar checklists");
       }

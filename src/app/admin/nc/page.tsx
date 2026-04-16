@@ -126,6 +126,8 @@ export default function AdminNonConformitiesPage() {
   const [bulkSaving, setBulkSaving] = useState(false);
   const [expandedResolutions, setExpandedResolutions] = useState<Set<string>>(new Set());
   const [expandedHistory, setExpandedHistory] = useState<Set<string>>(new Set());
+  const [historyLoadingIds, setHistoryLoadingIds] = useState<Set<string>>(new Set());
+  const [historyLoadedIds, setHistoryLoadedIds] = useState<Set<string>>(new Set());
   const [deleteDialogItemId, setDeleteDialogItemId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const loadingMoreRef = useRef(false);
@@ -173,6 +175,11 @@ export default function AdminNonConformitiesPage() {
       };
       const nextItems = sortByLastActivityDesc(payload.items ?? []);
       setItems(prev => (reset ? nextItems : sortByLastActivityDesc([...prev, ...nextItems])));
+      if (reset) {
+        setHistoryLoadedIds(new Set());
+        setHistoryLoadingIds(new Set());
+        setExpandedHistory(new Set());
+      }
       setTreatmentsByResponse(payload.treatmentsByResponse ?? {});
       setHasMore(Boolean(payload.hasMore));
       setTotalItems(prev => (reset ? nextItems.length : prev + nextItems.length));
@@ -318,6 +325,47 @@ export default function AdminNonConformitiesPage() {
     },
     [handleSave, handleUpdateItem]
   );
+
+  const handleLoadHistory = useCallback(async (itemId: string) => {
+    if (historyLoadedIds.has(itemId) || historyLoadingIds.has(itemId)) {
+      setExpandedHistory(prev => new Set(prev).add(itemId));
+      return;
+    }
+
+    setHistoryLoadingIds(prev => new Set(prev).add(itemId));
+    try {
+      const response = await fetch(`/api/admin/nc?id=${itemId}&includeHistorico=true`, { cache: "no-store" });
+      if (response.status === 401) {
+        window.location.href = "/admin/login";
+        return;
+      }
+      if (!response.ok) {
+        throw new Error("Falha ao carregar histórico.");
+      }
+
+      const payload = (await response.json()) as { historico?: NonConformityRecurrenceHistoryItem[] };
+      const historico = Array.isArray(payload.historico) ? payload.historico : [];
+
+      setItems(prev =>
+        prev.map(item =>
+          item.id === itemId
+            ? { ...item, recurrenceHistory: historico }
+            : item
+        )
+      );
+      setHistoryLoadedIds(prev => new Set(prev).add(itemId));
+      setExpandedHistory(prev => new Set(prev).add(itemId));
+    } catch (err: unknown) {
+      const message = err instanceof Error && err.message ? err.message : "Erro ao carregar histórico";
+      setFeedback(prev => ({ ...prev, [itemId]: { type: "error", message } }));
+    } finally {
+      setHistoryLoadingIds(prev => {
+        const next = new Set(prev);
+        next.delete(itemId);
+        return next;
+      });
+    }
+  }, [historyLoadedIds, historyLoadingIds]);
 
   const handleBulkStatusChange = useCallback(
     async (status: NonConformityStatus) => {
@@ -740,8 +788,25 @@ export default function AdminNonConformitiesPage() {
                     </section>
 
                     <section className="space-y-3">
-                      <h3 className="text-sm font-semibold text-[var(--text)]">Histórico de reincidências</h3>
-                      {!hasHistory ? (
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <h3 className="text-sm font-semibold text-[var(--text)]">Histórico de reincidências</h3>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleLoadHistory(item.id)}
+                          loading={historyLoadingIds.has(item.id)}
+                          disabled={historyLoadingIds.has(item.id)}
+                        >
+                          {historyLoadedIds.has(item.id) ? "Atualizar histórico" : "Carregar Histórico"}
+                        </Button>
+                      </div>
+
+                      {!historyLoadedIds.has(item.id) ? (
+                        <p className="text-sm text-[var(--muted)]">Clique em &quot;Carregar Histórico&quot;.</p>
+                      ) : historyLoadingIds.has(item.id) ? (
+                        <p className="text-sm text-[var(--muted)]">Carregando...</p>
+                      ) : !hasHistory ? (
                         <p className="text-sm text-[var(--muted)]">Sem histórico anterior.</p>
                       ) : (
                         <div className="divide-y divide-[var(--border)] rounded-lg border border-[var(--border)] bg-white">
@@ -760,7 +825,8 @@ export default function AdminNonConformitiesPage() {
                           ))}
                         </div>
                       )}
-                      {item.recurrenceHistory.length > 3 && (
+
+                      {historyLoadedIds.has(item.id) && item.recurrenceHistory.length > 3 && (
                         <Button
                           type="button"
                           variant="ghost"
