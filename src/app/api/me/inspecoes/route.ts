@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase-admin";
 import { requireMaint } from "@/lib/guards";
+import { getOrSetServerCache } from "@/lib/server-memory-cache";
 
 export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
+export const revalidate = 60;
 
 type MaintInspectionSummary = {
   id: string;
@@ -88,36 +89,52 @@ export async function GET(req: NextRequest) {
     const limitValue = clampLimit(Number(params.get("limit")), params.has("date") ? 15 : 25, 100);
     const cursorId = params.get("cursor");
     const range = deriveRange(params);
+    const maintId = auth.store.id!;
 
-    let queryRef = adminDb
-      .collection("inspecoes")
-      .where("maintainer.maintId", "==", auth.store.id!)
-      .orderBy("finalizadaEm", "desc");
+    const cacheKey = [
+      "me:inspecoes",
+      maintId,
+      String(limitValue),
+      cursorId ?? "",
+      range.start ?? "",
+      range.end ?? "",
+    ].join(":");
 
-    if (range.start) {
-      queryRef = queryRef.where("finalizadaEm", ">=", range.start);
-    }
-    if (range.end) {
-      queryRef = queryRef.where("finalizadaEm", "<=", range.end);
-    }
+    const payload = await getOrSetServerCache(cacheKey, 30_000, async () => {
+      let queryRef = adminDb
+        .collection("inspecoes")
+        .where("maintainer.maintId", "==", maintId)
+        .orderBy("finalizadaEm", "desc");
 
-    if (cursorId) {
-      const cursorSnap = await adminDb.collection("inspecoes").doc(cursorId).get();
-      if (cursorSnap.exists) {
-        queryRef = queryRef.startAfter(cursorSnap);
+      if (range.start) {
+        queryRef = queryRef.where("finalizadaEm", ">=", range.start);
       }
-    }
+      if (range.end) {
+        queryRef = queryRef.where("finalizadaEm", "<=", range.end);
+      }
 
-    const snapshot = await queryRef.limit(limitValue).get();
-    const items = snapshot.docs.map(mapInspectionSummary);
+      if (cursorId) {
+        const cursorSnap = await adminDb.collection("inspecoes").doc(cursorId).get();
+        if (cursorSnap.exists) {
+          queryRef = queryRef.startAfter(cursorSnap);
+        }
+      }
 
-    const hasMore = snapshot.size === limitValue;
-    const nextCursor = hasMore ? snapshot.docs[snapshot.docs.length - 1]?.id ?? null : null;
+      const snapshot = await queryRef.limit(limitValue).get();
+      const items = snapshot.docs.map(mapInspectionSummary);
+      const hasMore = snapshot.size === limitValue;
+      const nextCursor = hasMore ? snapshot.docs[snapshot.docs.length - 1]?.id ?? null : null;
 
-    return NextResponse.json({ items, nextCursor });
+      return { items, nextCursor };
+    });
+
+    return NextResponse.json(payload, {
+      headers: {
+        "Cache-Control": "private, max-age=30, stale-while-revalidate=60",
+      },
+    });
   } catch (error) {
     const message = error instanceof Error && error.message ? error.message : "INTERNAL_ERROR";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
-

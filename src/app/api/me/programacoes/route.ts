@@ -5,9 +5,10 @@ import { NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase-admin";
 import { requireMaint } from "@/lib/guards";
 import { normalizeName } from "@/lib/string-utils";
+import { getOrSetServerCache } from "@/lib/server-memory-cache";
 
 export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
+export const revalidate = 60;
 
 function toIso(value: unknown) {
   if (typeof value === "string") return value;
@@ -36,8 +37,10 @@ export async function GET() {
     const maintId = auth.store.id ?? null;
     const maintName = auth.store.nome ?? null;
     const normalizedName = normalizeName(typeof maintName === "string" ? maintName : null);
+    const cacheKey = `me:programacoes:${maintId ?? "anon"}:${normalizedName ?? "sem-nome"}`;
 
-    const docsMap = new Map<string, DocumentSnapshot<DocumentData>>();
+    const results = await getOrSetServerCache(cacheKey, 60_000, async () => {
+      const docsMap = new Map<string, DocumentSnapshot<DocumentData>>();
 
     if (maintId) {
       const [principalSnap, idsSnap] = await Promise.all([
@@ -172,7 +175,14 @@ export async function GET() {
       };
     });
 
-    return NextResponse.json(results);
+      return results;
+    });
+
+    return NextResponse.json(results, {
+      headers: {
+        "Cache-Control": "private, max-age=60, stale-while-revalidate=120",
+      },
+    });
   } catch (error: unknown) {
     const message = error instanceof Error && error.message ? error.message : "INTERNAL_ERROR";
     return NextResponse.json({ error: message }, { status: 500 });

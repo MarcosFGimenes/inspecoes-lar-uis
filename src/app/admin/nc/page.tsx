@@ -117,7 +117,7 @@ export default function AdminNonConformitiesPage() {
   const [statusFilter, setStatusFilter] = useState("aberta");
   const [maintainerFilter, setMaintainerFilter] = useState("");
   const [maintainers, setMaintainers] = useState<MaintainerOption[]>([]);
-  const [offset, setOffset] = useState(0);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [totalItems, setTotalItems] = useState(0);
   const [savingId, setSavingId] = useState<string | null>(null);
@@ -134,7 +134,7 @@ export default function AdminNonConformitiesPage() {
     setSelectedIds(prev => prev.filter(id => items.some(item => item.id === id)));
   }, [items]);
 
-  const loadData = useCallback(async (reset = true, fetchAll = false, requestOffset = 0) => {
+  const loadData = useCallback(async (reset = true, cursor?: string | null) => {
     if (!reset && loadingMoreRef.current) return;
     if (reset) setLoading(true);
     else {
@@ -148,11 +148,12 @@ export default function AdminNonConformitiesPage() {
       if (maintainerFilter) {
         params.set("mantenedor_id", maintainerFilter);
       }
-      if (fetchAll) {
-        params.set("all", "1");
-      } else {
-        params.set("limit", String(NC_PAGE_SIZE));
-        params.set("offset", String(reset ? 0 : requestOffset));
+      if (machineFilter.trim()) {
+        params.set("machine_query", machineFilter.trim());
+      }
+      params.set("limit", String(NC_PAGE_SIZE));
+      if (!reset && cursor) {
+        params.set("cursor", cursor);
       }
 
       const session = await fetch(`/api/admin/nc?${params.toString()}`, { cache: "no-store" });
@@ -168,14 +169,14 @@ export default function AdminNonConformitiesPage() {
         treatmentsByResponse?: Record<string, ChecklistNonConformityTreatment[]>;
         total?: number;
         hasMore?: boolean;
-        nextOffset?: number;
+        nextCursor?: string | null;
       };
       const nextItems = sortByLastActivityDesc(payload.items ?? []);
-      setItems(prev => (reset || fetchAll ? nextItems : sortByLastActivityDesc([...prev, ...nextItems])));
+      setItems(prev => (reset ? nextItems : sortByLastActivityDesc([...prev, ...nextItems])));
       setTreatmentsByResponse(payload.treatmentsByResponse ?? {});
       setHasMore(Boolean(payload.hasMore));
-      setTotalItems(typeof payload.total === "number" ? payload.total : nextItems.length);
-      setOffset(typeof payload.nextOffset === "number" ? payload.nextOffset : nextItems.length);
+      setTotalItems(prev => (reset ? nextItems.length : prev + nextItems.length));
+      setNextCursor(typeof payload.nextCursor === "string" ? payload.nextCursor : null);
     } catch (err: unknown) {
       const message = err instanceof Error && err.message ? err.message : "Erro ao carregar dados";
       setError(message);
@@ -186,7 +187,7 @@ export default function AdminNonConformitiesPage() {
         setLoadingMore(false);
       }
     }
-  }, [maintainerFilter, statusFilter]);
+  }, [machineFilter, maintainerFilter, statusFilter]);
 
   useEffect(() => {
     let cancelled = false;
@@ -217,7 +218,7 @@ export default function AdminNonConformitiesPage() {
 
   useEffect(() => {
     loadData(true);
-  }, [statusFilter, maintainerFilter, loadData]);
+  }, [statusFilter, maintainerFilter, machineFilter, loadData]);
 
   const machineOptionsForFilter = useMemo(() => {
     return Array.from(new Set(items.map(item => item.machineLabel.trim()).filter(Boolean))).sort((a, b) =>
@@ -225,24 +226,6 @@ export default function AdminNonConformitiesPage() {
     );
   }, [items]);
 
-  const filteredItems = useMemo(() => {
-    const machineSearch = machineFilter.trim().toLowerCase();
-    return items.filter(item => {
-      if (machineSearch) {
-        const machineLabel = item.machineLabel.toLowerCase();
-        const machineTag = (item.machineTag ?? "").toLowerCase();
-        const machineId = (item.machineId ?? "").toLowerCase();
-        if (
-          !machineLabel.includes(machineSearch) &&
-          !machineTag.includes(machineSearch) &&
-          !machineId.includes(machineSearch)
-        ) {
-          return false;
-        }
-      }
-      return true;
-    });
-  }, [items, machineFilter]);
 
   const handleUpdateItem = useCallback((id: string, updates: Partial<NonConformityItem>) => {
     setItems(prev =>
@@ -362,7 +345,7 @@ export default function AdminNonConformitiesPage() {
   }, []);
 
   const handleToggleAllVisible = useCallback(() => {
-    const visibleIds = filteredItems.map(item => item.id);
+    const visibleIds = items.map(item => item.id);
     const allSelected = visibleIds.length > 0 && visibleIds.every(id => selectedIds.includes(id));
 
     setSelectedIds(prev => {
@@ -372,7 +355,7 @@ export default function AdminNonConformitiesPage() {
       const merged = new Set([...prev, ...visibleIds]);
       return Array.from(merged);
     });
-  }, [filteredItems, selectedIds]);
+  }, [items, selectedIds]);
 
   const handleToggleResolution = useCallback((itemId: string) => {
     setExpandedResolutions(prev => {
@@ -421,7 +404,7 @@ export default function AdminNonConformitiesPage() {
   }, [deleteDialogItemId]);
 
   const allVisibleSelected =
-    filteredItems.length > 0 && filteredItems.every(item => selectedIds.includes(item.id));
+    items.length > 0 && items.every(item => selectedIds.includes(item.id));
   const selectedCount = selectedIds.length;
 
   if (loading) {
@@ -530,18 +513,18 @@ export default function AdminNonConformitiesPage() {
         Mostrando {items.length} de {totalItems} não conformidades.
       </div>
 
-      {filteredItems.length > 0 && (
+      {items.length > 0 && (
         <Card>
           <CardContent className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <label className="flex items-center gap-3 text-sm text-[var(--text)]">
               <input
                 type="checkbox"
                 className="h-4 w-4 accent-[var(--primary-500)]"
-                checked={allVisibleSelected && filteredItems.length > 0}
+                checked={allVisibleSelected && items.length > 0}
                 onChange={handleToggleAllVisible}
               />
               <div className="leading-tight">
-                <div>Selecionar todas as {filteredItems.length} NC exibidas</div>
+                <div>Selecionar todas as {items.length} NC exibidas</div>
                 <div className="text-[var(--muted)]">
                   {selectedCount} selecionada{selectedCount === 1 ? "" : "s"}
                 </div>
@@ -577,14 +560,14 @@ export default function AdminNonConformitiesPage() {
         </Card>
       )}
 
-      {filteredItems.length === 0 ? (
+      {items.length === 0 ? (
         <EmptyState
           title="Nenhuma não conformidade encontrada"
           description="Ajuste os filtros ou aguarde novas inspeções com NC registradas."
         />
       ) : (
         <div className="space-y-6">
-          {filteredItems.map(item => {
+          {items.map(item => {
             const itemFeedback = feedback[item.id];
             const hasMaintainerResolution = item.maintainerResolution != null;
             const reincidenciaCount = item.reincidenciaCount;
@@ -840,17 +823,9 @@ export default function AdminNonConformitiesPage() {
               variant="outline"
               disabled={!hasMore || loadingMore || loading}
               loading={loadingMore}
-              onClick={() => loadData(false, false, offset)}
+              onClick={() => loadData(false, nextCursor)}
             >
               Mostrar mais 20
-            </Button>
-            <Button
-              variant="secondary"
-              disabled={!hasMore || loadingMore || loading}
-              loading={loadingMore}
-              onClick={() => loadData(false, true, offset)}
-            >
-              Mostrar todas
             </Button>
           </div>
         </CardContent>

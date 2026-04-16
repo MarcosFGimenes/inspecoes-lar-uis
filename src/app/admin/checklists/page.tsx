@@ -3,10 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
-  collection,
   deleteDoc,
   doc,
-  getDocs,
 } from "firebase/firestore";
 
 import { Button, buttonStyles } from "@/components/ui/button";
@@ -146,16 +144,13 @@ export default function AdminChecklistsPage() {
   const [error, setError] = useState<string | null>(null);
   const [periodExporting, setPeriodExporting] = useState(false);
   const [periodDeleting, setPeriodDeleting] = useState(false);
-  const [offset, setOffset] = useState(0);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [totalRows, setTotalRows] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const loadingMoreRef = useRef(false);
   const didInitialFetchRef = useRef(false);
 
-  const machinesCol = useMemo(() => collection(firebaseDb, "machines"), []);
-  const maintainersCol = useMemo(() => collection(firebaseDb, "mantenedores"), []);
-  const templatesCol = useMemo(() => collection(firebaseDb, "templates"), []);
-  const inspectionsCol = useMemo(() => collection(firebaseDb, "inspecoes"), []);
+  const inspectionsCol = useMemo(() => ({ id: "inspecoes" }), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -168,60 +163,52 @@ export default function AdminChecklistsPage() {
           return;
         }
 
-        const [machinesSnap, maintainersSnap, templatesSnap] = await Promise.all([
-          getDocs(machinesCol),
-          getDocs(maintainersCol),
-          getDocs(templatesCol),
+        const [machinesRes, maintainersRes, templatesRes] = await Promise.all([
+          fetch("/api/maquinas", { cache: "force-cache" }),
+          fetch("/api/mantenedores", { cache: "force-cache" }),
+          fetch("/api/templates", { cache: "force-cache" }),
+        ]);
+
+        if (!machinesRes.ok || !maintainersRes.ok || !templatesRes.ok) {
+          throw new Error("Falha ao carregar listas de apoio");
+        }
+
+        const [machinesPayload, maintainersPayload, templatesPayload] = await Promise.all([
+          machinesRes.json(),
+          maintainersRes.json(),
+          templatesRes.json(),
         ]);
 
         if (cancelled) return;
 
-        const machineRecords: MachineOption[] = machinesSnap.docs
-          .map(docSnap => {
-            const data = docSnap.data() ?? {};
-            return {
-              id: docSnap.id,
-              nome: ensureString(data.nome),
-              tag: ensureString(data.tag),
-              setor: ensureString(data.setor),
-              unidade: ensureString(data.unidade),
-            } satisfies MachineOption;
-          })
-          .sort((a, b) => {
-            const labelA = (a.nome ?? a.tag ?? "").toLowerCase();
-            const labelB = (b.nome ?? b.tag ?? "").toLowerCase();
-            return labelA.localeCompare(labelB);
-          });
+        const machineRecords: MachineOption[] = (Array.isArray(machinesPayload) ? machinesPayload : [])
+          .map(item => ({
+            id: String(item.id ?? ""),
+            nome: ensureString(item.nome),
+            tag: ensureString(item.tag),
+            setor: ensureString(item.setor),
+            unidade: ensureString(item.unidade),
+          }))
+          .filter(item => item.id)
+          .sort((a, b) => (a.nome ?? a.tag ?? "").toLowerCase().localeCompare((b.nome ?? b.tag ?? "").toLowerCase()));
 
-        const maintainerRecords: MaintainerOption[] = maintainersSnap.docs
-          .map(docSnap => {
-            const data = docSnap.data() ?? {};
-            return {
-              id: docSnap.id,
-              nome: ensureString(data.nome),
-              matricula: ensureString(data.matricula),
-            } satisfies MaintainerOption;
-          })
-          .sort((a, b) => {
-            const labelA = `${a.matricula ?? ""} ${a.nome ?? ""}`.toLowerCase();
-            const labelB = `${b.matricula ?? ""} ${b.nome ?? ""}`.toLowerCase();
-            return labelA.localeCompare(labelB);
-          });
+        const maintainerRecords: MaintainerOption[] = (Array.isArray(maintainersPayload) ? maintainersPayload : [])
+          .map(item => ({
+            id: String(item.id ?? ""),
+            nome: ensureString(item.nome),
+            matricula: ensureString(item.matricula),
+          }))
+          .filter(item => item.id)
+          .sort((a, b) => `${a.matricula ?? ""} ${a.nome ?? ""}`.toLowerCase().localeCompare(`${b.matricula ?? ""} ${b.nome ?? ""}`.toLowerCase()));
 
-        const templateRecords: TemplateOption[] = templatesSnap.docs
-          .map(docSnap => {
-            const data = docSnap.data() ?? {};
-            return {
-              id: docSnap.id,
-              nome: ensureString(data.nome) ?? ensureString(data.title) ?? null,
-              versao: ensureString(data.versao) ?? ensureString(data.version) ?? null,
-            } satisfies TemplateOption;
-          })
-          .sort((a, b) => {
-            const labelA = (a.nome ?? "").toLowerCase();
-            const labelB = (b.nome ?? "").toLowerCase();
-            return labelA.localeCompare(labelB);
-          });
+        const templateRecords: TemplateOption[] = (Array.isArray(templatesPayload) ? templatesPayload : [])
+          .map(item => ({
+            id: String(item.id ?? ""),
+            nome: ensureString(item.nome) ?? ensureString(item.title) ?? null,
+            versao: ensureString(item.versao) ?? ensureString(item.version) ?? null,
+          }))
+          .filter(item => item.id)
+          .sort((a, b) => (a.nome ?? "").toLowerCase().localeCompare((b.nome ?? "").toLowerCase()));
 
         setMachines(machineRecords);
         setMaintainers(maintainerRecords);
@@ -243,7 +230,7 @@ export default function AdminChecklistsPage() {
     return () => {
       cancelled = true;
     };
-  }, [machinesCol, maintainersCol, templatesCol]);
+  }, []);
 
   const machineById = useMemo(() => new Map(machines.map(machine => [machine.id, machine])), [machines]);
   const maintainerById = useMemo(() => new Map(maintainers.map(item => [item.id, item])), [maintainers]);
@@ -288,55 +275,8 @@ export default function AdminChecklistsPage() {
     });
   }, [machineById, maintainerById, templateById]);
 
-  const applyFilters = useCallback((allRows: ChecklistRow[]) => {
-    const machineQuery = filter.machineTag?.trim().toLowerCase();
-    return allRows.filter(row => {
-      if (machineQuery) {
-        const tag = row.machineTag?.toLowerCase() ?? "";
-        const name = row.machineNome?.toLowerCase() ?? "";
-        const setor = row.machineSetor?.toLowerCase() ?? "";
-        if (!tag.includes(machineQuery) && !name.includes(machineQuery) && !setor.includes(machineQuery)) {
-          return false;
-        }
-      }
-      if (filter.maintainerId !== "all" && row.maintainerId !== filter.maintainerId) {
-        return false;
-      }
-      if (filter.templateId !== "all" && row.templateId !== filter.templateId) {
-        return false;
-      }
-      if (filter.hasNc === "yes" && !row.hasNc) {
-        return false;
-      }
-      if (filter.hasNc === "no" && row.hasNc) {
-        return false;
-      }
-      if (filter.matricula?.trim()) {
-        const wanted = filter.matricula.trim().toLowerCase();
-        const matricula = row.maintainerMatricula?.toLowerCase() ?? "";
-        if (!matricula.includes(wanted)) {
-          return false;
-        }
-      }
-      if (filter.from) {
-        const fromDate = new Date(`${filter.from}T00:00:00`);
-        const createdAt = normalizeDate(row.createdAt);
-        if (!createdAt || createdAt < fromDate) {
-          return false;
-        }
-      }
-      if (filter.to) {
-        const toDate = new Date(`${filter.to}T23:59:59`);
-        const createdAt = normalizeDate(row.createdAt);
-        if (!createdAt || createdAt > toDate) {
-          return false;
-        }
-      }
-      return true;
-    });
-  }, [filter]);
 
-  const fetchRows = useCallback(async (reset = true, fetchAll = false, requestOffset = 0) => {
+  const fetchRows = useCallback(async (reset = true, cursor?: string | null) => {
     if (!reset && loadingMoreRef.current) return;
     if (reset) setLoadingRows(true);
     else {
@@ -346,12 +286,18 @@ export default function AdminChecklistsPage() {
     setError(null);
     try {
       const params = new URLSearchParams();
-      if (fetchAll) {
-        params.set("all", "1");
-      } else {
-        params.set("limit", String(CHECKLISTS_PAGE_SIZE));
-        params.set("offset", String(reset ? 0 : requestOffset));
+      params.set("limit", String(CHECKLISTS_PAGE_SIZE));
+      if (!reset && cursor) {
+        params.set("cursor", cursor);
       }
+      if (filter.machineTag?.trim()) params.set("machine_query", filter.machineTag.trim());
+      if (filter.maintainerId !== "all") params.set("maintainer_id", filter.maintainerId);
+      if (filter.templateId !== "all") params.set("template_id", filter.templateId);
+      if (filter.hasNc !== "all") params.set("has_nc", filter.hasNc);
+      if (filter.matricula?.trim()) params.set("matricula", filter.matricula.trim());
+      if (filter.from) params.set("from", filter.from);
+      if (filter.to) params.set("to", filter.to);
+
       const response = await fetch(`/api/admin/checklists?${params.toString()}`, { cache: "no-store" });
       if (!response.ok) {
         throw new Error("Erro ao carregar checklists");
@@ -360,17 +306,17 @@ export default function AdminChecklistsPage() {
         items?: Array<{ id: string; data: Record<string, unknown> }>;
         total?: number;
         hasMore?: boolean;
-        nextOffset?: number;
+        nextCursor?: string | null;
       };
       const fetchedRows = mapRows(payload.items ?? []);
       let mergedRows: ChecklistRow[] = [];
       setRows(prev => {
-        mergedRows = reset || fetchAll ? fetchedRows : [...prev, ...fetchedRows];
-        return applyFilters(mergedRows);
+        mergedRows = reset ? fetchedRows : [...prev, ...fetchedRows];
+        return mergedRows;
       });
       setHasMore(Boolean(payload.hasMore));
-      setTotalRows(typeof payload.total === "number" ? payload.total : mergedRows.length);
-      setOffset(typeof payload.nextOffset === "number" ? payload.nextOffset : mergedRows.length);
+      setTotalRows(mergedRows.length);
+      setNextCursor(typeof payload.nextCursor === "string" ? payload.nextCursor : null);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Erro ao carregar checklists";
       setError(message);
@@ -381,7 +327,7 @@ export default function AdminChecklistsPage() {
         setLoadingMore(false);
       }
     }
-  }, [applyFilters, mapRows]);
+  }, [filter, mapRows]);
 
   useEffect(() => {
     if (loadingLookups || didInitialFetchRef.current) return;
@@ -447,7 +393,7 @@ export default function AdminChecklistsPage() {
     setPeriodDeleting(true);
     try {
       for (const row of rows) {
-        await deleteDoc(doc(inspectionsCol, row.id));
+        await deleteDoc(doc(firebaseDb, inspectionsCol.id, row.id));
       }
       alert(`Checklists deletados com sucesso (${rows.length}).`);
       await fetchRows();
@@ -779,17 +725,9 @@ export default function AdminChecklistsPage() {
               variant="outline"
               disabled={!hasMore || loadingRows || loadingMore}
               loading={loadingMore}
-              onClick={() => fetchRows(false, false, offset)}
+              onClick={() => fetchRows(false, nextCursor)}
             >
               Mostrar mais 30
-            </Button>
-            <Button
-              variant="secondary"
-              disabled={!hasMore || loadingRows || loadingMore}
-              loading={loadingMore}
-              onClick={() => fetchRows(false, true, offset)}
-            >
-              Mostrar todas
             </Button>
           </div>
         </CardContent>

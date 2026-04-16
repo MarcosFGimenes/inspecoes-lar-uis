@@ -11,6 +11,7 @@ import { isMaintainerProfileId } from "@/lib/signature-profiles";
 import { fromDataUrl } from "@/lib/storage/dataUrl";
 import { r2Provider } from "@/lib/storage/r2Provider";
 import { buildIssueRecurrenceUpdates } from "@/lib/non-conformity-priority";
+import { upsertInspectionSummary } from "@/lib/inspection-summary";
 import type { StoredImage } from "@/types";
 
 export const runtime = "nodejs";
@@ -377,6 +378,9 @@ export async function POST(req: NextRequest) {
       await issueRef.set({
         machineId: machineRecord.id,
         tag: machineRecord.tag ?? null,
+        machineTagLower: machineRecord.tag ? String(machineRecord.tag).toLowerCase() : null,
+        maintainerId: auth.store.id ?? null,
+        maintainerMatricula: auth.store.matricula ?? null,
         templateItemId: item.templateItemId,
         descricao,
         osNumero: item.osNumeroItem ?? null,
@@ -507,6 +511,7 @@ export async function POST(req: NextRequest) {
       answers: answersPayload,
       nonConformityTreatments: treatmentsPayload,
       qtdNC,
+      hasNc: qtdNC > 0,
       createdAt: nowIso,
       createdAtTimestamp: nowTimestamp,
       iniciadaEm: nowIso,
@@ -515,6 +520,29 @@ export async function POST(req: NextRequest) {
       finalizadaEmTimestamp: nowTimestamp,
       issuesCriadas,
       issuesResolvidas,
+    });
+
+    await upsertInspectionSummary({
+      id: inspectionId,
+      createdAt: nowIso,
+      machine: {
+        machineId: machineRecord.id,
+        tag: machineRecord.tag ?? null,
+        nome: machineRecord.nome ?? null,
+        setor: machineRecord.setor ?? null,
+      },
+      maintainer: {
+        maintId: auth.store.id ?? null,
+        nome: auth.store.nome ?? null,
+        matricula: auth.store.matricula ?? null,
+      },
+      template: {
+        id: templateSnap.id,
+        nome: typeof templateData.nome === "string" ? templateData.nome : null,
+        versao: typeof templateData.versao === "string" ? templateData.versao : null,
+      },
+      osNumero: osNumero ?? null,
+      qtdNc: qtdNC,
     });
 
     if (programacaoDoc) {
