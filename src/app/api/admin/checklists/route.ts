@@ -59,36 +59,82 @@ export async function GET(req: NextRequest) {
   const toIso = toIsoEnd(queryParams.get("to"));
   const cursor = decodeCursor(queryParams.get("cursor"));
 
-  let queryRef: FirebaseFirestore.Query<FirebaseFirestore.DocumentData> = adminDb
-    .collection("inspecoes_resumo")
-    .orderBy("createdAt", "desc")
-    .orderBy("inspectionId", "desc");
+  let docs: FirebaseFirestore.QueryDocumentSnapshot<FirebaseFirestore.DocumentData>[] = [];
+  let hasMore = false;
+  let nextCursor: string | null = null;
 
-  if (fromIso) queryRef = queryRef.where("createdAt", ">=", fromIso);
-  if (toIso) queryRef = queryRef.where("createdAt", "<=", toIso);
-  if (maintainerId) queryRef = queryRef.where("maintainerId", "==", maintainerId);
-  if (templateId) queryRef = queryRef.where("templateId", "==", templateId);
-  if (hasNc === "yes") queryRef = queryRef.where("hasNc", "==", true);
-  if (hasNc === "no") queryRef = queryRef.where("hasNc", "==", false);
-  if (matriculaQuery) queryRef = queryRef.where("maintainerMatriculaLower", "==", matriculaQuery);
+  try {
+    let queryRef: FirebaseFirestore.Query<FirebaseFirestore.DocumentData> = adminDb
+      .collection("inspecoes_resumo")
+      .orderBy("createdAt", "desc")
+      .orderBy("inspectionId", "desc");
 
-  if (machineQuery) {
-    queryRef = queryRef.where("machineSearchTokens", "array-contains", machineQuery);
+    if (fromIso) queryRef = queryRef.where("createdAt", ">=", fromIso);
+    if (toIso) queryRef = queryRef.where("createdAt", "<=", toIso);
+    if (maintainerId) queryRef = queryRef.where("maintainerId", "==", maintainerId);
+    if (templateId) queryRef = queryRef.where("templateId", "==", templateId);
+    if (hasNc === "yes") queryRef = queryRef.where("hasNc", "==", true);
+    if (hasNc === "no") queryRef = queryRef.where("hasNc", "==", false);
+    if (matriculaQuery) queryRef = queryRef.where("maintainerMatriculaLower", "==", matriculaQuery);
+
+    if (machineQuery) {
+      queryRef = queryRef.where("machineSearchTokens", "array-contains", machineQuery);
+    }
+
+    if (cursor) {
+      queryRef = queryRef.startAfter(cursor.createdAt, cursor.id);
+    }
+
+    const snap = await queryRef.limit(limit + 1).get();
+    docs = snap.docs.slice(0, limit);
+    hasMore = snap.docs.length > limit;
+    nextCursor = hasMore
+      ? encodeCursor({
+          createdAt: String(docs[docs.length - 1]?.data()?.createdAt ?? ""),
+          id: String(docs[docs.length - 1]?.data()?.inspectionId ?? docs[docs.length - 1]?.id ?? ""),
+        })
+      : null;
+  } catch {
+    // Fallback defensivo para ambientes sem todos os índices compostos do Firestore.
+    const fallbackSnap = await adminDb
+      .collection("inspecoes_resumo")
+      .orderBy("createdAt", "desc")
+      .limit(500)
+      .get();
+
+    const filtered = fallbackSnap.docs.filter(docSnap => {
+      const data = docSnap.data() ?? {};
+      const createdAt = typeof data.createdAt === "string" ? data.createdAt : null;
+      if (fromIso && createdAt && createdAt < fromIso) return false;
+      if (toIso && createdAt && createdAt > toIso) return false;
+      if (maintainerId && data.maintainerId !== maintainerId) return false;
+      if (templateId && data.templateId !== templateId) return false;
+      if (hasNc === "yes" && data.hasNc !== true) return false;
+      if (hasNc === "no" && data.hasNc !== false) return false;
+      if (matriculaQuery && String(data.maintainerMatriculaLower ?? "") !== matriculaQuery) return false;
+      if (machineQuery) {
+        const tokens = Array.isArray(data.machineSearchTokens) ? data.machineSearchTokens.map(String) : [];
+        if (!tokens.includes(machineQuery)) return false;
+      }
+      if (cursor && createdAt) {
+        if (createdAt > cursor.createdAt) return false;
+        if (createdAt === cursor.createdAt) {
+          const inspectionId = String(data.inspectionId ?? docSnap.id);
+          if (inspectionId >= cursor.id) return false;
+        }
+      }
+      return true;
+    });
+
+    docs = filtered.slice(0, limit);
+    hasMore = filtered.length > limit;
+    nextCursor = hasMore
+      ? encodeCursor({
+          createdAt: String(docs[docs.length - 1]?.data()?.createdAt ?? ""),
+          id: String(docs[docs.length - 1]?.data()?.inspectionId ?? docs[docs.length - 1]?.id ?? ""),
+        })
+      : null;
   }
-
-  if (cursor) {
-    queryRef = queryRef.startAfter(cursor.createdAt, cursor.id);
-  }
-
-  const snap = await queryRef.limit(limit + 1).get();
-  const docs = snap.docs.slice(0, limit);
-  const hasMore = snap.docs.length > limit;
-  const nextCursor = hasMore
-    ? encodeCursor({
-        createdAt: String(docs[docs.length - 1]?.data()?.createdAt ?? ""),
-        id: String(docs[docs.length - 1]?.data()?.inspectionId ?? docs[docs.length - 1]?.id ?? ""),
-      })
-    : null;
 
   const items = docs.map(docSnap => {
     const data = docSnap.data() ?? {};

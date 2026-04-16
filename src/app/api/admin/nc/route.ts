@@ -312,19 +312,48 @@ async function calculateIssueHistory(issueId: string) {
   }
 
   const sourceDate = resolveInspectionDate(sourceInspectionData);
-  let summaryQuery = adminDb
-    .collection("inspecoes_resumo")
-    .where("machineId", "==", machineId)
-    .where("hasNc", "==", true)
-    .orderBy("createdAt", "desc")
-    .limit(120);
+  let summaryDocs: FirebaseFirestore.QueryDocumentSnapshot<FirebaseFirestore.DocumentData>[] = [];
 
-  if (sourceDate) {
-    summaryQuery = summaryQuery.where("createdAt", "<", sourceDate);
+  try {
+    let summaryQuery = adminDb
+      .collection("inspecoes_resumo")
+      .where("machineId", "==", machineId)
+      .where("hasNc", "==", true)
+      .orderBy("createdAt", "desc")
+      .limit(120);
+
+    if (sourceDate) {
+      summaryQuery = summaryQuery.where("createdAt", "<", sourceDate);
+    }
+
+    const summarySnap = await summaryQuery.get();
+    summaryDocs = summarySnap.docs;
+  } catch {
+    // Fallback sem depender de índice composto para evitar erro 500 no carregamento sob demanda.
+    const fallbackSnap = await adminDb
+      .collection("inspecoes_resumo")
+      .where("machineId", "==", machineId)
+      .limit(300)
+      .get();
+
+    summaryDocs = fallbackSnap.docs
+      .filter(doc => Boolean(doc.data()?.hasNc))
+      .filter(doc => {
+        if (!sourceDate) return true;
+        const createdAt = typeof doc.data()?.createdAt === "string" ? doc.data().createdAt : null;
+        return createdAt ? createdAt < sourceDate : true;
+      })
+      .sort((a, b) => {
+        const aTs = Date.parse(String(a.data()?.createdAt ?? ""));
+        const bTs = Date.parse(String(b.data()?.createdAt ?? ""));
+        const normalizedA = Number.isNaN(aTs) ? 0 : aTs;
+        const normalizedB = Number.isNaN(bTs) ? 0 : bTs;
+        return normalizedB - normalizedA;
+      })
+      .slice(0, 120);
   }
 
-  const summarySnap = await summaryQuery.get();
-  const inspectionIds = summarySnap.docs
+  const inspectionIds = summaryDocs
     .map(doc => String(doc.data()?.inspectionId ?? ""))
     .filter(id => id && id !== responseId);
 
