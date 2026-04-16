@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import { QueryProvider } from "@/components/query-provider";
 import { cn } from "@/lib/cn";
 import "./globals.css";
 
@@ -23,9 +24,11 @@ export default function RootLayout({
         />
       </head>
       <body className={cn("app-body antialiased")}> 
-        <div className="app-shell">
-          <div className="page-wrapper">{children}</div>
-        </div>
+        <QueryProvider>
+          <div className="app-shell">
+            <div className="page-wrapper">{children}</div>
+          </div>
+        </QueryProvider>
       </body>
     </html>
   );

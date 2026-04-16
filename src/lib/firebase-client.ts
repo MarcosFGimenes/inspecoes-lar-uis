@@ -2,7 +2,7 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { getStorage } from "firebase/storage";
-import { getFirestore } from "firebase/firestore";
+import { getFirestore, initializeFirestore, persistentLocalCache } from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY!,
@@ -14,7 +14,14 @@ const firebaseConfig = {
 
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
+const db =
+  typeof window === "undefined"
+    ? getFirestore(app)
+    : initializeFirestore(app, {
+        localCache: persistentLocalCache(),
+      });
+
 export const firebaseApp = app;
 export const firebaseAuth = getAuth(app);
 export const firebaseStorage = getStorage(app);
-export const firebaseDb = getFirestore(app);
+export const firebaseDb = db;

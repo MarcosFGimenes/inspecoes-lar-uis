@@ -230,6 +230,29 @@ function resolveMachineIdFromInspection(data: Record<string, unknown>): string |
   return null;
 }
 
+async function getDocumentsByIds(
+  collectionName: string,
+  ids: string[]
+): Promise<FirebaseFirestore.DocumentSnapshot<FirebaseFirestore.DocumentData>[]> {
+  if (ids.length === 0) return [];
+  const uniqueIds = Array.from(new Set(ids.filter(Boolean)));
+  const chunkSize = 300;
+  const snapshots: FirebaseFirestore.DocumentSnapshot<FirebaseFirestore.DocumentData>[] = [];
+  for (let i = 0; i < uniqueIds.length; i += chunkSize) {
+    const refs = uniqueIds.slice(i, i + chunkSize).map(id => adminDb.collection(collectionName).doc(id));
+    const chunkSnapshots = await adminDb.getAll(...refs);
+    snapshots.push(...chunkSnapshots);
+  }
+  return snapshots;
+}
+
+function matchesMachineQuery(item: NonConformityItemResponse, machineQuery: string) {
+  if (!machineQuery) return true;
+  const query = machineQuery.toLowerCase();
+  const haystack = [item.machineLabel, item.machineTag ?? "", item.machineId ?? ""].join(" ").toLowerCase();
+  return haystack.includes(query);
+}
+
 export async function GET(req: NextRequest) {
   const isAdmin = await requireAdminFromRequest(req);
   if (!isAdmin) {
@@ -242,34 +265,106 @@ export async function GET(req: NextRequest) {
   const includeAll = queryParams.get("all") === "1";
   const issueStatusFilter = (queryParams.get("status") ?? "aberta").trim().toLowerCase();
   const maintainerIdFilter = queryParams.get("mantenedor_id")?.trim() ?? "";
+  const machineQueryFilter = (queryParams.get("machine_query") ?? "").trim();
 
   const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(Math.floor(rawLimit), 500) : 20;
   const offset = Number.isFinite(rawOffset) && rawOffset >= 0 ? Math.floor(rawOffset) : 0;
   const allowedStatuses = new Set(["aberta", "concluida", "resolvida"]);
   const normalizedIssueStatus = allowedStatuses.has(issueStatusFilter) ? issueStatusFilter : "aberta";
 
-  const issuesQuery = adminDb.collection("issues").where("status", "==", normalizedIssueStatus);
+  let issuesSnap: FirebaseFirestore.QuerySnapshot<FirebaseFirestore.DocumentData>;
 
-  const [machinesSnap, templatesSnap, issuesSnap, inspectionsSnap] = await Promise.all([
-    adminDb.collection("machines").get(),
-    adminDb.collection("templates").get(),
-    issuesQuery.get(),
-    adminDb.collection("inspecoes").get(),
-  ]);
+  if (machineQueryFilter) {
+    const machinesSnap = await adminDb.collection("machines").get();
+    const normalizedMachineQuery = machineQueryFilter.toLowerCase();
+    const candidateMachineIds = machinesSnap.docs
+      .filter(docSnap => {
+        const data = docSnap.data() ?? {};
+        const haystack = [docSnap.id, data.tag ?? "", data.nome ?? ""].join(" ").toLowerCase();
+        return haystack.includes(normalizedMachineQuery);
+      })
+      .map(docSnap => docSnap.id);
 
-  const machineOptions: MachineOption[] = machinesSnap.docs.map(docSnap => {
-    const data = docSnap.data() ?? {};
-    return {
-      id: docSnap.id,
-      nome: typeof data.nome === "string" ? data.nome : docSnap.id,
-      tag: data.tag ? String(data.tag) : null,
-      templateId: typeof data.templateId === "string" ? data.templateId : null,
-    } satisfies MachineOption;
-  });
+    if (candidateMachineIds.length > 0) {
+      const chunks: string[][] = [];
+      for (let index = 0; index < candidateMachineIds.length; index += 10) {
+        chunks.push(candidateMachineIds.slice(index, index + 10));
+      }
+      const chunkSnapshots = await Promise.all(
+        chunks.map(chunk =>
+          adminDb.collection("issues").where("status", "==", normalizedIssueStatus).where("machineId", "in", chunk).get()
+        )
+      );
+      const issuesMap = new Map<string, FirebaseFirestore.QueryDocumentSnapshot<FirebaseFirestore.DocumentData>>();
+      chunkSnapshots.forEach(snap => {
+        snap.forEach(docSnap => issuesMap.set(docSnap.id, docSnap));
+      });
+      issuesSnap = {
+        docs: Array.from(issuesMap.values()),
+      } as unknown as FirebaseFirestore.QuerySnapshot<FirebaseFirestore.DocumentData>;
+    } else {
+      issuesSnap = await adminDb.collection("issues").where("status", "==", normalizedIssueStatus).get();
+    }
+  } else {
+    issuesSnap = await adminDb.collection("issues").where("status", "==", normalizedIssueStatus).get();
+  }
+
+  const responseIds = issuesSnap.docs
+    .map(issueDoc => {
+      const data = issueDoc.data() ?? {};
+      return typeof data.abertaEmInspecaoId === "string" ? data.abertaEmInspecaoId : null;
+    })
+    .filter((value): value is string => Boolean(value));
+
+  const inspectionsDocs = await getDocumentsByIds("inspecoes", responseIds);
+
+  const machineIdsFromIssues = issuesSnap.docs
+    .map(issueDoc => {
+      const data = issueDoc.data() ?? {};
+      return typeof data.machineId === "string" ? data.machineId : null;
+    })
+    .filter((value): value is string => Boolean(value));
+
+  const machineIdsFromInspections = inspectionsDocs
+    .map(inspectionDoc => resolveMachineIdFromInspection(inspectionDoc.data() ?? {}))
+    .filter((value): value is string => Boolean(value));
+
+  const machineDocs = await getDocumentsByIds("machines", [...machineIdsFromIssues, ...machineIdsFromInspections]);
+
+  const machineOptions: MachineOption[] = machineDocs
+    .filter(docSnap => docSnap.exists)
+    .map(docSnap => {
+      const data = docSnap.data() ?? {};
+      return {
+        id: docSnap.id,
+        nome: typeof data.nome === "string" ? data.nome : docSnap.id,
+        tag: data.tag ? String(data.tag) : null,
+        templateId: typeof data.templateId === "string" ? data.templateId : null,
+      } satisfies MachineOption;
+    });
+
   const machinesById = new Map(machineOptions.map(machine => [machine.id, machine]));
 
+  const templateIds = new Set<string>();
+  inspectionsDocs.forEach(inspectionDoc => {
+    const inspectionData = inspectionDoc.data() ?? {};
+    const templateInfo = (inspectionData.template ?? {}) as Record<string, unknown>;
+    const machine = (inspectionData.machine ?? {}) as Record<string, unknown>;
+    const machineId = resolveMachineIdFromInspection(inspectionData);
+    const machineOption = machineId ? machinesById.get(machineId) : undefined;
+    const templateId =
+      typeof templateInfo.id === "string"
+        ? templateInfo.id
+        : typeof machine.templateId === "string"
+          ? machine.templateId
+          : machineOption?.templateId ?? null;
+    if (templateId) templateIds.add(templateId);
+  });
+
+  const templateDocs = await getDocumentsByIds("templates", Array.from(templateIds));
   const templateMap = new Map<string, TemplateMeta>();
-  templatesSnap.docs.forEach(docSnap => {
+  templateDocs.forEach(docSnap => {
+    if (!docSnap.exists) return;
     const data = docSnap.data() ?? {};
     const itens = Array.isArray(data.itens) ? (data.itens as TemplateItemData[]) : [];
     const itensMap = new Map<string, TemplateItemData>();
@@ -287,7 +382,8 @@ export async function GET(req: NextRequest) {
   const treatmentsByResponse: Record<string, ChecklistNonConformityTreatment[]> = {};
   const ncHistoryByLogicalId = new Map<string, NonConformityRecurrenceHistoryItem[]>();
 
-  inspectionsSnap.docs.forEach(inspectionDoc => {
+  inspectionsDocs.forEach(inspectionDoc => {
+    if (!inspectionDoc.exists) return;
     const inspectionData = inspectionDoc.data() ?? {};
     const machine = (inspectionData.machine ?? {}) as Record<string, unknown>;
     const maintainer = (inspectionData.maintainer ?? {}) as Record<string, unknown>;
@@ -362,6 +458,7 @@ export async function GET(req: NextRequest) {
 
   const builtItems: NonConformityItemResponse[] = [];
   const issuesToMigrate: Array<{ id: string; lastReincidenciaAt: string }> = [];
+
   issuesSnap.docs.forEach(issueDoc => {
     const issueData = issueDoc.data() ?? {};
     const machineId = typeof issueData.machineId === "string" ? issueData.machineId : null;
@@ -474,21 +571,28 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  const sortedItems = sortByLastActivityDesc(
-    maintainerIdFilter
-      ? builtItems.filter(item => item.maintainerId === maintainerIdFilter)
-      : builtItems
+  const filtered = sortByLastActivityDesc(
+    builtItems
+      .filter(item => (maintainerIdFilter ? item.maintainerId === maintainerIdFilter : true))
+      .filter(item => matchesMachineQuery(item, machineQueryFilter))
   );
-  const total = sortedItems.length;
-  const paginatedItems = includeAll ? sortedItems : sortedItems.slice(offset, offset + limit);
+
+  const total = filtered.length;
+  const paginatedItems = includeAll ? filtered : filtered.slice(offset, offset + limit);
   const returnedCount = includeAll ? total : Math.min(limit, Math.max(total - offset, 0));
   const nextOffset = includeAll ? total : offset + returnedCount;
+
+  const pagedTreatmentsByResponse: Record<string, ChecklistNonConformityTreatment[]> = {};
+  paginatedItems.forEach(item => {
+    if (!item.responseId) return;
+    pagedTreatmentsByResponse[item.responseId] = treatmentsByResponse[item.responseId] ?? [];
+  });
 
   return NextResponse.json({
     items: paginatedItems,
     total,
     hasMore: nextOffset < total,
     nextOffset,
-    treatmentsByResponse,
+    treatmentsByResponse: pagedTreatmentsByResponse,
   });
 }

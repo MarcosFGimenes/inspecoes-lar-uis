@@ -148,6 +148,9 @@ export default function AdminNonConformitiesPage() {
       if (maintainerFilter) {
         params.set("mantenedor_id", maintainerFilter);
       }
+      if (machineFilter.trim()) {
+        params.set("machine_query", machineFilter.trim());
+      }
       if (fetchAll) {
         params.set("all", "1");
       } else {
@@ -186,7 +189,7 @@ export default function AdminNonConformitiesPage() {
         setLoadingMore(false);
       }
     }
-  }, [maintainerFilter, statusFilter]);
+  }, [machineFilter, maintainerFilter, statusFilter]);
 
   useEffect(() => {
     let cancelled = false;
@@ -217,7 +220,7 @@ export default function AdminNonConformitiesPage() {
 
   useEffect(() => {
     loadData(true);
-  }, [statusFilter, maintainerFilter, loadData]);
+  }, [statusFilter, maintainerFilter, machineFilter, loadData]);
 
   const machineOptionsForFilter = useMemo(() => {
     return Array.from(new Set(items.map(item => item.machineLabel.trim()).filter(Boolean))).sort((a, b) =>
@@ -225,24 +228,6 @@ export default function AdminNonConformitiesPage() {
     );
   }, [items]);
 
-  const filteredItems = useMemo(() => {
-    const machineSearch = machineFilter.trim().toLowerCase();
-    return items.filter(item => {
-      if (machineSearch) {
-        const machineLabel = item.machineLabel.toLowerCase();
-        const machineTag = (item.machineTag ?? "").toLowerCase();
-        const machineId = (item.machineId ?? "").toLowerCase();
-        if (
-          !machineLabel.includes(machineSearch) &&
-          !machineTag.includes(machineSearch) &&
-          !machineId.includes(machineSearch)
-        ) {
-          return false;
-        }
-      }
-      return true;
-    });
-  }, [items, machineFilter]);
 
   const handleUpdateItem = useCallback((id: string, updates: Partial<NonConformityItem>) => {
     setItems(prev =>
@@ -362,7 +347,7 @@ export default function AdminNonConformitiesPage() {
   }, []);
 
   const handleToggleAllVisible = useCallback(() => {
-    const visibleIds = filteredItems.map(item => item.id);
+    const visibleIds = items.map(item => item.id);
     const allSelected = visibleIds.length > 0 && visibleIds.every(id => selectedIds.includes(id));
 
     setSelectedIds(prev => {
@@ -372,7 +357,7 @@ export default function AdminNonConformitiesPage() {
       const merged = new Set([...prev, ...visibleIds]);
       return Array.from(merged);
     });
-  }, [filteredItems, selectedIds]);
+  }, [items, selectedIds]);
 
   const handleToggleResolution = useCallback((itemId: string) => {
     setExpandedResolutions(prev => {
@@ -421,7 +406,7 @@ export default function AdminNonConformitiesPage() {
   }, [deleteDialogItemId]);
 
   const allVisibleSelected =
-    filteredItems.length > 0 && filteredItems.every(item => selectedIds.includes(item.id));
+    items.length > 0 && items.every(item => selectedIds.includes(item.id));
   const selectedCount = selectedIds.length;
 
   if (loading) {
@@ -530,18 +515,18 @@ export default function AdminNonConformitiesPage() {
         Mostrando {items.length} de {totalItems} não conformidades.
       </div>
 
-      {filteredItems.length > 0 && (
+      {items.length > 0 && (
         <Card>
           <CardContent className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <label className="flex items-center gap-3 text-sm text-[var(--text)]">
               <input
                 type="checkbox"
                 className="h-4 w-4 accent-[var(--primary-500)]"
-                checked={allVisibleSelected && filteredItems.length > 0}
+                checked={allVisibleSelected && items.length > 0}
                 onChange={handleToggleAllVisible}
               />
               <div className="leading-tight">
-                <div>Selecionar todas as {filteredItems.length} NC exibidas</div>
+                <div>Selecionar todas as {items.length} NC exibidas</div>
                 <div className="text-[var(--muted)]">
                   {selectedCount} selecionada{selectedCount === 1 ? "" : "s"}
                 </div>
@@ -577,14 +562,14 @@ export default function AdminNonConformitiesPage() {
         </Card>
       )}
 
-      {filteredItems.length === 0 ? (
+      {items.length === 0 ? (
         <EmptyState
           title="Nenhuma não conformidade encontrada"
           description="Ajuste os filtros ou aguarde novas inspeções com NC registradas."
         />
       ) : (
         <div className="space-y-6">
-          {filteredItems.map(item => {
+          {items.map(item => {
             const itemFeedback = feedback[item.id];
             const hasMaintainerResolution = item.maintainerResolution != null;
             const reincidenciaCount = item.reincidenciaCount;

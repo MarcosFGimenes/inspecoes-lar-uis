@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useInfiniteQuery } from "@tanstack/react-query";
 
 type MaintInspectionListItem = {
   id: string;
@@ -14,7 +15,13 @@ type MaintInspectionListItem = {
   qtdNc: number;
 };
 
+type InspecoesResponse = {
+  items: MaintInspectionListItem[];
+  nextCursor: string | null;
+};
+
 const PAGE_LIMIT = 20;
+const cacheInspecoes = new Map<string, InspecoesResponse>();
 
 function formatDateTime(value: string | null) {
   if (!value) return "-";
@@ -23,18 +30,71 @@ function formatDateTime(value: string | null) {
   return date.toLocaleString("pt-BR");
 }
 
+async function fetchInspecoes(
+  appliedStart: string,
+  appliedEnd: string,
+  cursor?: string,
+): Promise<InspecoesResponse> {
+  const params = new URLSearchParams();
+  if (appliedStart.trim()) {
+    params.set("startDate", appliedStart.trim());
+  }
+  if (appliedEnd.trim()) {
+    params.set("endDate", appliedEnd.trim());
+  }
+  params.set("limit", String(PAGE_LIMIT));
+  if (cursor) {
+    params.set("cursor", cursor);
+  }
+
+  const cacheKey = `${appliedStart}|${appliedEnd}|${cursor ?? "first"}`;
+  const cached = cacheInspecoes.get(cacheKey);
+  if (cached) return cached;
+
+  const response = await fetch(`/api/me/inspecoes?${params.toString()}`, { cache: "force-cache" });
+
+  if (response.status === 401) {
+    if (typeof window !== "undefined") {
+      window.location.href = "/login";
+    }
+    throw new Error("UNAUTHENTICATED");
+  }
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    throw new Error(typeof payload?.error === "string" ? payload.error : "Falha ao carregar inspeções");
+  }
+
+  const data = await response.json();
+  const rawItems = Array.isArray(data?.items) ? (data.items as MaintInspectionListItem[]) : [];
+  const normalized = rawItems
+    .map(item => ({
+      id: item?.id ? String(item.id) : "",
+      machineTag: item?.machineTag ?? null,
+      machineNome: item?.machineNome ?? null,
+      machineSetor: item?.machineSetor ?? null,
+      machineUnidade: item?.machineUnidade ?? null,
+      finalizadaEm: item?.finalizadaEm ?? null,
+      osNumero: item?.osNumero ?? null,
+      qtdNc: Number.isFinite(item?.qtdNc) ? Number(item?.qtdNc) : 0,
+    }))
+    .filter(item => item.id);
+
+  const result = {
+    items: normalized,
+    nextCursor: data?.nextCursor ? String(data.nextCursor) : null,
+  };
+
+  cacheInspecoes.set(cacheKey, result);
+  return result;
+}
+
 export default function MaintCompletedInspectionsPage() {
   const router = useRouter();
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [appliedStart, setAppliedStart] = useState("");
   const [appliedEnd, setAppliedEnd] = useState("");
-  const [items, setItems] = useState<MaintInspectionListItem[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [initializing, setInitializing] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -54,83 +114,23 @@ export default function MaintCompletedInspectionsPage() {
     return null;
   }, [appliedEnd, appliedStart]);
 
-  const fetchInspections = useCallback(
-    async ({ reset, cursor }: { reset: boolean; cursor?: string }) => {
-      if (reset) {
-        setLoading(true);
-        setError(null);
-        setNextCursor(null);
-      } else {
-        setLoadingMore(true);
-      }
-      try {
-        const params = new URLSearchParams();
-        if (appliedStart.trim()) {
-          params.set("startDate", appliedStart.trim());
-        }
-        if (appliedEnd.trim()) {
-          params.set("endDate", appliedEnd.trim());
-        }
-        params.set("limit", String(PAGE_LIMIT));
-        if (cursor) {
-          params.set("cursor", cursor);
-        }
-        const response = await fetch(`/api/me/inspecoes?${params.toString()}`, { cache: "no-store" });
-        if (response.status === 401) {
-          window.location.href = "/login";
-          return;
-        }
-        if (!response.ok) {
-          const payload = await response.json().catch(() => null);
-          throw new Error(typeof payload?.error === "string" ? payload.error : "Falha ao carregar inspeções");
-        }
-        const data = await response.json();
-        const rawItems = Array.isArray(data?.items) ? (data.items as MaintInspectionListItem[]) : [];
-        const normalized = rawItems
-          .map(item => ({
-            id: item?.id ? String(item.id) : "",
-            machineTag: item?.machineTag ?? null,
-            machineNome: item?.machineNome ?? null,
-            machineSetor: item?.machineSetor ?? null,
-            machineUnidade: item?.machineUnidade ?? null,
-            finalizadaEm: item?.finalizadaEm ?? null,
-            osNumero: item?.osNumero ?? null,
-            qtdNc: Number.isFinite(item?.qtdNc) ? Number(item?.qtdNc) : 0,
-          }))
-          .filter(item => item.id);
-        setItems(prev => (reset ? normalized : [...prev, ...normalized]));
-        setNextCursor(data?.nextCursor ? String(data.nextCursor) : null);
-      } catch (err: unknown) {
-        const message = err instanceof Error && err.message ? err.message : "Falha ao carregar inspeções";
-        if (reset) {
-          setItems([]);
-          setError(message);
-        } else {
-          setError(message);
-        }
-      } finally {
-        if (reset) {
-          setLoading(false);
-          setInitializing(false);
-        } else {
-          setLoadingMore(false);
-        }
-      }
-    },
-    [appliedEnd, appliedStart]
-  );
+  const query = useInfiniteQuery({
+    queryKey: ["inspecoes", appliedStart, appliedEnd],
+    enabled: !dateError,
+    queryFn: ({ pageParam }) => fetchInspecoes(appliedStart, appliedEnd, pageParam as string | undefined),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: lastPage => lastPage.nextCursor ?? undefined,
+    staleTime: 1000 * 60 * 5,
+    gcTime: 1000 * 60 * 10,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    retry: 1,
+  });
 
-  useEffect(() => {
-    if (appliedStart && appliedEnd && appliedStart > appliedEnd) {
-      setItems([]);
-      setError("A data inicial deve ser anterior ou igual à data final.");
-      setLoading(false);
-      setLoadingMore(false);
-      setInitializing(false);
-      return;
-    }
-    fetchInspections({ reset: true }).catch(() => undefined);
-  }, [appliedEnd, appliedStart, fetchInspections]);
+  const items = useMemo(
+    () => query.data?.pages.flatMap(page => page.items) ?? [],
+    [query.data?.pages]
+  );
 
   const applyFilters = useCallback(() => {
     setAppliedStart(startDate.trim());
@@ -150,6 +150,10 @@ export default function MaintCompletedInspectionsPage() {
     },
     [router]
   );
+
+  const loading = query.isLoading;
+  const loadingMore = query.isFetchingNextPage;
+  const error = query.error instanceof Error ? query.error.message : null;
 
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-8">
@@ -211,10 +215,10 @@ export default function MaintCompletedInspectionsPage() {
             <h2 className="text-lg font-semibold text-slate-900">Histórico de inspeções</h2>
             <p className="text-sm text-slate-500">Toque para revisar as respostas ou gerar o PDF da inspeção finalizada.</p>
           </div>
-          {initializing ? null : <span className="text-xs text-slate-400">{items.length} inspeções listadas</span>}
+          {!loading ? <span className="text-xs text-slate-400">{items.length} inspeções listadas</span> : null}
         </header>
 
-        {loading && initializing ? (
+        {loading ? (
           <div className="grid gap-4 sm:grid-cols-2">
             {Array.from({ length: 4 }).map((_, index) => (
               <div key={index} className="h-36 animate-pulse rounded-2xl bg-slate-100" />
@@ -271,11 +275,11 @@ export default function MaintCompletedInspectionsPage() {
           </div>
         )}
 
-        {nextCursor && !loading && (
+        {query.hasNextPage && !loading && (
           <div className="flex justify-center">
             <button
               type="button"
-              onClick={() => fetchInspections({ reset: false, cursor: nextCursor }).catch(() => undefined)}
+              onClick={() => query.fetchNextPage()}
               disabled={loadingMore}
               className="inline-flex items-center justify-center rounded-xl border border-slate-300 px-5 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
             >
