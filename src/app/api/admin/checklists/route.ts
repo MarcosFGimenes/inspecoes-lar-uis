@@ -42,6 +42,16 @@ function encodeCursor(payload: CursorPayload | null) {
   return Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
 }
 
+function computeNcCount(data: Record<string, unknown>) {
+  if (typeof data.qtdNC === "number") return data.qtdNC;
+  const answers = Array.isArray(data.answers) ? data.answers : [];
+  if (answers.length > 0) {
+    return answers.filter(item => String((item as Record<string, unknown>)?.response ?? "").toLowerCase() === "nc").length;
+  }
+  const itens = Array.isArray(data.itens) ? data.itens : [];
+  return itens.filter(item => String((item as Record<string, unknown>)?.resultado ?? "c").toLowerCase() === "nc").length;
+}
+
 export async function GET(req: NextRequest) {
   const isAdmin = await requireAdminFromRequest(req);
   if (!isAdmin) {
@@ -59,108 +69,136 @@ export async function GET(req: NextRequest) {
   const toIso = toIsoEnd(queryParams.get("to"));
   const cursor = decodeCursor(queryParams.get("cursor"));
 
-  let docs: FirebaseFirestore.QueryDocumentSnapshot<FirebaseFirestore.DocumentData>[] = [];
-  let hasMore = false;
-  let nextCursor: string | null = null;
+  let queryRef: FirebaseFirestore.Query<FirebaseFirestore.DocumentData> = adminDb
+    .collection("inspecoes")
+    .orderBy("createdAt", "desc")
+    .orderBy("__name__", "desc");
 
-  try {
-    let queryRef: FirebaseFirestore.Query<FirebaseFirestore.DocumentData> = adminDb
-      .collection("inspecoes_resumo")
-      .orderBy("createdAt", "desc")
-      .orderBy("inspectionId", "desc");
-
-    if (fromIso) queryRef = queryRef.where("createdAt", ">=", fromIso);
-    if (toIso) queryRef = queryRef.where("createdAt", "<=", toIso);
-    if (maintainerId) queryRef = queryRef.where("maintainerId", "==", maintainerId);
-    if (templateId) queryRef = queryRef.where("templateId", "==", templateId);
-    if (hasNc === "yes") queryRef = queryRef.where("hasNc", "==", true);
-    if (hasNc === "no") queryRef = queryRef.where("hasNc", "==", false);
-    if (matriculaQuery) queryRef = queryRef.where("maintainerMatriculaLower", "==", matriculaQuery);
-
-    if (machineQuery) {
-      queryRef = queryRef.where("machineSearchTokens", "array-contains", machineQuery);
-    }
-
-    if (cursor) {
-      queryRef = queryRef.startAfter(cursor.createdAt, cursor.id);
-    }
-
-    const snap = await queryRef.limit(limit + 1).get();
-    docs = snap.docs.slice(0, limit);
-    hasMore = snap.docs.length > limit;
-    nextCursor = hasMore
-      ? encodeCursor({
-          createdAt: String(docs[docs.length - 1]?.data()?.createdAt ?? ""),
-          id: String(docs[docs.length - 1]?.data()?.inspectionId ?? docs[docs.length - 1]?.id ?? ""),
-        })
-      : null;
-  } catch {
-    // Fallback defensivo para ambientes sem todos os índices compostos do Firestore.
-    const fallbackSnap = await adminDb
-      .collection("inspecoes_resumo")
-      .orderBy("createdAt", "desc")
-      .limit(500)
-      .get();
-
-    const filtered = fallbackSnap.docs.filter(docSnap => {
-      const data = docSnap.data() ?? {};
-      const createdAt = typeof data.createdAt === "string" ? data.createdAt : null;
-      if (fromIso && createdAt && createdAt < fromIso) return false;
-      if (toIso && createdAt && createdAt > toIso) return false;
-      if (maintainerId && data.maintainerId !== maintainerId) return false;
-      if (templateId && data.templateId !== templateId) return false;
-      if (hasNc === "yes" && data.hasNc !== true) return false;
-      if (hasNc === "no" && data.hasNc !== false) return false;
-      if (matriculaQuery && String(data.maintainerMatriculaLower ?? "") !== matriculaQuery) return false;
-      if (machineQuery) {
-        const tokens = Array.isArray(data.machineSearchTokens) ? data.machineSearchTokens.map(String) : [];
-        if (!tokens.includes(machineQuery)) return false;
-      }
-      if (cursor && createdAt) {
-        if (createdAt > cursor.createdAt) return false;
-        if (createdAt === cursor.createdAt) {
-          const inspectionId = String(data.inspectionId ?? docSnap.id);
-          if (inspectionId >= cursor.id) return false;
-        }
-      }
-      return true;
-    });
-
-    docs = filtered.slice(0, limit);
-    hasMore = filtered.length > limit;
-    nextCursor = hasMore
-      ? encodeCursor({
-          createdAt: String(docs[docs.length - 1]?.data()?.createdAt ?? ""),
-          id: String(docs[docs.length - 1]?.data()?.inspectionId ?? docs[docs.length - 1]?.id ?? ""),
-        })
-      : null;
+  if (cursor) {
+    queryRef = queryRef.startAfter(cursor.createdAt, cursor.id);
   }
 
+  const chunkSize = Math.max(60, limit * 3);
+  const scanLimit = 1200;
+  const matched: Array<{ id: string; data: Record<string, unknown> }> = [];
+  let scanned = 0;
+  let hasMoreFromQuery = true;
+  let localCursorQuery = queryRef;
+
+  while (matched.length < limit + 1 && hasMoreFromQuery && scanned < scanLimit) {
+    const snap = await localCursorQuery.limit(chunkSize).get();
+    if (snap.empty) {
+      hasMoreFromQuery = false;
+      break;
+    }
+
+    const docs = snap.docs;
+    scanned += docs.length;
+
+    docs.forEach(docSnap => {
+      if (matched.length >= limit + 1) return;
+      const data = (docSnap.data() ?? {}) as Record<string, unknown>;
+      const machine = (data.machine ?? {}) as Record<string, unknown>;
+      const maintainer = (data.maintainer ?? {}) as Record<string, unknown>;
+      const template = (data.template ?? {}) as Record<string, unknown>;
+
+      const createdAt =
+        (typeof data.createdAt === "string" ? data.createdAt : null) ??
+        (typeof data.finalizadaEm === "string" ? data.finalizadaEm : null) ??
+        (typeof data.iniciadaEm === "string" ? data.iniciadaEm : null);
+
+      if (fromIso && createdAt && createdAt < fromIso) return;
+      if (toIso && createdAt && createdAt > toIso) return;
+
+      const rowMaintainerId =
+        (typeof maintainer.maintId === "string" ? maintainer.maintId : null) ??
+        (typeof maintainer.id === "string" ? maintainer.id : null);
+      if (maintainerId && rowMaintainerId !== maintainerId) return;
+
+      const rowTemplateId = typeof template.id === "string" ? template.id : null;
+      if (templateId && rowTemplateId !== templateId) return;
+
+      const rowMatricula = (typeof maintainer.matricula === "string" ? maintainer.matricula : "").trim().toLowerCase();
+      if (matriculaQuery && rowMatricula !== matriculaQuery) return;
+
+      const machineTag = (typeof machine.tag === "string" ? machine.tag : "").trim().toLowerCase();
+      const machineNome = (typeof machine.nome === "string" ? machine.nome : "").trim().toLowerCase();
+      if (machineQuery && !machineTag.includes(machineQuery) && !machineNome.includes(machineQuery)) return;
+
+      const ncCount = computeNcCount(data);
+      const rowHasNc = ncCount > 0;
+      if (hasNc === "yes" && !rowHasNc) return;
+      if (hasNc === "no" && rowHasNc) return;
+
+      matched.push({ id: docSnap.id, data });
+    });
+
+    const last = docs[docs.length - 1];
+    if (docs.length < chunkSize || !last) {
+      hasMoreFromQuery = false;
+      break;
+    }
+    const lastCreatedAt = String(last.data()?.createdAt ?? "");
+    localCursorQuery = adminDb
+      .collection("inspecoes")
+      .orderBy("createdAt", "desc")
+      .orderBy("__name__", "desc")
+      .startAfter(lastCreatedAt, last.id);
+  }
+
+  const docs = matched.slice(0, limit);
+  const hasMore = matched.length > limit || hasMoreFromQuery;
+  const lastDoc = docs[docs.length - 1];
+  const lastCreatedAt =
+    lastDoc &&
+    ((typeof lastDoc.data.createdAt === "string" ? lastDoc.data.createdAt : null) ??
+      (typeof lastDoc.data.finalizadaEm === "string" ? lastDoc.data.finalizadaEm : null) ??
+      "");
+
+  const nextCursor = hasMore && lastDoc
+    ? encodeCursor({ createdAt: String(lastCreatedAt), id: lastDoc.id })
+    : null;
+
   const items = docs.map(docSnap => {
-    const data = docSnap.data() ?? {};
+    const data = docSnap.data;
+    const machine = (data.machine ?? {}) as Record<string, unknown>;
+    const maintainer = (data.maintainer ?? {}) as Record<string, unknown>;
+    const template = (data.template ?? {}) as Record<string, unknown>;
+
     return {
-      id: String(data.inspectionId ?? docSnap.id),
+      id: docSnap.id,
       data: {
-        createdAt: data.createdAt ?? null,
+        createdAt:
+          (typeof data.createdAt === "string" ? data.createdAt : null) ??
+          (typeof data.finalizadaEm === "string" ? data.finalizadaEm : null) ??
+          (typeof data.iniciadaEm === "string" ? data.iniciadaEm : null),
         machine: {
-          machineId: data.machineId ?? null,
-          nome: data.machineNome ?? null,
-          tag: data.machineTag ?? null,
-          setor: data.machineSetor ?? null,
+          machineId:
+            (typeof machine.machineId === "string" ? machine.machineId : null) ??
+            (typeof machine.id === "string" ? machine.id : null),
+          nome: typeof machine.nome === "string" ? machine.nome : null,
+          tag: typeof machine.tag === "string" ? machine.tag : null,
+          setor: typeof machine.setor === "string" ? machine.setor : null,
         },
         maintainer: {
-          maintId: data.maintainerId ?? null,
-          nome: data.maintainerNome ?? null,
-          matricula: data.maintainerMatricula ?? null,
+          maintId:
+            (typeof maintainer.maintId === "string" ? maintainer.maintId : null) ??
+            (typeof maintainer.id === "string" ? maintainer.id : null),
+          nome: typeof maintainer.nome === "string" ? maintainer.nome : null,
+          matricula: typeof maintainer.matricula === "string" ? maintainer.matricula : null,
         },
         template: {
-          id: data.templateId ?? null,
-          nome: data.templateNome ?? null,
-          versao: data.templateVersao ?? null,
+          id: typeof template.id === "string" ? template.id : null,
+          nome:
+            (typeof template.nome === "string" ? template.nome : null) ??
+            (typeof template.title === "string" ? template.title : null),
+          versao:
+            (typeof template.versao === "string" ? template.versao : null) ??
+            (typeof template.version === "string" ? template.version : null),
         },
-        osNumero: data.osNumero ?? null,
-        qtdNC: typeof data.qtdNc === "number" ? data.qtdNc : 0,
-        hasNc: Boolean(data.hasNc),
+        osNumero: typeof data.osNumero === "string" ? data.osNumero : null,
+        qtdNC: computeNcCount(data),
+        hasNc: computeNcCount(data) > 0,
       },
     };
   });

@@ -312,7 +312,7 @@ async function calculateIssueHistory(issueId: string) {
   }
 
   const sourceDate = resolveInspectionDate(sourceInspectionData);
-  let summaryDocs: FirebaseFirestore.QueryDocumentSnapshot<FirebaseFirestore.DocumentData>[] = [];
+  let summaryInspectionIds: string[] = [];
 
   try {
     let summaryQuery = adminDb
@@ -327,7 +327,9 @@ async function calculateIssueHistory(issueId: string) {
     }
 
     const summarySnap = await summaryQuery.get();
-    summaryDocs = summarySnap.docs;
+    summaryInspectionIds = summarySnap.docs
+      .map(doc => String(doc.data()?.inspectionId ?? ""))
+      .filter(Boolean);
   } catch {
     // Fallback sem depender de índice composto para evitar erro 500 no carregamento sob demanda.
     const fallbackSnap = await adminDb
@@ -336,7 +338,7 @@ async function calculateIssueHistory(issueId: string) {
       .limit(300)
       .get();
 
-    summaryDocs = fallbackSnap.docs
+summaryInspectionIds = fallbackSnap.docs
       .filter(doc => Boolean(doc.data()?.hasNc))
       .filter(doc => {
         if (!sourceDate) return true;
@@ -350,12 +352,32 @@ async function calculateIssueHistory(issueId: string) {
         const normalizedB = Number.isNaN(bTs) ? 0 : bTs;
         return normalizedB - normalizedA;
       })
+      .slice(0, 120)
+      .map(doc => String(doc.data()?.inspectionId ?? ""))
+      .filter(Boolean);
+  }
+
+  if (summaryInspectionIds.length === 0) {
+    const fallbackInspecoesSnap = await adminDb
+      .collection("inspecoes")
+      .orderBy("createdAt", "desc")
+      .limit(600)
+      .get();
+
+    summaryInspectionIds = fallbackInspecoesSnap.docs
+      .filter(docSnap => {
+        const data = docSnap.data() ?? {};
+        const inspectionMachineId = resolveMachineIdFromInspection(data);
+        if (inspectionMachineId !== machineId) return false;
+        if (!sourceDate) return true;
+        const createdAt = resolveInspectionDate(data);
+        return createdAt ? createdAt < sourceDate : true;
+      })
+      .map(docSnap => docSnap.id)
       .slice(0, 120);
   }
 
-  const inspectionIds = summaryDocs
-    .map(doc => String(doc.data()?.inspectionId ?? ""))
-    .filter(id => id && id !== responseId);
+  const inspectionIds = summaryInspectionIds.filter(id => id && id !== responseId);
 
   const inspectionDocs = await getDocumentsByIds("inspecoes", inspectionIds);
   const machineDocs = await getDocumentsByIds("machines", [machineId]);
