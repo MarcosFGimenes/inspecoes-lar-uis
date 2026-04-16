@@ -117,7 +117,7 @@ export default function AdminNonConformitiesPage() {
   const [statusFilter, setStatusFilter] = useState("aberta");
   const [maintainerFilter, setMaintainerFilter] = useState("");
   const [maintainers, setMaintainers] = useState<MaintainerOption[]>([]);
-  const [offset, setOffset] = useState(0);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [totalItems, setTotalItems] = useState(0);
   const [savingId, setSavingId] = useState<string | null>(null);
@@ -134,7 +134,7 @@ export default function AdminNonConformitiesPage() {
     setSelectedIds(prev => prev.filter(id => items.some(item => item.id === id)));
   }, [items]);
 
-  const loadData = useCallback(async (reset = true, fetchAll = false, requestOffset = 0) => {
+  const loadData = useCallback(async (reset = true, cursor?: string | null) => {
     if (!reset && loadingMoreRef.current) return;
     if (reset) setLoading(true);
     else {
@@ -151,11 +151,9 @@ export default function AdminNonConformitiesPage() {
       if (machineFilter.trim()) {
         params.set("machine_query", machineFilter.trim());
       }
-      if (fetchAll) {
-        params.set("all", "1");
-      } else {
-        params.set("limit", String(NC_PAGE_SIZE));
-        params.set("offset", String(reset ? 0 : requestOffset));
+      params.set("limit", String(NC_PAGE_SIZE));
+      if (!reset && cursor) {
+        params.set("cursor", cursor);
       }
 
       const session = await fetch(`/api/admin/nc?${params.toString()}`, { cache: "no-store" });
@@ -171,14 +169,14 @@ export default function AdminNonConformitiesPage() {
         treatmentsByResponse?: Record<string, ChecklistNonConformityTreatment[]>;
         total?: number;
         hasMore?: boolean;
-        nextOffset?: number;
+        nextCursor?: string | null;
       };
       const nextItems = sortByLastActivityDesc(payload.items ?? []);
-      setItems(prev => (reset || fetchAll ? nextItems : sortByLastActivityDesc([...prev, ...nextItems])));
+      setItems(prev => (reset ? nextItems : sortByLastActivityDesc([...prev, ...nextItems])));
       setTreatmentsByResponse(payload.treatmentsByResponse ?? {});
       setHasMore(Boolean(payload.hasMore));
-      setTotalItems(typeof payload.total === "number" ? payload.total : nextItems.length);
-      setOffset(typeof payload.nextOffset === "number" ? payload.nextOffset : nextItems.length);
+      setTotalItems(prev => (reset ? nextItems.length : prev + nextItems.length));
+      setNextCursor(typeof payload.nextCursor === "string" ? payload.nextCursor : null);
     } catch (err: unknown) {
       const message = err instanceof Error && err.message ? err.message : "Erro ao carregar dados";
       setError(message);
@@ -825,17 +823,9 @@ export default function AdminNonConformitiesPage() {
               variant="outline"
               disabled={!hasMore || loadingMore || loading}
               loading={loadingMore}
-              onClick={() => loadData(false, false, offset)}
+              onClick={() => loadData(false, nextCursor)}
             >
               Mostrar mais 20
-            </Button>
-            <Button
-              variant="secondary"
-              disabled={!hasMore || loadingMore || loading}
-              loading={loadingMore}
-              onClick={() => loadData(false, true, offset)}
-            >
-              Mostrar todas
             </Button>
           </div>
         </CardContent>

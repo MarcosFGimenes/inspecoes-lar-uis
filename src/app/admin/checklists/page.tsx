@@ -144,7 +144,7 @@ export default function AdminChecklistsPage() {
   const [error, setError] = useState<string | null>(null);
   const [periodExporting, setPeriodExporting] = useState(false);
   const [periodDeleting, setPeriodDeleting] = useState(false);
-  const [offset, setOffset] = useState(0);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [totalRows, setTotalRows] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const loadingMoreRef = useRef(false);
@@ -276,7 +276,7 @@ export default function AdminChecklistsPage() {
   }, [machineById, maintainerById, templateById]);
 
 
-  const fetchRows = useCallback(async (reset = true, fetchAll = false, requestOffset = 0) => {
+  const fetchRows = useCallback(async (reset = true, cursor?: string | null) => {
     if (!reset && loadingMoreRef.current) return;
     if (reset) setLoadingRows(true);
     else {
@@ -286,11 +286,9 @@ export default function AdminChecklistsPage() {
     setError(null);
     try {
       const params = new URLSearchParams();
-      if (fetchAll) {
-        params.set("all", "1");
-      } else {
-        params.set("limit", String(CHECKLISTS_PAGE_SIZE));
-        params.set("offset", String(reset ? 0 : requestOffset));
+      params.set("limit", String(CHECKLISTS_PAGE_SIZE));
+      if (!reset && cursor) {
+        params.set("cursor", cursor);
       }
       if (filter.machineTag?.trim()) params.set("machine_query", filter.machineTag.trim());
       if (filter.maintainerId !== "all") params.set("maintainer_id", filter.maintainerId);
@@ -308,17 +306,17 @@ export default function AdminChecklistsPage() {
         items?: Array<{ id: string; data: Record<string, unknown> }>;
         total?: number;
         hasMore?: boolean;
-        nextOffset?: number;
+        nextCursor?: string | null;
       };
       const fetchedRows = mapRows(payload.items ?? []);
       let mergedRows: ChecklistRow[] = [];
       setRows(prev => {
-        mergedRows = reset || fetchAll ? fetchedRows : [...prev, ...fetchedRows];
+        mergedRows = reset ? fetchedRows : [...prev, ...fetchedRows];
         return mergedRows;
       });
       setHasMore(Boolean(payload.hasMore));
-      setTotalRows(typeof payload.total === "number" ? payload.total : mergedRows.length);
-      setOffset(typeof payload.nextOffset === "number" ? payload.nextOffset : mergedRows.length);
+      setTotalRows(mergedRows.length);
+      setNextCursor(typeof payload.nextCursor === "string" ? payload.nextCursor : null);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Erro ao carregar checklists";
       setError(message);
@@ -727,17 +725,9 @@ export default function AdminChecklistsPage() {
               variant="outline"
               disabled={!hasMore || loadingRows || loadingMore}
               loading={loadingMore}
-              onClick={() => fetchRows(false, false, offset)}
+              onClick={() => fetchRows(false, nextCursor)}
             >
               Mostrar mais 30
-            </Button>
-            <Button
-              variant="secondary"
-              disabled={!hasMore || loadingRows || loadingMore}
-              loading={loadingMore}
-              onClick={() => fetchRows(false, true, offset)}
-            >
-              Mostrar todas
             </Button>
           </div>
         </CardContent>

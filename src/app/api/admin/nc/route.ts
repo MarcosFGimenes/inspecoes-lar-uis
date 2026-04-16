@@ -246,11 +246,25 @@ async function getDocumentsByIds(
   return snapshots;
 }
 
-function matchesMachineQuery(item: NonConformityItemResponse, machineQuery: string) {
-  if (!machineQuery) return true;
-  const query = machineQuery.toLowerCase();
-  const haystack = [item.machineLabel, item.machineTag ?? "", item.machineId ?? ""].join(" ").toLowerCase();
-  return haystack.includes(query);
+type CursorPayload = {
+  createdAt: string;
+  id: string;
+};
+
+function decodeCursor(raw: string | null): CursorPayload | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(raw, "base64url").toString("utf8"));
+    if (typeof parsed?.createdAt !== "string" || typeof parsed?.id !== "string") return null;
+    return { createdAt: parsed.createdAt, id: parsed.id };
+  } catch {
+    return null;
+  }
+}
+
+function encodeCursor(payload: CursorPayload | null) {
+  if (!payload) return null;
+  return Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
 }
 
 export async function GET(req: NextRequest) {
@@ -261,53 +275,48 @@ export async function GET(req: NextRequest) {
 
   const queryParams = req.nextUrl.searchParams;
   const rawLimit = Number(queryParams.get("limit") ?? "20");
-  const rawOffset = Number(queryParams.get("offset") ?? "0");
   const includeAll = queryParams.get("all") === "1";
   const issueStatusFilter = (queryParams.get("status") ?? "aberta").trim().toLowerCase();
   const maintainerIdFilter = queryParams.get("mantenedor_id")?.trim() ?? "";
-  const machineQueryFilter = (queryParams.get("machine_query") ?? "").trim();
+  const machineQueryFilter = (queryParams.get("machine_query") ?? "").trim().toLowerCase();
+  const cursor = decodeCursor(queryParams.get("cursor"));
 
-  const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(Math.floor(rawLimit), 500) : 20;
-  const offset = Number.isFinite(rawOffset) && rawOffset >= 0 ? Math.floor(rawOffset) : 0;
+  const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(Math.floor(rawLimit), 200) : 20;
   const allowedStatuses = new Set(["aberta", "concluida", "resolvida"]);
   const normalizedIssueStatus = allowedStatuses.has(issueStatusFilter) ? issueStatusFilter : "aberta";
 
-  let issuesSnap: FirebaseFirestore.QuerySnapshot<FirebaseFirestore.DocumentData>;
+  let issuesQuery: FirebaseFirestore.Query<FirebaseFirestore.DocumentData> = adminDb
+    .collection("issues")
+    .where("status", "==", normalizedIssueStatus);
+
+  if (maintainerIdFilter) {
+    issuesQuery = issuesQuery.where("maintainerId", "==", maintainerIdFilter);
+  }
 
   if (machineQueryFilter) {
-    const machinesSnap = await adminDb.collection("machines").get();
-    const normalizedMachineQuery = machineQueryFilter.toLowerCase();
-    const candidateMachineIds = machinesSnap.docs
-      .filter(docSnap => {
-        const data = docSnap.data() ?? {};
-        const haystack = [docSnap.id, data.tag ?? "", data.nome ?? ""].join(" ").toLowerCase();
-        return haystack.includes(normalizedMachineQuery);
-      })
-      .map(docSnap => docSnap.id);
-
-    if (candidateMachineIds.length > 0) {
-      const chunks: string[][] = [];
-      for (let index = 0; index < candidateMachineIds.length; index += 10) {
-        chunks.push(candidateMachineIds.slice(index, index + 10));
-      }
-      const chunkSnapshots = await Promise.all(
-        chunks.map(chunk =>
-          adminDb.collection("issues").where("status", "==", normalizedIssueStatus).where("machineId", "in", chunk).get()
-        )
-      );
-      const issuesMap = new Map<string, FirebaseFirestore.QueryDocumentSnapshot<FirebaseFirestore.DocumentData>>();
-      chunkSnapshots.forEach(snap => {
-        snap.forEach(docSnap => issuesMap.set(docSnap.id, docSnap));
-      });
-      issuesSnap = {
-        docs: Array.from(issuesMap.values()),
-      } as unknown as FirebaseFirestore.QuerySnapshot<FirebaseFirestore.DocumentData>;
+    if (/^[a-z0-9_-]+$/i.test(machineQueryFilter)) {
+      issuesQuery = issuesQuery.where("machineTagLower", "==", machineQueryFilter);
     } else {
-      issuesSnap = await adminDb.collection("issues").where("status", "==", normalizedIssueStatus).get();
+      return NextResponse.json({ items: [], hasMore: false, nextCursor: null, treatmentsByResponse: {} });
     }
-  } else {
-    issuesSnap = await adminDb.collection("issues").where("status", "==", normalizedIssueStatus).get();
   }
+
+  issuesQuery = issuesQuery.orderBy("createdAt", "desc").orderBy("__name__", "desc");
+
+  if (cursor) {
+    issuesQuery = issuesQuery.startAfter(cursor.createdAt, cursor.id);
+  }
+
+  const issuesSnapRaw = await issuesQuery.limit((includeAll ? 500 : limit) + 1).get();
+  const hasMore = !includeAll && issuesSnapRaw.docs.length > limit;
+  const pageIssues = includeAll ? issuesSnapRaw.docs : issuesSnapRaw.docs.slice(0, limit);
+  const issuesSnap = { docs: pageIssues } as FirebaseFirestore.QuerySnapshot<FirebaseFirestore.DocumentData>;
+  const nextCursor = hasMore
+    ? encodeCursor({
+        createdAt: String(pageIssues[pageIssues.length - 1]?.data()?.createdAt ?? ""),
+        id: String(pageIssues[pageIssues.length - 1]?.id ?? ""),
+      })
+    : null;
 
   const responseIds = issuesSnap.docs
     .map(issueDoc => {
@@ -571,28 +580,18 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  const filtered = sortByLastActivityDesc(
-    builtItems
-      .filter(item => (maintainerIdFilter ? item.maintainerId === maintainerIdFilter : true))
-      .filter(item => matchesMachineQuery(item, machineQueryFilter))
-  );
-
-  const total = filtered.length;
-  const paginatedItems = includeAll ? filtered : filtered.slice(offset, offset + limit);
-  const returnedCount = includeAll ? total : Math.min(limit, Math.max(total - offset, 0));
-  const nextOffset = includeAll ? total : offset + returnedCount;
+  const sortedItems = sortByLastActivityDesc(builtItems);
 
   const pagedTreatmentsByResponse: Record<string, ChecklistNonConformityTreatment[]> = {};
-  paginatedItems.forEach(item => {
+  sortedItems.forEach(item => {
     if (!item.responseId) return;
     pagedTreatmentsByResponse[item.responseId] = treatmentsByResponse[item.responseId] ?? [];
   });
 
   return NextResponse.json({
-    items: paginatedItems,
-    total,
-    hasMore: nextOffset < total,
-    nextOffset,
+    items: sortedItems,
+    hasMore,
+    nextCursor,
     treatmentsByResponse: pagedTreatmentsByResponse,
   });
 }
