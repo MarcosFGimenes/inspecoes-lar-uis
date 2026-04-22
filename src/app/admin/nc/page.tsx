@@ -21,6 +21,7 @@ import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import type {
   ChecklistAnswer,
   ChecklistNonConformityTreatment,
@@ -262,6 +263,8 @@ export default function AdminNonConformitiesPage() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkSaving, setBulkSaving] = useState(false);
   const [expandedResolutions, setExpandedResolutions] = useState<Set<string>>(new Set());
+  const [deleteDialogItem, setDeleteDialogItem] = useState<NonConformityItem | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     setSelectedIds(prev => prev.filter(id => items.some(item => item.id === id)));
@@ -695,6 +698,33 @@ export default function AdminNonConformitiesPage() {
     });
   }, []);
 
+  const handleDeleteItem = useCallback(async () => {
+    if (!deleteDialogItem) return;
+
+    setDeletingId(deleteDialogItem.id);
+    try {
+      const response = await fetch(`/api/admin/nc/${deleteDialogItem.id}`, { method: "DELETE" });
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(payload?.error || "Erro ao excluir não conformidade");
+      }
+
+      setItems(prev => prev.filter(item => item.id !== deleteDialogItem.id));
+      setSelectedIds(prev => prev.filter(id => id !== deleteDialogItem.id));
+      setFeedback(prev => {
+        const next = { ...prev };
+        delete next[deleteDialogItem.id];
+        return next;
+      });
+      setDeleteDialogItem(null);
+    } catch (err: unknown) {
+      const message = err instanceof Error && err.message ? err.message : "Erro ao excluir não conformidade";
+      setFeedback(prev => ({ ...prev, [deleteDialogItem.id]: { type: "error", message } }));
+    } finally {
+      setDeletingId(null);
+    }
+  }, [deleteDialogItem]);
+
   const allVisibleSelected =
     filteredItems.length > 0 && filteredItems.every(item => selectedIds.includes(item.id));
   const selectedCount = selectedIds.length;
@@ -1021,9 +1051,17 @@ export default function AdminNonConformitiesPage() {
                       </div>
                       <div className="flex items-center gap-3">
                         <Button
+                          type="button"
+                          variant="destructive"
+                          onClick={() => setDeleteDialogItem(item)}
+                          disabled={savingId === item.id || bulkSaving || deletingId === item.id}
+                        >
+                          Excluir NC
+                        </Button>
+                        <Button
                           onClick={() => handleSave(item)}
                           loading={savingId === item.id}
-                          disabled={bulkSaving}
+                          disabled={bulkSaving || deletingId === item.id}
                         >
                           Salvar tratativa
                         </Button>
@@ -1047,6 +1085,24 @@ export default function AdminNonConformitiesPage() {
           })}
         </div>
       )}
+
+      <ConfirmDialog
+        open={Boolean(deleteDialogItem)}
+        title="Excluir não conformidade"
+        description={
+          deleteDialogItem
+            ? `Deseja excluir o card "${deleteDialogItem.questionText}"? Esta ação não pode ser desfeita.`
+            : undefined
+        }
+        confirmLabel="Excluir"
+        cancelLabel="Cancelar"
+        busy={deletingId != null}
+        onCancel={() => {
+          if (deletingId) return;
+          setDeleteDialogItem(null);
+        }}
+        onConfirm={handleDeleteItem}
+      />
     </div>
   );
 }
