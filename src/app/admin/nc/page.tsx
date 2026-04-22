@@ -21,7 +21,6 @@ import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
-import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import type {
   ChecklistAnswer,
   ChecklistNonConformityTreatment,
@@ -263,8 +262,6 @@ export default function AdminNonConformitiesPage() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkSaving, setBulkSaving] = useState(false);
   const [expandedResolutions, setExpandedResolutions] = useState<Set<string>>(new Set());
-  const [deleteCandidate, setDeleteCandidate] = useState<NonConformityItem | null>(null);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     setSelectedIds(prev => prev.filter(id => items.some(item => item.id === id)));
@@ -698,55 +695,6 @@ export default function AdminNonConformitiesPage() {
     });
   }, []);
 
-  const handleDeleteTreatment = useCallback(async () => {
-    if (!deleteCandidate) return;
-
-    const item = deleteCandidate;
-    setDeletingId(item.id);
-    setFeedback(prev => ({ ...prev, [item.id]: { type: "success", message: "" } }));
-
-    try {
-      const nowIso = new Date().toISOString();
-
-      if (item.responseId) {
-        const existing = treatmentsByResponse[item.responseId] ?? [];
-        const nextTreatments = existing.filter(treatment => treatment.questionId !== item.questionId);
-
-        await updateDoc(doc(collection(firebaseDb, "inspecoes"), item.responseId), {
-          nonConformityTreatments: nextTreatments,
-          updatedAt: nowIso,
-        });
-
-        setTreatmentsByResponse(prev => ({ ...prev, [item.responseId as string]: nextTreatments }));
-      }
-
-      await updateDoc(doc(collection(firebaseDb, "issues"), item.id), {
-        pcmTreatment: deleteField(),
-        status: "aberta",
-        concluidaEm: deleteField(),
-        concluidaPorTratativa: deleteField(),
-        updatedAt: nowIso,
-      });
-
-      handleUpdateItem(item.id, {
-        summary: "",
-        responsible: "",
-        dueDate: "",
-        dueDateIso: null,
-        status: "open",
-        issueStatus: "aberta",
-        updatedAt: nowIso,
-      });
-      setFeedback(prev => ({ ...prev, [item.id]: { type: "success", message: "Tratativa excluída com sucesso" } }));
-      setDeleteCandidate(null);
-    } catch (err: unknown) {
-      const message = err instanceof Error && err.message ? err.message : "Erro ao excluir tratativa";
-      setFeedback(prev => ({ ...prev, [item.id]: { type: "error", message } }));
-    } finally {
-      setDeletingId(null);
-    }
-  }, [deleteCandidate, handleUpdateItem, treatmentsByResponse]);
-
   const allVisibleSelected =
     filteredItems.length > 0 && filteredItems.every(item => selectedIds.includes(item.id));
   const selectedCount = selectedIds.length;
@@ -1075,17 +1023,9 @@ export default function AdminNonConformitiesPage() {
                         <Button
                           onClick={() => handleSave(item)}
                           loading={savingId === item.id}
-                          disabled={bulkSaving || deletingId === item.id}
+                          disabled={bulkSaving}
                         >
                           Salvar tratativa
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="destructive"
-                          disabled={bulkSaving || savingId === item.id || deletingId === item.id}
-                          onClick={() => setDeleteCandidate(item)}
-                        >
-                          Excluir tratativa
                         </Button>
                         {itemFeedback?.message && (
                           <span
@@ -1107,20 +1047,6 @@ export default function AdminNonConformitiesPage() {
           })}
         </div>
       )}
-
-      <ConfirmDialog
-        open={deleteCandidate != null}
-        title="Excluir tratativa"
-        description="Deseja realmente excluir esta tratativa? Esta ação remove o planejamento salvo para esta NC."
-        confirmLabel="Excluir"
-        cancelLabel="Cancelar"
-        busy={deletingId != null}
-        onCancel={() => {
-          if (deletingId) return;
-          setDeleteCandidate(null);
-        }}
-        onConfirm={handleDeleteTreatment}
-      />
     </div>
   );
 }
