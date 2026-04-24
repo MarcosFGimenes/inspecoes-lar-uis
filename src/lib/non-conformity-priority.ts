@@ -53,14 +53,18 @@ export function resolveIssueLastActivityAt({
   rawIssueTreatment,
   sourceTreatment,
 }: IssueActivityAtInput): string | null {
+  void rawIssueTreatment;
+  void sourceTreatment;
+
+  const maintainerResolution =
+    issueData.maintainerResolution && typeof issueData.maintainerResolution === "object"
+      ? (issueData.maintainerResolution as Record<string, unknown>)
+      : null;
+
   const candidates: Array<unknown> = [
     issueData.ultimaOcorrenciaEm,
     issueData.ultimaReincidenciaEm,
-    issueData.updatedAt,
-    rawIssueTreatment?.updatedAt,
-    sourceTreatment?.updatedAt,
-    rawIssueTreatment?.createdAt,
-    sourceTreatment?.createdAt,
+    maintainerResolution?.resolvedAt,
     issueData.concluidaEm,
     issueData.createdAt,
   ];

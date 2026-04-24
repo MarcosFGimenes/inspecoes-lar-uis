@@ -257,7 +257,7 @@ export default function AdminNonConformitiesPage() {
   const [items, setItems] = useState<NonConformityItem[]>([]);
   const [treatmentsByResponse, setTreatmentsByResponse] = useState<Record<string, ChecklistNonConformityTreatment[]>>({});
   const [machineFilter, setMachineFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("open");
   const [savingId, setSavingId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<Record<string, FeedbackState>>({});
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -543,23 +543,24 @@ export default function AdminNonConformitiesPage() {
           return false;
         }
       }
-      if (statusFilter === "pending") {
-        return item.status !== "resolved";
-      }
       if (statusFilter === "planned") {
         return Boolean(item.summary.trim() || item.responsible.trim() || item.dueDate);
       }
+      if (statusFilter === "unplanned") {
+        return !Boolean(item.summary.trim() || item.responsible.trim() || item.dueDate);
+      }
       if (statusFilter === "all") {
         return true;
+      }
+      if (statusFilter === "maintainer_resolved") {
+        return item.maintainerResolution != null;
       }
       return item.status === statusFilter;
     });
   }, [items, machineFilter, statusFilter]);
 
   const handleUpdateItem = useCallback((id: string, updates: Partial<NonConformityItem>) => {
-    setItems(prev =>
-      sortByLastActivityDesc(prev.map(item => (item.id === id ? { ...item, ...updates } : item)))
-    );
+    setItems(prev => prev.map(item => (item.id === id ? { ...item, ...updates } : item)));
   }, []);
 
   const handleSave = useCallback(
@@ -811,12 +812,12 @@ export default function AdminNonConformitiesPage() {
           <label className="space-y-1 text-sm">
             <span className="text-[var(--muted)]">Status</span>
             <Select value={statusFilter} onChange={event => setStatusFilter(event.target.value)}>
-              <option value="pending">Pendentes</option>
               <option value="planned">Com tratativa planejada</option>
+              <option value="unplanned">Sem tratativa planejada</option>
               <option value="all">Todos</option>
               <option value="open">Abertas</option>
-              <option value="in_progress">Em andamento</option>
               <option value="resolved">Resolvidas</option>
+              <option value="maintainer_resolved">Realizado pelo mantenedor</option>
             </Select>
           </label>
         </CardContent>
