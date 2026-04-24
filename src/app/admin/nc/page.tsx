@@ -257,6 +257,7 @@ export default function AdminNonConformitiesPage() {
   const [items, setItems] = useState<NonConformityItem[]>([]);
   const [treatmentsByResponse, setTreatmentsByResponse] = useState<Record<string, ChecklistNonConformityTreatment[]>>({});
   const [machineFilter, setMachineFilter] = useState("");
+  const [maintainerFilter, setMaintainerFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("open");
   const [savingId, setSavingId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<Record<string, FeedbackState>>({});
@@ -528,6 +529,20 @@ export default function AdminNonConformitiesPage() {
     );
   }, [items]);
 
+  const maintainerOptionsForFilter = useMemo(() => {
+    const maintainers = new Map<string, string>();
+    items.forEach(item => {
+      const nome = item.operatorNome?.trim();
+      if (!nome) return;
+      const matricula = item.operatorMatricula?.trim();
+      const label = matricula ? `${nome} (mat. ${matricula})` : nome;
+      maintainers.set(nome, label);
+    });
+    return Array.from(maintainers.entries())
+      .sort((a, b) => a[1].localeCompare(b[1], "pt-BR"))
+      .map(([value, label]) => ({ value, label }));
+  }, [items]);
+
   const filteredItems = useMemo(() => {
     const machineSearch = machineFilter.trim().toLowerCase();
     return items.filter(item => {
@@ -543,6 +558,9 @@ export default function AdminNonConformitiesPage() {
           return false;
         }
       }
+      if (maintainerFilter && item.operatorNome !== maintainerFilter) {
+        return false;
+      }
       if (statusFilter === "planned") {
         return Boolean(item.summary.trim() || item.responsible.trim() || item.dueDate);
       }
@@ -557,7 +575,7 @@ export default function AdminNonConformitiesPage() {
       }
       return item.status === statusFilter;
     });
-  }, [items, machineFilter, statusFilter]);
+  }, [items, machineFilter, maintainerFilter, statusFilter]);
 
   const handleUpdateItem = useCallback((id: string, updates: Partial<NonConformityItem>) => {
     setItems(prev => prev.map(item => (item.id === id ? { ...item, ...updates } : item)));
@@ -793,7 +811,7 @@ export default function AdminNonConformitiesPage() {
         <CardHeader className="pb-4">
           <CardTitle className="text-base text-[var(--text)]">Filtros</CardTitle>
         </CardHeader>
-        <CardContent className="grid gap-4 md:grid-cols-2">
+        <CardContent className="grid gap-4 md:grid-cols-3">
           <label className="space-y-1 text-sm">
             <span className="text-[var(--muted)]">Máquina</span>
             <Input
@@ -808,6 +826,17 @@ export default function AdminNonConformitiesPage() {
                 <option key={option} value={option} />
               ))}
             </datalist>
+          </label>
+          <label className="space-y-1 text-sm">
+            <span className="text-[var(--muted)]">Mantenedor</span>
+            <Select value={maintainerFilter} onChange={event => setMaintainerFilter(event.target.value)}>
+              <option value="">Todos</option>
+              {maintainerOptionsForFilter.map(option => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </Select>
           </label>
           <label className="space-y-1 text-sm">
             <span className="text-[var(--muted)]">Status</span>
