@@ -17,6 +17,10 @@ function parseStringCollection(value: string): unknown[] | null {
   const trimmed = value.trim();
   if (!trimmed) return null;
 
+  if (trimmed.startsWith("data:")) {
+    return null;
+  }
+
   if ((trimmed.startsWith("[") && trimmed.endsWith("]")) || (trimmed.startsWith("{") && trimmed.endsWith("}"))) {
     try {
       const parsed = JSON.parse(trimmed) as unknown;
@@ -28,7 +32,11 @@ function parseStringCollection(value: string): unknown[] | null {
   }
 
   if (trimmed.includes(",")) {
-    return trimmed.split(",").map(part => part.trim()).filter(Boolean);
+    const parts = trimmed.split(",").map(part => part.trim()).filter(Boolean);
+    const looksLikeUrlList = parts.length > 1 && parts.every(part => /^https?:\/\//i.test(part));
+    if (looksLikeUrlList) {
+      return parts;
+    }
   }
 
   return null;
