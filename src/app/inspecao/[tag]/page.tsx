@@ -1068,13 +1068,13 @@ export default function InspectionPage() {
   }, []);
 
   const queueBackgroundUploads = useCallback(
-    (inspectionId: string, uploads: PendingUpload[]) => {
+    async (inspectionId: string, uploads: PendingUpload[]) => {
       if (!inspectionId || uploads.length === 0) return;
 
       uploadQueueRef.current = uploads.reduce<Promise<void>>((chain, upload) => {
         return chain.then(async () => {
           try {
-            await fetch(`/api/inspecoes/${encodeURIComponent(inspectionId)}/fotos`, {
+            const response = await fetch(`/api/inspecoes/${encodeURIComponent(inspectionId)}/fotos`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -1083,11 +1083,18 @@ export default function InspectionPage() {
                 fileName: upload.fileName ?? undefined,
               }),
             });
+            if (!response.ok) {
+              const payload = await response.json().catch(() => null);
+              throw new Error(typeof payload?.error === "string" ? payload.error : "Falha no upload das fotos.");
+            }
           } catch (err) {
             console.error("[inspection-upload]", err);
+            throw err;
           }
         });
       }, uploadQueueRef.current);
+
+      await uploadQueueRef.current;
     },
     []
   );
@@ -1277,7 +1284,7 @@ export default function InspectionPage() {
           params.set("inspecaoId", inspectionId);
         }
         if (inspectionId) {
-          queueBackgroundUploads(inspectionId, pendingUploads);
+          await queueBackgroundUploads(inspectionId, pendingUploads);
         }
         router.replace(`/home?${params.toString()}`);
       } catch (err: unknown) {
