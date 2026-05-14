@@ -127,14 +127,17 @@ export async function POST(req: NextRequest, context: RouteContext) {
         .where("templateItemId", "==", payload.templateItemId)
         .get();
 
+      // Encontre as fotos atuais do item na inspeção após a atualização
+      const updatedItem = updatedItens.find(item => String(item.templateItemId ?? "") === payload.templateItemId);
+      const currentItemFotos = updatedItem ? normalizeStoredImages(updatedItem.fotos ?? []) : [];
+
       await Promise.all(
         issuesSnap.docs.map(async doc => {
           await adminDb.runTransaction(async transaction => {
             const issueSnap = await transaction.get(doc.ref);
             if (!issueSnap.exists) return;
-            const issueData = issueSnap.data() ?? {};
-            const nextFotos = mergeStoredImageCollections(issueData.fotos, [storedImage]);
-            transaction.update(doc.ref, { fotos: nextFotos });
+            // Sincronize todas as fotos atuais do item da inspeção para o issue
+            transaction.update(doc.ref, { fotos: currentItemFotos });
           });
         })
       );
