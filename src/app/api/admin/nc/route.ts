@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminFromRequest } from "@/lib/guards";
 import { adminDb } from "@/lib/firebase-admin";
+import { FieldPath } from "firebase-admin/firestore";
 import { resolveIssueLastActivityAt, sortByLastActivityDesc } from "@/lib/non-conformity-priority";
 import { normalizeStoredImages } from "@/lib/storage/images";
 import type { ChecklistAnswer, ChecklistNonConformityTreatment, NonConformityStatus, StoredImage } from "@/types";
