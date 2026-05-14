@@ -1104,6 +1104,7 @@ export default function InspectionPage() {
           resultado: "C" | "NC" | "NA";
           observacaoItem?: string;
           osNumeroItem?: string;
+          fotos?: string[];
         }> = [];
         const pendingUploads: PendingUpload[] = [];
         const lockedOsNumero = osBloqueado ?? null;
@@ -1126,6 +1127,7 @@ export default function InspectionPage() {
             return;
           }
           const osNumeroItem = osValue || undefined;
+          let fotosForPayload: string[] | undefined;
           if (st.fotos.length) {
             const fotosValues: ({ dataUrl: string; fileName: string | null } | null)[] = await Promise.all(
               st.fotos.slice(0, 3).map(async (foto) => {
@@ -1148,6 +1150,7 @@ export default function InspectionPage() {
                 Boolean(value?.dataUrl && value.dataUrl.trim())
             );
             if (normalized.length) {
+              fotosForPayload = normalized.map(({ dataUrl }) => dataUrl);
               pendingUploads.push(
                 ...normalized.map(({ dataUrl, fileName }) => ({
                   templateItemId: item.id!,
@@ -1162,6 +1165,7 @@ export default function InspectionPage() {
             resultado: st.resultado,
             observacaoItem: st.observacao.trim() || undefined,
             osNumeroItem,
+            fotos: fotosForPayload,
           });
         }
         if (!payloadItems.length) {

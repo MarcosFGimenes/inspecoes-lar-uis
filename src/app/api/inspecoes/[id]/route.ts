@@ -425,9 +425,8 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
             if (osValue && activeIssueDoc.data()?.osNumero !== osValue) {
               updatesIssue.osNumero = osValue;
             }
-            if (photoUrls.length > 0) {
-              updatesIssue.fotos = photoUrls;
-            }
+            // Sempre sincronize as fotos atuais do item para o issue ativo
+            updatesIssue.fotos = photoUrls;
             if (observation && activeIssueDoc.data()?.descricao !== observation) {
               updatesIssue.descricao = observation;
             }
