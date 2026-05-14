@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { collection, getDocs, orderBy, query } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase-client";
+import { useAdminReadCounter } from "@/lib/admin-read-counter";
 import { Button, buttonStyles } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -54,11 +55,13 @@ export default function AdminInspectionsPage() {
   const [visibleCount, setVisibleCount] = useState<number>(0);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [actionFeedback, setActionFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const { setReadCount } = useAdminReadCounter();
 
   const loadData = useCallback(async () => {
     setLoading(true);
     setError(null);
     setActionFeedback(null);
+    setReadCount(0);
     try {
       const session = await fetch("/api/admin-session", { cache: "no-store" });
       if (session.status === 401) {
@@ -142,6 +145,7 @@ export default function AdminInspectionsPage() {
       });
 
       setItems(mapped);
+      setReadCount(mapped.length);
     } catch (err: unknown) {
       const message = err instanceof Error && err.message ? err.message : "Erro ao carregar inspeções";
       setError(message);

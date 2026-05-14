@@ -6,6 +6,7 @@ import { useCallback, useState } from "react";
 
 import { Button, buttonStyles } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
+import { useAdminReadCounter } from "@/lib/admin-read-counter";
 
 interface AdminNavItem {
   href: string;
@@ -113,6 +114,8 @@ export function AdminSidebar({ open, onClose, onNavigate }: AdminSidebarProps) {
     [pathname]
   );
 
+  const { readCount } = useAdminReadCounter();
+
   return (
     <aside
       className={cn(
@@ -154,6 +157,10 @@ export function AdminSidebar({ open, onClose, onNavigate }: AdminSidebarProps) {
             );
           })}
         </nav>
+
+        <div className="pointer-events-none absolute left-4 bottom-6 inline-flex h-10 w-10 items-center justify-center rounded-full bg-[var(--primary)] text-sm font-semibold text-white shadow-lg">
+          {readCount}
+        </div>
 
         {pathname.startsWith("/admin/programacao") ? (
           <div className="mt-6 space-y-2">
