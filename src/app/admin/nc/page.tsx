@@ -121,7 +121,7 @@ export default function AdminNonConformitiesPage() {
     setLoading(true);
     setError(null);
     try {
-      const session = await fetch("/api/admin/nc", { cache: "no-store" });
+      const session = await fetch("/api/admin/nc?limit=50", { cache: "no-store" });
       if (session.status === 401) {
         window.location.href = "/admin/login";
         return;

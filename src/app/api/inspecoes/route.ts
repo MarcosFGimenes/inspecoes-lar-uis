@@ -66,6 +66,12 @@ function buildIssueDescription(item: TemplateItem, fallback: string) {
   return fallback;
 }
 
+function buildMachineLabel(machine: Record<string, unknown>) {
+  const nome = machine?.nome ? String(machine.nome) : "Máquina";
+  const tag = machine?.tag ? String(machine.tag) : null;
+  return tag ? `${nome} (${tag})` : nome;
+}
+
 function isIssueResolvedStatus(status: unknown) {
   return status === "concluida" || status === "resolvida";
 }
@@ -336,6 +342,16 @@ export async function POST(req: NextRequest) {
     // Rastreia quais itens NC já tinham issue aberta (não gera tratativa nova)
     const ncItemsWithExistingOpenIssue = new Set<string>();
 
+    const maintData = maintDoc.data() ?? {};
+    const maintainerNome = typeof maintData.nome === "string" ? maintData.nome : null;
+    const maintainerMatricula =
+      typeof maintData.matricula === "string" && maintData.matricula.trim()
+        ? maintData.matricula.trim().toUpperCase()
+        : null;
+    const issueMachineLabel = buildMachineLabel(machineRecord);
+    const issueTemplateLabel = typeof templateData.nome === "string" ? String(templateData.nome) : null;
+    const issueTemplateVersion = typeof templateData.versao === "string" ? String(templateData.versao) : null;
+
     const osNumero = osNumeroFinal;
     const observacoes = payload.observacoes?.trim() ? payload.observacoes.trim() : null;
     const resolveDescriptions = payload.resolveDescriptions ?? {};
@@ -357,6 +373,12 @@ export async function POST(req: NextRequest) {
           osNumeroItem: item.osNumeroItem,
           fotos: item.fotos,
           descricao: item.observacaoItem?.trim() ?? null,
+          machineLabel: issueMachineLabel,
+          templateLabel: issueTemplateLabel,
+          templateVersion: issueTemplateVersion,
+          operatorNome: maintainerNome,
+          operatorMatricula: maintainerMatricula,
+          checklistDate: nowIso,
         });
         await existingActiveIssue.ref.update(issueUpdates);
         continue;
@@ -376,8 +398,16 @@ export async function POST(req: NextRequest) {
         })[0];
       await issueRef.set({
         machineId: machineRecord.id,
+        machineLabel: issueMachineLabel,
         tag: machineRecord.tag ?? null,
+        templateId,
+        templateLabel: issueTemplateLabel,
+        templateVersion: issueTemplateVersion,
         templateItemId: item.templateItemId,
+        questionText: descricao,
+        checklistDate: nowIso,
+        operatorNome: maintainerNome,
+        operatorMatricula: maintainerMatricula,
         descricao,
         osNumero: item.osNumeroItem ?? null,
         fotos: item.fotos,

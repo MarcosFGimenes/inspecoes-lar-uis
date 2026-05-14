@@ -196,6 +196,41 @@ function normalizeAnswers(
   return dedupeAnswers([...answersFromPayload, ...missingFromPayload]);
 }
 
+function buildIssueHistory(issues: Array<Record<string, unknown> | null | undefined>) {
+  const historyByLogicalId = new Map<string, NonConformityRecurrenceHistoryItem[]>();
+
+  issues.forEach(issue => {
+    if (!issue || typeof issue.templateItemId !== "string") return;
+    const machineId = typeof issue.machineId === "string" ? issue.machineId : null;
+    const questionId = String(issue.templateItemId);
+    const logicalId = `${machineId ?? "sem-maquina"}::${questionId}`;
+    const checklistDate =
+      typeof issue.checklistDate === "string"
+        ? issue.checklistDate
+        : typeof issue.createdAt === "string"
+        ? issue.createdAt
+        : null;
+    const itemOsNumero =
+      typeof issue.osNumero === "string" && issue.osNumero.trim()
+        ? issue.osNumero.trim().toUpperCase()
+        : null;
+    const observation = typeof issue.descricao === "string" ? issue.descricao : null;
+    const operatorNome = typeof issue.operatorNome === "string" ? issue.operatorNome : null;
+    const currentHistory = historyByLogicalId.get(logicalId) ?? [];
+    currentHistory.push({
+      inspectionId: typeof issue.abertaEmInspecaoId === "string" ? issue.abertaEmInspecaoId : String(issue.id ?? ""),
+      checklistDate,
+      observation,
+      osNumero: itemOsNumero,
+      osStatus: null,
+      operatorNome,
+    });
+    historyByLogicalId.set(logicalId, currentHistory);
+  });
+
+  return historyByLogicalId;
+}
+
 function buildMachineLabel(machine: Record<string, unknown>) {
   const nome = machine?.nome ? String(machine.nome) : "Máquina";
   const tag = machine?.tag ? String(machine.tag) : null;
@@ -229,109 +264,105 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 });
   }
 
-  const [machinesSnap, templatesSnap, issuesSnap, inspectionsSnap] = await Promise.all([
-    adminDb.collection("machines").get(),
-    adminDb.collection("templates").get(),
-    adminDb.collection("issues").where("status", "in", ["aberta", "concluida", "resolvida"]).get(),
-    adminDb.collection("inspecoes").get(),
-  ]);
+  const url = new URL(req.url);
+  const limitValue = Math.min(Math.max(Number(url.searchParams.get("limit") ?? "50"), 1), 100);
+  const issuesSnap = await adminDb
+    .collection("issues")
+    .where("status", "in", ["aberta", "concluida", "resolvida"])
+    .limit(limitValue)
+    .get();
 
-  const machineOptions: MachineOption[] = machinesSnap.docs.map(docSnap => {
-    const data = docSnap.data() ?? {};
-    return {
-      id: docSnap.id,
-      nome: typeof data.nome === "string" ? data.nome : docSnap.id,
-      tag: data.tag ? String(data.tag) : null,
-      templateId: typeof data.templateId === "string" ? data.templateId : null,
-    } satisfies MachineOption;
-  });
-  const machinesById = new Map(machineOptions.map(machine => [machine.id, machine]));
-
-  const templateMap = new Map<string, TemplateMeta>();
-  templatesSnap.docs.forEach(docSnap => {
-    const data = docSnap.data() ?? {};
-    const itens = Array.isArray(data.itens) ? (data.itens as TemplateItemData[]) : [];
-    const itensMap = new Map<string, TemplateItemData>();
-    itens.forEach(item => {
-      if (item?.id) itensMap.set(String(item.id), item);
-    });
-    templateMap.set(docSnap.id, {
-      nome: data.nome ? String(data.nome) : docSnap.id,
-      versao: data.versao ? String(data.versao) : null,
-      itensMap,
-    });
-  });
+  const issueDocuments = issuesSnap.docs.map(docSnap => ({ id: docSnap.id, data: docSnap.data() ?? {} }));
+  const responseIds = Array.from(
+    new Set(
+      issueDocuments
+        .map(issue => (typeof issue.data.abertaEmInspecaoId === "string" ? issue.data.abertaEmInspecaoId : null))
+        .filter((value): value is string => Boolean(value))
+    )
+  );
 
   const sourceInspectionMap = new Map<string, SourceInspectionData>();
   const treatmentsByResponse: Record<string, ChecklistNonConformityTreatment[]> = {};
-  const ncHistoryByLogicalId = new Map<string, NonConformityRecurrenceHistoryItem[]>();
+  const ncHistoryByLogicalId = buildIssueHistory(issueDocuments.map(issue => ({ ...issue.data, id: issue.id })));
 
-  inspectionsSnap.docs.forEach(inspectionDoc => {
-    const inspectionData = inspectionDoc.data() ?? {};
-    const machine = (inspectionData.machine ?? {}) as Record<string, unknown>;
-    const maintainer = (inspectionData.maintainer ?? {}) as Record<string, unknown>;
-    const templateInfo = (inspectionData.template ?? {}) as Record<string, unknown>;
-    const machineId = resolveMachineIdFromInspection(inspectionData);
-    const machineOption = machineId ? machinesById.get(machineId) : undefined;
-    const templateId =
-      typeof templateInfo.id === "string"
-        ? templateInfo.id
-        : typeof machine.templateId === "string"
-          ? machine.templateId
-          : machineOption?.templateId ?? null;
-    const templateMeta = templateId ? templateMap.get(templateId) : undefined;
+  if (responseIds.length > 0) {
+    const inspectionChunks: string[][] = [];
+    for (let i = 0; i < responseIds.length; i += 10) {
+      inspectionChunks.push(responseIds.slice(i, i + 10));
+    }
 
-    const answers = normalizeAnswers(inspectionData, templateMeta?.itensMap ?? new Map());
-    const answersMap = new Map(answers.map(answer => [answer.questionId, answer]));
-    const treatments = Array.isArray(inspectionData.nonConformityTreatments)
-      ? (inspectionData.nonConformityTreatments as ChecklistNonConformityTreatment[])
-      : [];
-    const treatmentMap = new Map<string, ChecklistNonConformityTreatment>();
-    treatments.forEach(treatment => {
-      if (treatment?.questionId) treatmentMap.set(treatment.questionId, treatment);
-    });
+    for (const chunk of inspectionChunks) {
+      const inspectionsSnap = await adminDb
+        .collection("inspecoes")
+        .where(FieldPath.documentId(), "in", chunk)
+        .get();
 
-    sourceInspectionMap.set(inspectionDoc.id, {
-      machineId,
-      machineLabel: buildMachineLabel(machine),
-      machineTag: typeof machine.tag === "string" ? machine.tag : null,
-      templateId,
-      templateLabel:
-        templateMeta?.nome ?? (typeof templateInfo.nome === "string" ? String(templateInfo.nome) : "Template"),
-      templateVersion:
-        templateMeta?.versao ?? (typeof templateInfo.versao === "string" ? String(templateInfo.versao) : null),
-      checklistDate: resolveInspectionDate(inspectionData),
-      operatorNome: typeof maintainer.nome === "string" ? maintainer.nome : null,
-      operatorMatricula: typeof maintainer.matricula === "string" ? maintainer.matricula : null,
-      treatments,
-      treatmentMap,
-      answersMap,
-    });
+      inspectionsSnap.docs.forEach(inspectionDoc => {
+        const inspectionData = inspectionDoc.data() ?? {};
+        const machine = (inspectionData.machine ?? {}) as Record<string, unknown>;
+        const maintainer = (inspectionData.maintainer ?? {}) as Record<string, unknown>;
+        const templateInfo = (inspectionData.template ?? {}) as Record<string, unknown>;
+        const machineId = resolveMachineIdFromInspection(inspectionData);
+        const templateId =
+          typeof templateInfo.id === "string"
+            ? templateInfo.id
+            : typeof machine.templateId === "string"
+              ? machine.templateId
+              : null;
 
-    treatmentsByResponse[inspectionDoc.id] = treatments;
+        const answers = normalizeAnswers(inspectionData, new Map());
+        const answersMap = new Map(answers.map(answer => [answer.questionId, answer]));
+        const treatments = Array.isArray(inspectionData.nonConformityTreatments)
+          ? (inspectionData.nonConformityTreatments as ChecklistNonConformityTreatment[])
+          : [];
+        const treatmentMap = new Map<string, ChecklistNonConformityTreatment>();
+        treatments.forEach(treatment => {
+          if (treatment?.questionId) treatmentMap.set(treatment.questionId, treatment);
+        });
 
-    answers.forEach(answer => {
-      if (!answer?.questionId || answer.response !== "nc") return;
-      const questionId = String(answer.questionId);
-      const logicalId = `${machineId ?? "sem-maquina"}::${questionId}`;
-      const inspectionDate = resolveInspectionDate(inspectionData);
-      const itemOsNumero =
-        typeof answer.itemOsNumero === "string" && answer.itemOsNumero.trim()
-          ? answer.itemOsNumero.trim().toUpperCase()
-          : null;
-      const observation = answer.observation ?? null;
-      const currentHistory = ncHistoryByLogicalId.get(logicalId) ?? [];
-      currentHistory.push({
-        inspectionId: inspectionDoc.id,
-        checklistDate: inspectionDate,
-        observation,
-        osNumero: itemOsNumero,
-        osStatus: null,
-        operatorNome: typeof maintainer.nome === "string" ? maintainer.nome : null,
+        sourceInspectionMap.set(inspectionDoc.id, {
+          machineId,
+          machineLabel: buildMachineLabel(machine),
+          machineTag: typeof machine.tag === "string" ? machine.tag : null,
+          templateId,
+          templateLabel:
+            typeof templateInfo.nome === "string" ? String(templateInfo.nome) : "Template",
+          templateVersion:
+            typeof templateInfo.versao === "string" ? String(templateInfo.versao) : null,
+          checklistDate: resolveInspectionDate(inspectionData),
+          operatorNome: typeof maintainer.nome === "string" ? maintainer.nome : null,
+          operatorMatricula: typeof maintainer.matricula === "string" ? maintainer.matricula : null,
+          treatments,
+          treatmentMap,
+          answersMap,
+        });
+
+        treatmentsByResponse[inspectionDoc.id] = treatments;
+
+        answers.forEach(answer => {
+          if (!answer?.questionId || answer.response !== "nc") return;
+          const questionId = String(answer.questionId);
+          const logicalId = `${machineId ?? "sem-maquina"}::${questionId}`;
+          const inspectionDate = resolveInspectionDate(inspectionData);
+          const itemOsNumero =
+            typeof answer.itemOsNumero === "string" && answer.itemOsNumero.trim()
+              ? answer.itemOsNumero.trim().toUpperCase()
+              : null;
+          const observation = answer.observation ?? null;
+          const currentHistory = ncHistoryByLogicalId.get(logicalId) ?? [];
+          currentHistory.push({
+            inspectionId: inspectionDoc.id,
+            checklistDate: inspectionDate,
+            observation,
+            osNumero: itemOsNumero,
+            osStatus: null,
+            operatorNome: typeof maintainer.nome === "string" ? maintainer.nome : null,
+          });
+          ncHistoryByLogicalId.set(logicalId, currentHistory);
+        });
       });
-      ncHistoryByLogicalId.set(logicalId, currentHistory);
-    });
-  });
+    }
+  }
 
   const builtItems: NonConformityItemResponse[] = [];
   issuesSnap.docs.forEach(issueDoc => {
@@ -342,11 +373,11 @@ export async function GET(req: NextRequest) {
 
     const responseId = typeof issueData.abertaEmInspecaoId === "string" ? issueData.abertaEmInspecaoId : null;
     const sourceInspection = responseId ? sourceInspectionMap.get(responseId) : undefined;
-    const machineOption = machineId ? machinesById.get(machineId) : undefined;
     const issueTag = typeof issueData.tag === "string" ? issueData.tag : null;
-    const templateId = sourceInspection?.templateId ?? machineOption?.templateId ?? null;
-    const templateMeta = templateId ? templateMap.get(templateId) : undefined;
-    const templateItem = templateMeta?.itensMap.get(questionId);
+    const templateId =
+      typeof issueData.templateId === "string"
+        ? issueData.templateId
+        : sourceInspection?.templateId ?? null;
     const answerData = sourceInspection?.answersMap.get(questionId);
 
     const rawIssueTreatment =
@@ -393,20 +424,36 @@ export async function GET(req: NextRequest) {
       responseId,
       questionId,
       machineId: machineId ?? sourceInspection?.machineId ?? null,
-      machineLabel: sourceInspection?.machineLabel ?? buildMachineLabelFromOption(machineOption, issueTag),
-      machineTag: sourceInspection?.machineTag ?? machineOption?.tag ?? issueTag,
+      machineLabel:
+        typeof issueData.machineLabel === "string"
+          ? issueData.machineLabel
+          : sourceInspection?.machineLabel ?? buildMachineLabelFromOption(undefined, issueTag),
+      machineTag: typeof issueData.tag === "string" ? issueData.tag : sourceInspection?.machineTag ?? issueTag,
       templateId,
-      templateLabel: sourceInspection?.templateLabel ?? templateMeta?.nome ?? "Template",
-      templateVersion: sourceInspection?.templateVersion ?? templateMeta?.versao ?? null,
+      templateLabel:
+        typeof issueData.templateLabel === "string"
+          ? issueData.templateLabel
+          : sourceInspection?.templateLabel ?? "Template",
+      templateVersion:
+        typeof issueData.templateVersion === "string"
+          ? issueData.templateVersion
+          : sourceInspection?.templateVersion ?? null,
       questionText:
-        answerData?.questionText ??
-        templateItem?.oQueChecar ??
-        templateItem?.criterio ??
-        templateItem?.componente ??
-        `Item ${questionId}`,
-      checklistDate: sourceInspection?.checklistDate ?? (typeof issueData.createdAt === "string" ? issueData.createdAt : null),
-      operatorNome: sourceInspection?.operatorNome ?? null,
-      operatorMatricula: sourceInspection?.operatorMatricula ?? null,
+        typeof issueData.questionText === "string"
+          ? issueData.questionText
+          : answerData?.questionText ?? `Item ${questionId}`,
+      checklistDate:
+        typeof issueData.checklistDate === "string"
+          ? issueData.checklistDate
+          : sourceInspection?.checklistDate ?? (typeof issueData.createdAt === "string" ? issueData.createdAt : null),
+      operatorNome:
+        typeof issueData.operatorNome === "string"
+          ? issueData.operatorNome
+          : sourceInspection?.operatorNome ?? null,
+      operatorMatricula:
+        typeof issueData.operatorMatricula === "string"
+          ? issueData.operatorMatricula
+          : sourceInspection?.operatorMatricula ?? null,
       observation: typeof issueData.descricao === "string" ? issueData.descricao : answerData?.observation ?? null,
       photos: mergeStoredImageCollections(issueData.fotos, answerData?.photoUrls),
       itemOsNumero: typeof issueData.osNumero === "string" ? issueData.osNumero : answerData?.itemOsNumero ?? null,

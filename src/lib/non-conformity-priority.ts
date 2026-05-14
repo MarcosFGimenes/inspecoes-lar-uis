@@ -7,6 +7,12 @@ export interface IssueRecurrenceUpdateInput {
   osNumeroItem?: string | null;
   fotos?: unknown[];
   descricao?: string | null;
+  machineLabel?: string | null;
+  templateLabel?: string | null;
+  templateVersion?: string | null;
+  operatorNome?: string | null;
+  operatorMatricula?: string | null;
+  checklistDate?: string | null;
 }
 
 export function buildIssueRecurrenceUpdates({
@@ -16,6 +22,12 @@ export function buildIssueRecurrenceUpdates({
   osNumeroItem,
   fotos = [],
   descricao,
+  machineLabel,
+  templateLabel,
+  templateVersion,
+  operatorNome,
+  operatorMatricula,
+  checklistDate,
 }: IssueRecurrenceUpdateInput): Record<string, unknown> {
   const currentReincidencia = typeof issueData.reincidenciaCount === "number" ? issueData.reincidenciaCount : 0;
   const updates: Record<string, unknown> = {
@@ -34,6 +46,24 @@ export function buildIssueRecurrenceUpdates({
   }
   if (descricao && issueData.descricao !== descricao) {
     updates.descricao = descricao;
+  }
+  if (typeof machineLabel === "string") {
+    updates.machineLabel = machineLabel;
+  }
+  if (typeof templateLabel === "string") {
+    updates.templateLabel = templateLabel;
+  }
+  if (typeof templateVersion === "string") {
+    updates.templateVersion = templateVersion;
+  }
+  if (typeof operatorNome === "string") {
+    updates.operatorNome = operatorNome;
+  }
+  if (typeof operatorMatricula === "string") {
+    updates.operatorMatricula = operatorMatricula;
+  }
+  if (typeof checklistDate === "string") {
+    updates.checklistDate = checklistDate;
   }
   if (issueData.maintainerResolution) {
     updates.maintainerResolution = null;
