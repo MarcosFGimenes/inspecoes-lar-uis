@@ -491,8 +491,8 @@ export async function POST(req: NextRequest) {
         machine: {
           tag,
           nome: descricao,
-          machineId: machineRecord?.id,
-          templateId: machineRecord?.templateId,
+          machineId: machineRecord?.id ?? null,
+          templateId: machineRecord?.templateId ?? null,
           codTarefaConfigurado: configuredCodTarefa || null,
           machineNotFound: !machineRecord,
         },
