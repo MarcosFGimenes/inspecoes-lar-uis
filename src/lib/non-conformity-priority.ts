@@ -87,3 +87,13 @@ export function sortByLastActivityDesc<T extends { updatedAt: string | null; che
     return normalizedB - normalizedA;
   });
 }
+
+export function sortByDueDateAsc<T extends { dueDateIso: string | null; dueDate: string }>(items: T[]): T[] {
+  return [...items].sort((a, b) => {
+    const aTs = Date.parse(a.dueDateIso ?? a.dueDate);
+    const bTs = Date.parse(b.dueDateIso ?? b.dueDate);
+    const normalizedA = Number.isNaN(aTs) ? Number.POSITIVE_INFINITY : aTs;
+    const normalizedB = Number.isNaN(bTs) ? Number.POSITIVE_INFINITY : bTs;
+    return normalizedA - normalizedB;
+  });
+}

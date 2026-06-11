@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   buildIssueRecurrenceUpdates,
   resolveIssueLastActivityAt,
+  sortByDueDateAsc,
   sortByLastActivityDesc,
 } from "../src/lib/non-conformity-priority.ts";
 
@@ -56,5 +57,18 @@ test("tratativa reincidente sobe para o topo da lista", () => {
   assert.deepEqual(
     sorted.map(item => item.id),
     ["new", "fallback", "old"]
+  );
+});
+
+test("ordena NCs por vencimento do mais antigo para o mais novo", () => {
+  const sorted = sortByDueDateAsc([
+    { id: "without-date", dueDate: "", dueDateIso: null },
+    { id: "newer", dueDate: "2026-04-10", dueDateIso: "2026-04-10T00:00:00.000Z" },
+    { id: "older", dueDate: "2026-03-10", dueDateIso: "2026-03-10T00:00:00.000Z" },
+  ]);
+
+  assert.deepEqual(
+    sorted.map(item => item.id),
+    ["older", "newer", "without-date"]
   );
 });

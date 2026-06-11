@@ -28,7 +28,7 @@ import type {
   NonConformityStatus,
   StoredImage,
 } from "@/types";
-import { resolveIssueLastActivityAt, sortByLastActivityDesc } from "@/lib/non-conformity-priority";
+import { resolveIssueLastActivityAt, sortByDueDateAsc, sortByLastActivityDesc } from "@/lib/non-conformity-priority";
 import { normalizeStoredImages } from "@/lib/storage/images";
 
 interface MachineOption {
@@ -259,6 +259,7 @@ export default function AdminNonConformitiesPage() {
   const [machineFilter, setMachineFilter] = useState("");
   const [maintainerFilter, setMaintainerFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("open");
+  const [dueDateFilter, setDueDateFilter] = useState("default");
   const [savingId, setSavingId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<Record<string, FeedbackState>>({});
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -545,7 +546,7 @@ export default function AdminNonConformitiesPage() {
 
   const filteredItems = useMemo(() => {
     const machineSearch = machineFilter.trim().toLowerCase();
-    return items.filter(item => {
+    const visibleItems = items.filter(item => {
       if (machineSearch) {
         const machineLabel = item.machineLabel.toLowerCase();
         const machineTag = (item.machineTag ?? "").toLowerCase();
@@ -575,7 +576,13 @@ export default function AdminNonConformitiesPage() {
       }
       return item.status === statusFilter;
     });
-  }, [items, machineFilter, maintainerFilter, statusFilter]);
+
+    if (dueDateFilter === "oldest_first") {
+      return sortByDueDateAsc(visibleItems);
+    }
+
+    return visibleItems;
+  }, [items, machineFilter, maintainerFilter, statusFilter, dueDateFilter]);
 
   const handleUpdateItem = useCallback((id: string, updates: Partial<NonConformityItem>) => {
     setItems(prev => prev.map(item => (item.id === id ? { ...item, ...updates } : item)));
@@ -811,7 +818,7 @@ export default function AdminNonConformitiesPage() {
         <CardHeader className="pb-4">
           <CardTitle className="text-base text-[var(--text)]">Filtros</CardTitle>
         </CardHeader>
-        <CardContent className="grid gap-4 md:grid-cols-3">
+        <CardContent className="grid gap-4 md:grid-cols-4">
           <label className="space-y-1 text-sm">
             <span className="text-[var(--muted)]">Máquina</span>
             <Input
@@ -847,6 +854,13 @@ export default function AdminNonConformitiesPage() {
               <option value="open">Abertas</option>
               <option value="resolved">Resolvidas</option>
               <option value="maintainer_resolved">Realizado pelo mantenedor</option>
+            </Select>
+          </label>
+          <label className="space-y-1 text-sm">
+            <span className="text-[var(--muted)]">Data de vencimento</span>
+            <Select value={dueDateFilter} onChange={event => setDueDateFilter(event.target.value)}>
+              <option value="default">Padrão: atividade mais recente</option>
+              <option value="oldest_first">Mais antigo para mais novo</option>
             </Select>
           </label>
         </CardContent>
