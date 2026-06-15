@@ -5,12 +5,19 @@ function asStoredImageFromObject(value: unknown): StoredImage | null {
   const maybe = value as Partial<StoredImage>;
   if (typeof maybe.url !== "string" || !maybe.url.trim()) return null;
   const provider = maybe.provider === "r2" ? "r2" : "imgbb";
-  return {
+  const image: StoredImage = {
     url: maybe.url.trim(),
     provider,
-    mime: typeof maybe.mime === "string" ? maybe.mime : undefined,
-    key: typeof maybe.key === "string" ? maybe.key : undefined,
   };
+
+  if (typeof maybe.mime === "string" && maybe.mime.trim()) {
+    image.mime = maybe.mime.trim();
+  }
+  if (typeof maybe.key === "string" && maybe.key.trim()) {
+    image.key = maybe.key.trim();
+  }
+
+  return image;
 }
 
 function parseStringCollection(value: string): unknown[] | null {
