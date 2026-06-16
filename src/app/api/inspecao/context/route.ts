@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { QueryDocumentSnapshot, DocumentData } from "firebase-admin/firestore";
 import { adminDb } from "@/lib/firebase-admin";
 import { findMachineByTag } from "@/lib/db/machines";
 import { requireMaint } from "@/lib/guards";
@@ -7,6 +8,77 @@ import { sanitizeIsoHeaderConfig } from "@/lib/iso-header-config";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+function isTreatmentResolved(value: unknown) {
+  if (!value || typeof value !== "object") return false;
+  const status = String((value as Record<string, unknown>).status ?? "").trim().toLowerCase();
+  return status === "resolved" || status === "resolvida" || status === "concluida" || status === "concluída" || status === "closed";
+}
+
+function hasMaintainerResolution(value: unknown) {
+  if (!value || typeof value !== "object") return false;
+  const resolution = value as Record<string, unknown>;
+  return typeof resolution.resolvedAt === "string" && resolution.resolvedAt.trim().length > 0;
+}
+
+async function findSourceTreatment(issueData: Record<string, unknown>) {
+  const inspectionId = typeof issueData.abertaEmInspecaoId === "string" ? issueData.abertaEmInspecaoId.trim() : "";
+  const templateItemId = typeof issueData.templateItemId === "string" ? issueData.templateItemId.trim() : "";
+  if (!inspectionId || !templateItemId) return null;
+
+  const inspectionSnap = await adminDb.collection("inspecoes").doc(inspectionId).get();
+  const treatments = Array.isArray(inspectionSnap.data()?.nonConformityTreatments)
+    ? (inspectionSnap.data()?.nonConformityTreatments as Array<Record<string, unknown>>)
+    : [];
+
+  return treatments.find(treatment => treatment.questionId === templateItemId) ?? null;
+}
+
+async function reconcileIssueBeforeInspection(issueDoc: QueryDocumentSnapshot<DocumentData>, nowIso: string) {
+  const data = issueDoc.data() ?? {};
+  const rawStatus = String(data.status ?? "aberta").trim().toLowerCase();
+  if (rawStatus === "resolvida") return "resolvida";
+
+  const sourceTreatment = isTreatmentResolved(data.pcmTreatment) ? null : await findSourceTreatment(data);
+  const pcmMarkedResolved = isTreatmentResolved(data.pcmTreatment) || isTreatmentResolved(sourceTreatment);
+  const maintainerAlreadyConfirmed = hasMaintainerResolution(data.maintainerResolution);
+
+  if (pcmMarkedResolved && maintainerAlreadyConfirmed) {
+    await issueDoc.ref.update({
+      status: "resolvida",
+      resolvedAt: typeof data.resolvedAt === "string" ? data.resolvedAt : nowIso,
+      reconciledAt: nowIso,
+      reconciledReason: "pcm_treatment_and_maintainer_resolution",
+      updatedAt: nowIso,
+    });
+    return "resolvida";
+  }
+
+  if (rawStatus === "aberta" && pcmMarkedResolved) {
+    await issueDoc.ref.update({
+      status: "concluida",
+      concluidaEm: typeof data.concluidaEm === "string" ? data.concluidaEm : nowIso,
+      concluidaPorTratativa: true,
+      reconciledAt: nowIso,
+      reconciledReason: "pcm_treatment_resolved",
+      updatedAt: nowIso,
+    });
+    return "concluida";
+  }
+
+  if (rawStatus === "concluida" && maintainerAlreadyConfirmed) {
+    await issueDoc.ref.update({
+      status: "resolvida",
+      resolvedAt: typeof data.resolvedAt === "string" ? data.resolvedAt : nowIso,
+      reconciledAt: nowIso,
+      reconciledReason: "concluded_with_maintainer_resolution",
+      updatedAt: nowIso,
+    });
+    return "resolvida";
+  }
+
+  return rawStatus === "concluida" ? "concluida" : "aberta";
+}
 
 function extractMessage(error: unknown, fallback: string) {
   if (error instanceof Error && error.message) {
@@ -73,27 +145,37 @@ export async function GET(req: NextRequest) {
       .where("status", "in", ["aberta", "concluida"])
       .get();
 
-    const openIssues = issuesSnap.docs.map(doc => {
-      const data = doc.data() ?? {};
-      const rawResolution = data.maintainerResolution ?? null;
-      const maintainerResolution = rawResolution && typeof rawResolution === "object"
-        ? {
-            resolvedAt: rawResolution.resolvedAt ?? null,
-            description: rawResolution.description ?? null,
-            resolvedByName: rawResolution.resolvedByName ?? null,
-          }
-        : null;
-      return {
-        id: doc.id,
-        templateItemId: data.templateItemId ?? null,
-        descricao: data.descricao ?? null,
-        osNumero: data.osNumero ?? null,
-        fotos: normalizeStoredImages(data.fotos ?? []),
-        createdAt: data.createdAt ?? null,
-        status: data.status === "concluida" ? "concluida" : "aberta",
-        maintainerResolution,
-      };
-    });
+    const nowIso = new Date().toISOString();
+    const reconciledIssues = await Promise.all(
+      issuesSnap.docs.map(async doc => ({
+        doc,
+        status: await reconcileIssueBeforeInspection(doc, nowIso),
+      })),
+    );
+
+    const openIssues = reconciledIssues
+      .filter(issue => issue.status !== "resolvida")
+      .map(({ doc, status }) => {
+        const data = doc.data() ?? {};
+        const rawResolution = data.maintainerResolution ?? null;
+        const maintainerResolution = rawResolution && typeof rawResolution === "object"
+          ? {
+              resolvedAt: rawResolution.resolvedAt ?? null,
+              description: rawResolution.description ?? null,
+              resolvedByName: rawResolution.resolvedByName ?? null,
+            }
+          : null;
+        return {
+          id: doc.id,
+          templateItemId: data.templateItemId ?? null,
+          descricao: data.descricao ?? null,
+          osNumero: data.osNumero ?? null,
+          fotos: normalizeStoredImages(data.fotos ?? []),
+          createdAt: data.createdAt ?? null,
+          status: status === "concluida" ? "concluida" : "aberta",
+          maintainerResolution,
+        };
+      });
 
     return NextResponse.json({
       maintainer: {

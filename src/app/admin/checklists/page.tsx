@@ -113,6 +113,30 @@ function ensureNumber(value: unknown) {
   return typeof value === "number" ? value : null;
 }
 
+function normalizeTextKey(value: string | null | undefined) {
+  return value?.trim().toLowerCase() ?? null;
+}
+
+function buildMaintainerFilterKeys(maintainer: MaintainerOption | null | undefined) {
+  if (!maintainer) return new Set<string>();
+  return new Set(
+    [maintainer.id, maintainer.matricula, normalizeTextKey(maintainer.nome)]
+      .map(value => value?.trim())
+      .filter((value): value is string => Boolean(value)),
+  );
+}
+
+function rowMatchesMaintainer(row: ChecklistRow, selectedMaintainer: MaintainerOption | null | undefined) {
+  const selectedKeys = buildMaintainerFilterKeys(selectedMaintainer);
+  if (selectedKeys.size === 0) return false;
+
+  const rowKeys = [row.maintainerId, row.maintainerMatricula, normalizeTextKey(row.maintainerNome)]
+    .map(value => value?.trim())
+    .filter((value): value is string => Boolean(value));
+
+  return rowKeys.some(key => selectedKeys.has(key));
+}
+
 function computeNcCount(data: Record<string, unknown>): number {
   const qtdNc = ensureNumber(data.qtdNC);
   if (typeof qtdNc === "number" && !Number.isNaN(qtdNc)) {
@@ -250,7 +274,7 @@ export default function AdminChecklistsPage() {
     setError(null);
     try {
       const snap = await getDocs(query(inspectionsCol, orderBy("createdAt", "desc")));
-      const allRows: ChecklistRow[] = snap.docs.slice(0, MAX_RESULTS).map(docSnap => {
+      const allRows: ChecklistRow[] = snap.docs.map(docSnap => {
         const data = docSnap.data() ?? {};
         const machine = (data.machine ?? {}) as Record<string, unknown>;
         const maintainer = (data.maintainer ?? {}) as Record<string, unknown>;
@@ -288,6 +312,8 @@ export default function AdminChecklistsPage() {
       });
 
       const machineQuery = filter.machineTag?.trim().toLowerCase();
+      const selectedMaintainer =
+        filter.maintainerId === "all" ? null : maintainerById.get(filter.maintainerId) ?? null;
 
       const filtered = allRows.filter(row => {
         if (machineQuery) {
@@ -298,7 +324,7 @@ export default function AdminChecklistsPage() {
             return false;
           }
         }
-        if (filter.maintainerId !== "all" && row.maintainerId !== filter.maintainerId) {
+        if (filter.maintainerId !== "all" && !rowMatchesMaintainer(row, selectedMaintainer)) {
           return false;
         }
         if (filter.templateId !== "all" && row.templateId !== filter.templateId) {
@@ -334,7 +360,7 @@ export default function AdminChecklistsPage() {
         return true;
       });
 
-      setRows(filtered);
+      setRows(filter.maintainerId === "all" ? filtered.slice(0, MAX_RESULTS) : filtered);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Erro ao carregar checklists";
       setError(message);
