@@ -7,11 +7,9 @@ export interface ParseCsvOptions {
   skipEmptyLines?: boolean;
 }
 
-export function parseCsv(content: string | Buffer, options: ParseCsvOptions = {}): CsvRow[] {
-  const delimiter = options.delimiter ?? ",";
-  const skipEmptyLines = options.skipEmptyLines ?? true;
+const CANDIDATE_DELIMITERS = [",", ";", "\t"] as const;
 
-  const text = (typeof content === "string" ? content : content.toString("utf-8")).replace(/^\ufeff/, "");
+function splitCsvRows(text: string, delimiter: string, skipEmptyLines: boolean): string[][] {
   const rows: string[][] = [];
   let currentField = "";
   let currentRow: string[] = [];
@@ -68,6 +66,35 @@ export function parseCsv(content: string | Buffer, options: ParseCsvOptions = {}
   if (currentRow.length > 1 || currentRow[0]?.trim()) {
     pushRow();
   }
+
+  return rows;
+}
+
+function scoreRows(rows: string[][]) {
+  if (!rows.length) return 0;
+  const [header, ...dataRows] = rows;
+  const headerColumns = header.length;
+  const comparableRows = dataRows.slice(0, 25);
+  const matchingRows = comparableRows.filter(row => row.length === headerColumns).length;
+  const populatedHeaders = header.filter(column => column.trim().length > 0).length;
+
+  return headerColumns * 100 + populatedHeaders * 10 + matchingRows;
+}
+
+function detectDelimiter(text: string, skipEmptyLines: boolean) {
+  return CANDIDATE_DELIMITERS.map(delimiter => ({
+    delimiter,
+    rows: splitCsvRows(text, delimiter, skipEmptyLines),
+  })).sort((a, b) => scoreRows(b.rows) - scoreRows(a.rows))[0]!;
+}
+
+export function parseCsv(content: string | Buffer, options: ParseCsvOptions = {}): CsvRow[] {
+  const skipEmptyLines = options.skipEmptyLines ?? true;
+
+  const text = (typeof content === "string" ? content : content.toString("utf-8")).replace(/^\ufeff/, "");
+  const rows = options.delimiter
+    ? splitCsvRows(text, options.delimiter, skipEmptyLines)
+    : detectDelimiter(text, skipEmptyLines).rows;
 
   if (!rows.length) {
     return [];
