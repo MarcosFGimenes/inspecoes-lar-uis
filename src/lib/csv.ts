@@ -92,9 +92,10 @@ export function parseCsv(content: string | Buffer, options: ParseCsvOptions = {}
   const skipEmptyLines = options.skipEmptyLines ?? true;
 
   const text = (typeof content === "string" ? content : content.toString("utf-8")).replace(/^\ufeff/, "");
-  const rows = options.delimiter
-    ? splitCsvRows(text, options.delimiter, skipEmptyLines)
-    : detectDelimiter(text, skipEmptyLines).rows;
+  const parsed = options.delimiter
+    ? { delimiter: options.delimiter, rows: splitCsvRows(text, options.delimiter, skipEmptyLines) }
+    : detectDelimiter(text, skipEmptyLines);
+  const { delimiter, rows } = parsed;
 
   if (!rows.length) {
     return [];
@@ -105,9 +106,12 @@ export function parseCsv(content: string | Buffer, options: ParseCsvOptions = {}
   const records: CsvRow[] = [];
 
   for (const dataRow of dataRows) {
+    const normalizedRow = dataRow.length === 1 && headers.length > 1 && dataRow[0]?.includes(delimiter)
+      ? splitCsvRows(dataRow[0], delimiter, false)[0] ?? dataRow
+      : dataRow;
     const record: CsvRow = {};
     headers.forEach((column, index) => {
-      record[column] = (dataRow[index] ?? "").trim();
+      record[column] = (normalizedRow[index] ?? "").trim();
     });
     records.push(record);
   }
