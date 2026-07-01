@@ -110,6 +110,11 @@ function formatDateInput(value: string | null | undefined) {
   return date.toISOString().slice(0, 10);
 }
 
+
+function normalizeOsNumero(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim().toUpperCase() : null;
+}
+
 function normalizeStatus(value: unknown): NonConformityStatus | null {
   if (value === "open" || value === "in_progress" || value === "resolved") {
     return value;
@@ -174,9 +179,7 @@ function normalizeAnswers(
           photoUrls: normalizeStoredImages(item.fotos ?? []),
           recurrence: false,
           itemOsNumero:
-            typeof item.osNumeroItem === "string" && item.osNumeroItem.trim()
-              ? item.osNumeroItem.trim().toUpperCase()
-              : null,
+            normalizeOsNumero(item.osNumeroItem),
         } satisfies ChecklistAnswer;
       })
   );
@@ -205,7 +208,7 @@ function normalizeAnswers(
           observation: item.observation ?? fallbackFromItens?.observation ?? null,
           photoUrls: mergeStoredImageCollections(item.photoUrls, fallbackFromItens?.photoUrls),
           recurrence: item.recurrence === true || fallbackFromItens?.recurrence === true,
-          itemOsNumero: item.itemOsNumero ?? fallbackFromItens?.itemOsNumero ?? null,
+          itemOsNumero: normalizeOsNumero(item.itemOsNumero) ?? fallbackFromItens?.itemOsNumero ?? null,
         } satisfies ChecklistAnswer;
       })
   );
@@ -336,10 +339,7 @@ export async function GET(req: NextRequest) {
       const questionId = String(answer.questionId);
       const logicalId = buildNcLogicalId(machineId, machineTag, questionId);
       const inspectionDate = resolveInspectionDate(inspectionData);
-      const itemOsNumero =
-        typeof answer.itemOsNumero === "string" && answer.itemOsNumero.trim()
-          ? answer.itemOsNumero.trim().toUpperCase()
-          : null;
+      const itemOsNumero = normalizeOsNumero(answer.itemOsNumero);
       const observation = answer.observation ?? null;
       const currentHistory = ncHistoryByLogicalId.get(logicalId) ?? [];
       currentHistory.push({
@@ -362,7 +362,9 @@ export async function GET(req: NextRequest) {
     if (!questionId) return;
 
     const responseId = typeof issueData.abertaEmInspecaoId === "string" ? issueData.abertaEmInspecaoId : null;
-    const sourceInspection = responseId ? sourceInspectionMap.get(responseId) : undefined;
+    const latestOccurrenceId =
+      typeof issueData.ultimaReincidenciaInspecaoId === "string" ? issueData.ultimaReincidenciaInspecaoId : responseId;
+    const sourceInspection = latestOccurrenceId ? sourceInspectionMap.get(latestOccurrenceId) : undefined;
     const machineOption = machineId ? machinesById.get(machineId) : undefined;
     const issueTag = typeof issueData.tag === "string" ? issueData.tag : null;
     const templateId = sourceInspection?.templateId ?? machineOption?.templateId ?? null;
@@ -434,7 +436,7 @@ export async function GET(req: NextRequest) {
       operatorMatricula: sourceInspection?.operatorMatricula ?? null,
       observation: typeof issueData.descricao === "string" ? issueData.descricao : answerData?.observation ?? null,
       photos: mergeStoredImageCollections(issueData.fotos, answerData?.photoUrls),
-      itemOsNumero: typeof issueData.osNumero === "string" ? issueData.osNumero : answerData?.itemOsNumero ?? null,
+      itemOsNumero: answerData?.itemOsNumero ?? normalizeOsNumero(issueData.osNumero) ?? null,
       issueStatus,
       status,
       summary: summaryValue ? String(summaryValue) : "",

@@ -1,14 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   collection,
   deleteDoc,
   doc,
   getDocs,
+  limit,
   orderBy,
   query,
+  startAfter,
+  type DocumentData,
+  type QueryDocumentSnapshot,
 } from "firebase/firestore";
 
 import { Button, buttonStyles } from "@/components/ui/button";
@@ -153,7 +157,8 @@ function computeNcCount(data: Record<string, unknown>): number {
   return itensRaw.filter(item => String(item.resultado ?? item.response ?? "c").toLowerCase() === "nc").length;
 }
 
-const MAX_RESULTS = 1000;
+const PAGE_SIZE = 20;
+type InspectionCursor = QueryDocumentSnapshot<DocumentData>;
 
 export default function AdminChecklistsPage() {
   const [machines, setMachines] = useState<MachineOption[]>([]);
@@ -168,6 +173,9 @@ export default function AdminChecklistsPage() {
   });
   const [loadingLookups, setLoadingLookups] = useState(true);
   const [loadingRows, setLoadingRows] = useState(true);
+  const [loadingMoreRows, setLoadingMoreRows] = useState(false);
+  const lastInspectionCursorRef = useRef<InspectionCursor | null>(null);
+  const [hasMoreRows, setHasMoreRows] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [periodExporting, setPeriodExporting] = useState(false);
   const [periodDeleting, setPeriodDeleting] = useState(false);
@@ -269,109 +277,131 @@ export default function AdminChecklistsPage() {
   const maintainerById = useMemo(() => new Map(maintainers.map(item => [item.id, item])), [maintainers]);
   const templateById = useMemo(() => new Map(templates.map(item => [item.id, item])), [templates]);
 
-  const fetchRows = useCallback(async () => {
-    setLoadingRows(true);
+  const mapInspectionDoc = useCallback((docSnap: InspectionCursor) => {
+    const data = docSnap.data() ?? {};
+    const machine = (data.machine ?? {}) as Record<string, unknown>;
+    const maintainer = (data.maintainer ?? {}) as Record<string, unknown>;
+    const template = (data.template ?? {}) as Record<string, unknown>;
+
+    const machineId = ensureString(machine.machineId) ?? ensureString(machine.id);
+    const machineFallback = machineId ? machineById.get(machineId) : null;
+    const maintainerId = ensureString(maintainer.maintId) ?? ensureString(maintainer.id);
+    const maintainerFallback = maintainerId ? maintainerById.get(maintainerId) : null;
+    const templateId = ensureString(template.id);
+    const templateFallback = templateId ? templateById.get(templateId) : null;
+
+    const ncCount = computeNcCount(data);
+
+    return {
+      id: docSnap.id,
+      createdAt: ensureString(data.createdAt) ?? ensureString(data.finalizadaEm) ?? ensureString(data.iniciadaEm),
+      machineId: machineId,
+      machineNome: ensureString(machine.nome) ?? machineFallback?.nome ?? null,
+      machineTag: ensureString(machine.tag) ?? machineFallback?.tag ?? null,
+      machineSetor: ensureString(machine.setor) ?? machineFallback?.setor ?? null,
+      maintainerId,
+      maintainerNome: ensureString(maintainer.nome) ?? maintainerFallback?.nome ?? null,
+      maintainerMatricula:
+        ensureString(maintainer.matricula) ?? maintainerFallback?.matricula ?? null,
+      templateId,
+      templateNome:
+        ensureString(template.nome) ?? ensureString(template.title) ?? templateFallback?.nome ?? null,
+      templateVersao:
+        ensureString(template.versao) ?? ensureString(template.version) ?? templateFallback?.versao ?? null,
+      osNumero: ensureString(data.osNumero),
+      ncCount,
+      hasNc: ncCount > 0,
+    } satisfies ChecklistRow;
+  }, [machineById, maintainerById, templateById]);
+
+  const applyCurrentFilters = useCallback((items: ChecklistRow[]) => {
+    const machineQuery = filter.machineTag?.trim().toLowerCase();
+    const selectedMaintainer =
+      filter.maintainerId === "all" ? null : maintainerById.get(filter.maintainerId) ?? null;
+
+    return items.filter(row => {
+      if (machineQuery) {
+        const tag = row.machineTag?.toLowerCase() ?? "";
+        const name = row.machineNome?.toLowerCase() ?? "";
+        const setor = row.machineSetor?.toLowerCase() ?? "";
+        if (!tag.includes(machineQuery) && !name.includes(machineQuery) && !setor.includes(machineQuery)) {
+          return false;
+        }
+      }
+      if (filter.maintainerId !== "all" && !rowMatchesMaintainer(row, selectedMaintainer)) {
+        return false;
+      }
+      if (filter.templateId !== "all" && row.templateId !== filter.templateId) {
+        return false;
+      }
+      if (filter.hasNc === "yes" && !row.hasNc) {
+        return false;
+      }
+      if (filter.hasNc === "no" && row.hasNc) {
+        return false;
+      }
+      if (filter.matricula?.trim()) {
+        const wanted = filter.matricula.trim().toLowerCase();
+        const matricula = row.maintainerMatricula?.toLowerCase() ?? "";
+        if (!matricula.includes(wanted)) {
+          return false;
+        }
+      }
+      if (filter.from) {
+        const fromDate = new Date(`${filter.from}T00:00:00`);
+        const createdAt = normalizeDate(row.createdAt);
+        if (!createdAt || createdAt < fromDate) {
+          return false;
+        }
+      }
+      if (filter.to) {
+        const toDate = new Date(`${filter.to}T23:59:59`);
+        const createdAt = normalizeDate(row.createdAt);
+        if (!createdAt || createdAt > toDate) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [filter, maintainerById]);
+
+  const fetchRows = useCallback(async (mode: "reset" | "append" = "reset") => {
+    const shouldAppend = mode === "append";
+    const cursor = lastInspectionCursorRef.current;
+    if (shouldAppend && !cursor) return;
+
+    if (shouldAppend) {
+      setLoadingMoreRows(true);
+    } else {
+      setLoadingRows(true);
+      lastInspectionCursorRef.current = null;
+      setHasMoreRows(false);
+    }
     setError(null);
     try {
-      const snap = await getDocs(query(inspectionsCol, orderBy("createdAt", "desc")));
-      const allRows: ChecklistRow[] = snap.docs.map(docSnap => {
-        const data = docSnap.data() ?? {};
-        const machine = (data.machine ?? {}) as Record<string, unknown>;
-        const maintainer = (data.maintainer ?? {}) as Record<string, unknown>;
-        const template = (data.template ?? {}) as Record<string, unknown>;
-
-        const machineId = ensureString(machine.machineId) ?? ensureString(machine.id);
-        const machineFallback = machineId ? machineById.get(machineId) : null;
-        const maintainerId = ensureString(maintainer.maintId) ?? ensureString(maintainer.id);
-        const maintainerFallback = maintainerId ? maintainerById.get(maintainerId) : null;
-        const templateId = ensureString(template.id);
-        const templateFallback = templateId ? templateById.get(templateId) : null;
-
-        const ncCount = computeNcCount(data);
-
-        return {
-          id: docSnap.id,
-          createdAt: ensureString(data.createdAt) ?? ensureString(data.finalizadaEm) ?? ensureString(data.iniciadaEm),
-          machineId: machineId,
-          machineNome: ensureString(machine.nome) ?? machineFallback?.nome ?? null,
-          machineTag: ensureString(machine.tag) ?? machineFallback?.tag ?? null,
-          machineSetor: ensureString(machine.setor) ?? machineFallback?.setor ?? null,
-          maintainerId,
-          maintainerNome: ensureString(maintainer.nome) ?? maintainerFallback?.nome ?? null,
-          maintainerMatricula:
-            ensureString(maintainer.matricula) ?? maintainerFallback?.matricula ?? null,
-          templateId,
-          templateNome:
-            ensureString(template.nome) ?? ensureString(template.title) ?? templateFallback?.nome ?? null,
-          templateVersao:
-            ensureString(template.versao) ?? ensureString(template.version) ?? templateFallback?.versao ?? null,
-          osNumero: ensureString(data.osNumero),
-          ncCount,
-          hasNc: ncCount > 0,
-        } satisfies ChecklistRow;
-      });
-
-      const machineQuery = filter.machineTag?.trim().toLowerCase();
-      const selectedMaintainer =
-        filter.maintainerId === "all" ? null : maintainerById.get(filter.maintainerId) ?? null;
-
-      const filtered = allRows.filter(row => {
-        if (machineQuery) {
-          const tag = row.machineTag?.toLowerCase() ?? "";
-          const name = row.machineNome?.toLowerCase() ?? "";
-          const setor = row.machineSetor?.toLowerCase() ?? "";
-          if (!tag.includes(machineQuery) && !name.includes(machineQuery) && !setor.includes(machineQuery)) {
-            return false;
-          }
-        }
-        if (filter.maintainerId !== "all" && !rowMatchesMaintainer(row, selectedMaintainer)) {
-          return false;
-        }
-        if (filter.templateId !== "all" && row.templateId !== filter.templateId) {
-          return false;
-        }
-        if (filter.hasNc === "yes" && !row.hasNc) {
-          return false;
-        }
-        if (filter.hasNc === "no" && row.hasNc) {
-          return false;
-        }
-        if (filter.matricula?.trim()) {
-          const wanted = filter.matricula.trim().toLowerCase();
-          const matricula = row.maintainerMatricula?.toLowerCase() ?? "";
-          if (!matricula.includes(wanted)) {
-            return false;
-          }
-        }
-        if (filter.from) {
-          const fromDate = new Date(`${filter.from}T00:00:00`);
-          const createdAt = normalizeDate(row.createdAt);
-          if (!createdAt || createdAt < fromDate) {
-            return false;
-          }
-        }
-        if (filter.to) {
-          const toDate = new Date(`${filter.to}T23:59:59`);
-          const createdAt = normalizeDate(row.createdAt);
-          if (!createdAt || createdAt > toDate) {
-            return false;
-          }
-        }
-        return true;
-      });
-
-      setRows(filter.maintainerId === "all" ? filtered.slice(0, MAX_RESULTS) : filtered);
+      const constraints = shouldAppend && cursor
+        ? [orderBy("createdAt", "desc"), startAfter(cursor), limit(PAGE_SIZE)]
+        : [orderBy("createdAt", "desc"), limit(PAGE_SIZE)];
+      const snap = await getDocs(query(inspectionsCol, ...constraints));
+      const pageRows = applyCurrentFilters(snap.docs.map(mapInspectionDoc));
+      setRows(prev => (shouldAppend ? [...prev, ...pageRows] : pageRows));
+      lastInspectionCursorRef.current = snap.docs.at(-1) ?? null;
+      setHasMoreRows(snap.docs.length === PAGE_SIZE);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Erro ao carregar checklists";
       setError(message);
     } finally {
-      setLoadingRows(false);
+      if (shouldAppend) {
+        setLoadingMoreRows(false);
+      } else {
+        setLoadingRows(false);
+      }
     }
-  }, [filter, inspectionsCol, machineById, maintainerById, templateById]);
+  }, [applyCurrentFilters, inspectionsCol, mapInspectionDoc]);
 
   useEffect(() => {
     if (!loadingLookups) {
-      fetchRows();
+      fetchRows("reset");
     }
   }, [loadingLookups, fetchRows]);
 
@@ -436,7 +466,7 @@ export default function AdminChecklistsPage() {
         await deleteDoc(doc(inspectionsCol, row.id));
       }
       alert(`Checklists deletados com sucesso (${rows.length}).`);
-      await fetchRows();
+      await fetchRows("reset");
     } catch (err) {
       console.error("Erro ao deletar checklists", err);
       alert("Não foi possível deletar os checklists deste período. Tente novamente.");
@@ -460,7 +490,7 @@ export default function AdminChecklistsPage() {
           <Button
             size="sm"
             variant="outline"
-            onClick={() => fetchRows()}
+            onClick={() => fetchRows("reset")}
             disabled={loadingRows}
             loading={loadingRows}
           >
@@ -618,7 +648,7 @@ export default function AdminChecklistsPage() {
                   <i className="fas fa-eraser" aria-hidden />
                   Limpar filtros
                 </Button>
-                <Button size="sm" onClick={fetchRows} disabled={loadingRows} loading={loadingRows}>
+                <Button size="sm" onClick={() => fetchRows("reset")} disabled={loadingRows} loading={loadingRows}>
                   <i className="fas fa-filter" aria-hidden />
                   Aplicar filtros
                 </Button>
@@ -669,8 +699,9 @@ export default function AdminChecklistsPage() {
               icon={<i className="fas fa-clipboard-list" aria-hidden />}
             />
           ) : (
-            <Table>
-              <TableHeader>
+            <div className="space-y-4">
+              <Table>
+                <TableHeader>
                 <TableRow>
                   <TableHead>Data</TableHead>
                   <TableHead>Máquina</TableHead>
@@ -746,8 +777,23 @@ export default function AdminChecklistsPage() {
                     </TableCell>
                   </TableRow>
                 ))}
-              </TableBody>
-            </Table>
+                </TableBody>
+              </Table>
+              {hasMoreRows ? (
+                <div className="flex justify-center border-t border-[var(--border)] pt-4">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => fetchRows("append")}
+                    disabled={loadingMoreRows}
+                    loading={loadingMoreRows}
+                  >
+                    <i className="fas fa-plus" aria-hidden />
+                    Carregar mais 20 inspeções
+                  </Button>
+                </div>
+              ) : null}
+            </div>
           )}
         </CardContent>
       </Card>
