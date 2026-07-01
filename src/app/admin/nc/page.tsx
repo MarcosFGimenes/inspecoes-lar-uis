@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import {
   collection,
@@ -13,7 +13,6 @@ import {
   query,
   startAfter,
   updateDoc,
-  where,
   type DocumentData,
   type QueryDocumentSnapshot,
 } from "firebase/firestore";
@@ -33,7 +32,11 @@ import type {
   NonConformityStatus,
   StoredImage,
 } from "@/types";
-import { resolveIssueLastActivityAt, sortByDueDateAsc, sortByLastActivityDesc } from "@/lib/non-conformity-priority";
+import {
+  resolveIssueLastActivityAt,
+  sortByDueDateAsc,
+  sortByLastActivityDesc,
+} from "@/lib/non-conformity-priority";
 import { normalizeStoredImages } from "@/lib/storage/images";
 
 interface MachineOption {
@@ -129,9 +132,10 @@ function formatDateInput(value: string | null | undefined) {
   return date.toISOString().slice(0, 10);
 }
 
-
 function normalizeOsNumero(value: unknown): string | null {
-  return typeof value === "string" && value.trim() ? value.trim().toUpperCase() : null;
+  return typeof value === "string" && value.trim()
+    ? value.trim().toUpperCase()
+    : null;
 }
 
 function normalizeStatus(value: unknown): NonConformityStatus | null {
@@ -144,7 +148,7 @@ function normalizeStatus(value: unknown): NonConformityStatus | null {
 function dedupeAnswers(answers: ChecklistAnswer[]) {
   const seen = new Set<string>();
   const unique: ChecklistAnswer[] = [];
-  answers.forEach(answer => {
+  answers.forEach((answer) => {
     if (!answer.questionId || seen.has(answer.questionId)) {
       return;
     }
@@ -157,8 +161,8 @@ function dedupeAnswers(answers: ChecklistAnswer[]) {
 function mergeStoredImageCollections(...collections: unknown[]): StoredImage[] {
   const seen = new Set<string>();
   const merged: StoredImage[] = [];
-  collections.forEach(collection => {
-    normalizeStoredImages(collection).forEach(image => {
+  collections.forEach((collection) => {
+    normalizeStoredImages(collection).forEach((image) => {
       const key = `${image.provider}:${image.url}`;
       if (seen.has(key)) return;
       seen.add(key);
@@ -170,46 +174,58 @@ function mergeStoredImageCollections(...collections: unknown[]): StoredImage[] {
 
 function normalizeAnswers(
   data: Record<string, unknown>,
-  templateItems: Map<string, TemplateItemData>
+  templateItems: Map<string, TemplateItemData>,
 ): ChecklistAnswer[] {
-  const itens = Array.isArray(data.itens) ? (data.itens as Array<Record<string, unknown>>) : [];
+  const itens = Array.isArray(data.itens)
+    ? (data.itens as Array<Record<string, unknown>>)
+    : [];
   const answersFromItens = dedupeAnswers(
     itens
-      .filter(item => item?.templateItemId)
-      .map(item => {
+      .filter((item) => item?.templateItemId)
+      .map((item) => {
         const questionId = String(item.templateItemId);
         const templateItem = templateItems.get(questionId) ?? {};
         const resultado = String(item.resultado || "C").toLowerCase();
-        const response: "c" | "nc" | "na" = resultado === "nc" ? "nc" : resultado === "na" ? "na" : "c";
+        const response: "c" | "nc" | "na" =
+          resultado === "nc" ? "nc" : resultado === "na" ? "na" : "c";
         return {
           questionId,
           questionText:
             templateItem.oQueChecar ||
             templateItem.criterio ||
             templateItem.componente ||
-            (typeof item.componente === "string" ? item.componente : `Item ${questionId}`),
+            (typeof item.componente === "string"
+              ? item.componente
+              : `Item ${questionId}`),
           response,
-          observation: typeof item.observacaoItem === "string" ? item.observacaoItem : null,
+          observation:
+            typeof item.observacaoItem === "string"
+              ? item.observacaoItem
+              : null,
           photoUrls: normalizeStoredImages(item.fotos ?? []),
           recurrence: false,
           itemOsNumero: normalizeOsNumero(item.osNumeroItem),
         } satisfies ChecklistAnswer;
-      })
+      }),
   );
 
-  const answers = Array.isArray(data.answers) ? (data.answers as ChecklistAnswer[]) : [];
+  const answers = Array.isArray(data.answers)
+    ? (data.answers as ChecklistAnswer[])
+    : [];
   if (answers.length === 0) {
     return answersFromItens;
   }
 
   const answersFromItensByQuestionId = new Map(
-    answersFromItens.map(answer => [answer.questionId, answer] as const)
+    answersFromItens.map((answer) => [answer.questionId, answer] as const),
   );
   const answersFromPayload = dedupeAnswers(
     answers
-      .filter(item => item?.questionId)
-      .map(item => {
-        const fallbackFromItens = answersFromItensByQuestionId.get(item.questionId);
+      .filter((item) => item?.questionId)
+      .map((item) => {
+        const fallbackFromItens = answersFromItensByQuestionId.get(
+          item.questionId,
+        );
         return {
           questionId: item.questionId,
           questionText:
@@ -219,17 +235,32 @@ function normalizeAnswers(
             templateItems.get(item.questionId)?.componente ||
             fallbackFromItens?.questionText ||
             `Item ${item.questionId}`,
-          response: item.response === "nc" || item.response === "na" ? item.response : "c",
-          observation: item.observation ?? fallbackFromItens?.observation ?? null,
-          photoUrls: mergeStoredImageCollections(item.photoUrls, fallbackFromItens?.photoUrls),
-          recurrence: item.recurrence === true || fallbackFromItens?.recurrence === true,
-          itemOsNumero: normalizeOsNumero(item.itemOsNumero) ?? fallbackFromItens?.itemOsNumero ?? null,
+          response:
+            item.response === "nc" || item.response === "na"
+              ? item.response
+              : "c",
+          observation:
+            item.observation ?? fallbackFromItens?.observation ?? null,
+          photoUrls: mergeStoredImageCollections(
+            item.photoUrls,
+            fallbackFromItens?.photoUrls,
+          ),
+          recurrence:
+            item.recurrence === true || fallbackFromItens?.recurrence === true,
+          itemOsNumero:
+            normalizeOsNumero(item.itemOsNumero) ??
+            fallbackFromItens?.itemOsNumero ??
+            null,
         } satisfies ChecklistAnswer;
-      })
+      }),
   );
 
-  const questionIdsFromPayload = new Set(answersFromPayload.map(item => item.questionId));
-  const missingFromPayload = answersFromItens.filter(item => !questionIdsFromPayload.has(item.questionId));
+  const questionIdsFromPayload = new Set(
+    answersFromPayload.map((item) => item.questionId),
+  );
+  const missingFromPayload = answersFromItens.filter(
+    (item) => !questionIdsFromPayload.has(item.questionId),
+  );
   return dedupeAnswers([...answersFromPayload, ...missingFromPayload]);
 }
 
@@ -239,7 +270,10 @@ function buildMachineLabel(machine: Record<string, unknown>) {
   return tag ? `${nome} (${tag})` : nome;
 }
 
-function buildMachineLabelFromOption(machine: MachineOption | undefined, fallbackTag?: string | null) {
+function buildMachineLabelFromOption(
+  machine: MachineOption | undefined,
+  fallbackTag?: string | null,
+) {
   if (!machine) {
     return fallbackTag ? `Máquina (${fallbackTag})` : "Máquina";
   }
@@ -249,12 +283,14 @@ function buildMachineLabelFromOption(machine: MachineOption | undefined, fallbac
 
 function renderStatusBadge(status: NonConformityStatus) {
   if (status === "resolved") return <Badge variant="success">Resolvida</Badge>;
-  if (status === "in_progress") return <Badge variant="warning">Em andamento</Badge>;
+  if (status === "in_progress")
+    return <Badge variant="warning">Em andamento</Badge>;
   return <Badge variant="danger">Aberta</Badge>;
 }
 
 const PAGE_SIZE = 20;
-type IssueCursor = QueryDocumentSnapshot<DocumentData>;
+
+type IssueCursor = QueryDocumentSnapshot<DocumentData> | null;
 
 const STATUS_OPTIONS: Array<{ value: NonConformityStatus; label: string }> = [
   { value: "open", label: "Aberta" },
@@ -265,13 +301,17 @@ const STATUS_OPTIONS: Array<{ value: NonConformityStatus; label: string }> = [
 export default function AdminNonConformitiesPage() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
-  const issueCursorRef = useRef<IssueCursor | null>(null);
-  const [hasMoreInitialItems, setHasMoreInitialItems] = useState(false);
-  const [usingInitialLimit, setUsingInitialLimit] = useState(true);
-  const [forceVisibleIds, setForceVisibleIds] = useState<Set<string>>(new Set());
+  const [loadingAll, setLoadingAll] = useState(false);
+  const [issueCursor, setIssueCursor] = useState<IssueCursor>(null);
+  const [hasMoreIssues, setHasMoreIssues] = useState(true);
+  const [forceVisibleIds, setForceVisibleIds] = useState<Set<string>>(
+    new Set(),
+  );
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<NonConformityItem[]>([]);
-  const [treatmentsByResponse, setTreatmentsByResponse] = useState<Record<string, ChecklistNonConformityTreatment[]>>({});
+  const [treatmentsByResponse, setTreatmentsByResponse] = useState<
+    Record<string, ChecklistNonConformityTreatment[]>
+  >({});
   const [machineFilter, setMachineFilter] = useState("");
   const [maintainerFilter, setMaintainerFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("open");
@@ -280,76 +320,58 @@ export default function AdminNonConformitiesPage() {
   const [feedback, setFeedback] = useState<Record<string, FeedbackState>>({});
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkSaving, setBulkSaving] = useState(false);
-  const [expandedResolutions, setExpandedResolutions] = useState<Set<string>>(new Set());
-  const [deleteDialogItem, setDeleteDialogItem] = useState<NonConformityItem | null>(null);
+  const [expandedResolutions, setExpandedResolutions] = useState<Set<string>>(
+    new Set(),
+  );
+  const [deleteDialogItem, setDeleteDialogItem] =
+    useState<NonConformityItem | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  const hasActiveFilter = Boolean(machineFilter.trim() || maintainerFilter || statusFilter !== "open" || dueDateFilter !== "default");
+  const hasActiveFilter = Boolean(
+    machineFilter.trim() ||
+    maintainerFilter ||
+    statusFilter !== "open" ||
+    dueDateFilter !== "default",
+  );
 
   useEffect(() => {
-    setSelectedIds(prev => prev.filter(id => items.some(item => item.id === id)));
+    setSelectedIds((prev) =>
+      prev.filter((id) => items.some((item) => item.id === id)),
+    );
   }, [items]);
 
-  const loadData = useCallback(async (mode: "initial" | "append" | "full" = "initial") => {
-    const append = mode === "append";
-    const fullLoad = mode === "full";
-    if (append && !issueCursorRef.current) return;
-
-    if (append) {
-      setLoadingMore(true);
-    } else {
-      setLoading(true);
-      issueCursorRef.current = null;
-      setHasMoreInitialItems(false);
-      setUsingInitialLimit(!fullLoad);
-    }
-    setError(null);
-    try {
-      const session = await fetch("/api/admin-session", { cache: "no-store" });
-      if (session.status === 401) {
-        window.location.href = "/admin/login";
-        return;
-      }
-
-      const issueConstraints = fullLoad
-        ? [where("status", "in", ["aberta", "concluida", "resolvida"])]
-        : append && issueCursorRef.current
-          ? [
-              where("status", "in", ["aberta", "concluida", "resolvida"]),
-              orderBy("updatedAt", "desc"),
-              startAfter(issueCursorRef.current),
-              limit(PAGE_SIZE),
-            ]
-          : [
-              where("status", "in", ["aberta", "concluida", "resolvida"]),
-              orderBy("updatedAt", "desc"),
-              limit(PAGE_SIZE),
-            ];
-
-      const [machinesSnap, templatesSnap, issuesSnap] = await Promise.all([
+  const buildItemsFromIssueDocs = useCallback(
+    async (issueDocs: QueryDocumentSnapshot<DocumentData>[]) => {
+      const [machinesSnap, templatesSnap] = await Promise.all([
         getDocs(collection(firebaseDb, "machines")),
         getDocs(collection(firebaseDb, "templates")),
-        getDocs(query(collection(firebaseDb, "issues"), ...issueConstraints)),
       ]);
 
-      const machineOptions: MachineOption[] = machinesSnap.docs.map(docSnap => {
-        const data = docSnap.data() ?? {};
-        return {
-          id: docSnap.id,
-          nome: typeof data.nome === "string" ? data.nome : docSnap.id,
-          tag: data.tag ? String(data.tag) : null,
-          templateId: typeof data.templateId === "string" ? data.templateId : null,
-          ativo: data.ativo !== false,
-        } satisfies MachineOption;
-      });
-      const machinesById = new Map(machineOptions.map(machine => [machine.id, machine]));
+      const machineOptions: MachineOption[] = machinesSnap.docs.map(
+        (docSnap) => {
+          const data = docSnap.data() ?? {};
+          return {
+            id: docSnap.id,
+            nome: typeof data.nome === "string" ? data.nome : docSnap.id,
+            tag: data.tag ? String(data.tag) : null,
+            templateId:
+              typeof data.templateId === "string" ? data.templateId : null,
+            ativo: data.ativo !== false,
+          } satisfies MachineOption;
+        },
+      );
+      const machinesById = new Map(
+        machineOptions.map((machine) => [machine.id, machine]),
+      );
 
       const templateMap = new Map<string, TemplateMeta>();
-      templatesSnap.docs.forEach(docSnap => {
+      templatesSnap.docs.forEach((docSnap) => {
         const data = docSnap.data() ?? {};
-        const itens = Array.isArray(data.itens) ? (data.itens as TemplateItemData[]) : [];
+        const itens = Array.isArray(data.itens)
+          ? (data.itens as TemplateItemData[])
+          : [];
         const itensMap = new Map<string, TemplateItemData>();
-        itens.forEach(item => {
+        itens.forEach((item) => {
           if (item?.id) {
             itensMap.set(String(item.id), item);
           }
@@ -363,41 +385,69 @@ export default function AdminNonConformitiesPage() {
 
       const sourceInspectionIds = Array.from(
         new Set(
-          issuesSnap.docs
-            .flatMap(issueDoc => {
-              const issueData = issueDoc.data() ?? {};
-              return [issueData.abertaEmInspecaoId, issueData.ultimaReincidenciaInspecaoId]
-                .filter((value): value is string => typeof value === "string" && value.trim().length > 0);
-            })
-        )
+          issueDocs.flatMap((issueDoc) => {
+            const issueData = issueDoc.data() ?? {};
+            return [
+              issueData.abertaEmInspecaoId,
+              issueData.ultimaReincidenciaInspecaoId,
+            ].filter(
+              (value): value is string =>
+                typeof value === "string" && value.trim().length > 0,
+            );
+          }),
+        ),
       );
 
       const sourceInspectionEntries = await Promise.all(
-        sourceInspectionIds.map(async inspectionId => {
-          const inspectionRef = doc(collection(firebaseDb, "inspecoes"), inspectionId);
+        sourceInspectionIds.map(async (inspectionId) => {
+          const inspectionRef = doc(
+            collection(firebaseDb, "inspecoes"),
+            inspectionId,
+          );
           const inspectionSnap = await getDoc(inspectionRef);
           if (!inspectionSnap.exists()) {
             return [inspectionId, null] as const;
           }
 
           const inspectionData = inspectionSnap.data() ?? {};
-          const machine = (inspectionData.machine ?? {}) as Record<string, unknown>;
-          const maintainer = (inspectionData.maintainer ?? {}) as Record<string, unknown>;
-          const templateInfo = (inspectionData.template ?? {}) as Record<string, unknown>;
+          const machine = (inspectionData.machine ?? {}) as Record<
+            string,
+            unknown
+          >;
+          const maintainer = (inspectionData.maintainer ?? {}) as Record<
+            string,
+            unknown
+          >;
+          const templateInfo = (inspectionData.template ?? {}) as Record<
+            string,
+            unknown
+          >;
           const templateId =
             typeof templateInfo.id === "string"
               ? templateInfo.id
               : typeof machine.templateId === "string"
-              ? machine.templateId
-              : null;
-          const templateMeta = templateId ? templateMap.get(templateId) : undefined;
-          const answers = normalizeAnswers(inspectionData, templateMeta?.itensMap ?? new Map());
-          const answersMap = new Map(answers.map(answer => [answer.questionId, answer]));
-          const treatments = Array.isArray(inspectionData.nonConformityTreatments)
+                ? machine.templateId
+                : null;
+          const templateMeta = templateId
+            ? templateMap.get(templateId)
+            : undefined;
+          const answers = normalizeAnswers(
+            inspectionData,
+            templateMeta?.itensMap ?? new Map(),
+          );
+          const answersMap = new Map(
+            answers.map((answer) => [answer.questionId, answer]),
+          );
+          const treatments = Array.isArray(
+            inspectionData.nonConformityTreatments,
+          )
             ? (inspectionData.nonConformityTreatments as ChecklistNonConformityTreatment[])
             : [];
-          const treatmentMap = new Map<string, ChecklistNonConformityTreatment>();
-          treatments.forEach(treatment => {
+          const treatmentMap = new Map<
+            string,
+            ChecklistNonConformityTreatment
+          >();
+          treatments.forEach((treatment) => {
             if (treatment?.questionId) {
               treatmentMap.set(treatment.questionId, treatment);
             }
@@ -410,35 +460,46 @@ export default function AdminNonConformitiesPage() {
                 typeof machine.machineId === "string"
                   ? machine.machineId
                   : typeof machine.id === "string"
-                  ? machine.id
-                  : null,
+                    ? machine.id
+                    : null,
               machineLabel: buildMachineLabel(machine),
               machineTag: typeof machine.tag === "string" ? machine.tag : null,
               templateId,
               templateLabel:
                 templateMeta?.nome ??
-                (typeof templateInfo.nome === "string" ? String(templateInfo.nome) : "Template"),
+                (typeof templateInfo.nome === "string"
+                  ? String(templateInfo.nome)
+                  : "Template"),
               templateVersion:
                 templateMeta?.versao ??
-                (typeof templateInfo.versao === "string" ? String(templateInfo.versao) : null),
+                (typeof templateInfo.versao === "string"
+                  ? String(templateInfo.versao)
+                  : null),
               checklistDate:
                 typeof inspectionData.createdAt === "string"
                   ? inspectionData.createdAt
                   : typeof inspectionData.finalizadaEm === "string"
-                  ? inspectionData.finalizadaEm
+                    ? inspectionData.finalizadaEm
+                    : null,
+              operatorNome:
+                typeof maintainer.nome === "string" ? maintainer.nome : null,
+              operatorMatricula:
+                typeof maintainer.matricula === "string"
+                  ? maintainer.matricula
                   : null,
-              operatorNome: typeof maintainer.nome === "string" ? maintainer.nome : null,
-              operatorMatricula: typeof maintainer.matricula === "string" ? maintainer.matricula : null,
               treatments,
               treatmentMap,
               answersMap,
             } satisfies SourceInspectionData,
           ] as const;
-        })
+        }),
       );
 
       const sourceInspectionMap = new Map<string, SourceInspectionData>();
-      const treatmentsRecord: Record<string, ChecklistNonConformityTreatment[]> = {};
+      const treatmentsRecord: Record<
+        string,
+        ChecklistNonConformityTreatment[]
+      > = {};
       sourceInspectionEntries.forEach(([inspectionId, inspectionData]) => {
         if (!inspectionData) return;
         sourceInspectionMap.set(inspectionId, inspectionData);
@@ -446,21 +507,37 @@ export default function AdminNonConformitiesPage() {
       });
 
       const builtItems: NonConformityItem[] = [];
-      issuesSnap.docs.forEach(issueDoc => {
+      issueDocs.forEach((issueDoc) => {
         const issueData = issueDoc.data() ?? {};
-        const machineId = typeof issueData.machineId === "string" ? issueData.machineId : null;
-        const questionId = typeof issueData.templateItemId === "string" ? issueData.templateItemId : null;
+        const machineId =
+          typeof issueData.machineId === "string" ? issueData.machineId : null;
+        const questionId =
+          typeof issueData.templateItemId === "string"
+            ? issueData.templateItemId
+            : null;
         if (!questionId) return;
 
         const responseId =
-          typeof issueData.abertaEmInspecaoId === "string" ? issueData.abertaEmInspecaoId : null;
+          typeof issueData.abertaEmInspecaoId === "string"
+            ? issueData.abertaEmInspecaoId
+            : null;
         const latestOccurrenceId =
-          typeof issueData.ultimaReincidenciaInspecaoId === "string" ? issueData.ultimaReincidenciaInspecaoId : responseId;
-        const sourceInspection = latestOccurrenceId ? sourceInspectionMap.get(latestOccurrenceId) : undefined;
-        const machineOption = machineId ? machinesById.get(machineId) : undefined;
-        const issueTag = typeof issueData.tag === "string" ? issueData.tag : null;
-        const templateId = sourceInspection?.templateId ?? machineOption?.templateId ?? null;
-        const templateMeta = templateId ? templateMap.get(templateId) : undefined;
+          typeof issueData.ultimaReincidenciaInspecaoId === "string"
+            ? issueData.ultimaReincidenciaInspecaoId
+            : responseId;
+        const sourceInspection = latestOccurrenceId
+          ? sourceInspectionMap.get(latestOccurrenceId)
+          : undefined;
+        const machineOption = machineId
+          ? machinesById.get(machineId)
+          : undefined;
+        const issueTag =
+          typeof issueData.tag === "string" ? issueData.tag : null;
+        const templateId =
+          sourceInspection?.templateId ?? machineOption?.templateId ?? null;
+        const templateMeta = templateId
+          ? templateMap.get(templateId)
+          : undefined;
         const templateItem = templateMeta?.itensMap.get(questionId);
         const answerData = sourceInspection?.answersMap.get(questionId);
 
@@ -473,24 +550,28 @@ export default function AdminNonConformitiesPage() {
           issueData.status === "resolvida"
             ? "resolvida"
             : issueData.status === "concluida"
-            ? "concluida"
-            : "aberta";
-        const statusFromTreatment = normalizeStatus(rawIssueTreatment?.status ?? sourceTreatment?.status);
+              ? "concluida"
+              : "aberta";
+        const statusFromTreatment = normalizeStatus(
+          rawIssueTreatment?.status ?? sourceTreatment?.status,
+        );
         const status: NonConformityStatus =
-          issueStatus === "aberta" ? statusFromTreatment ?? "open" : "resolved";
+          issueStatus === "aberta"
+            ? (statusFromTreatment ?? "open")
+            : "resolved";
 
         const summaryValue =
           typeof rawIssueTreatment?.summary === "string"
             ? rawIssueTreatment.summary
-            : sourceTreatment?.summary ?? null;
+            : (sourceTreatment?.summary ?? null);
         const responsibleValue =
           typeof rawIssueTreatment?.responsible === "string"
             ? rawIssueTreatment.responsible
-            : sourceTreatment?.responsible ?? null;
+            : (sourceTreatment?.responsible ?? null);
         const dueDateIsoValue =
           typeof rawIssueTreatment?.dueDate === "string"
             ? rawIssueTreatment.dueDate
-            : sourceTreatment?.dueDate ?? null;
+            : (sourceTreatment?.dueDate ?? null);
         const updatedAtValue = resolveIssueLastActivityAt({
           issueData,
           rawIssueTreatment,
@@ -498,17 +579,24 @@ export default function AdminNonConformitiesPage() {
         });
 
         const rawResolution = issueData.maintainerResolution ?? null;
-        const maintainerResolution = rawResolution && typeof rawResolution === "object"
-          ? {
-              resolvedAt: rawResolution.resolvedAt ?? null,
-              resolvedByName: rawResolution.resolvedByName ?? null,
-              resolvedByMatricula: rawResolution.resolvedByMatricula ?? null,
-              description: typeof rawResolution.description === "string" ? rawResolution.description : "",
-              osNumero: rawResolution.osNumero ?? null,
-              inspecaoId: rawResolution.inspecaoId ?? null,
-            }
-          : null;
-        const reincidenciaCount = typeof issueData.reincidenciaCount === "number" ? issueData.reincidenciaCount : 0;
+        const maintainerResolution =
+          rawResolution && typeof rawResolution === "object"
+            ? {
+                resolvedAt: rawResolution.resolvedAt ?? null,
+                resolvedByName: rawResolution.resolvedByName ?? null,
+                resolvedByMatricula: rawResolution.resolvedByMatricula ?? null,
+                description:
+                  typeof rawResolution.description === "string"
+                    ? rawResolution.description
+                    : "",
+                osNumero: rawResolution.osNumero ?? null,
+                inspecaoId: rawResolution.inspecaoId ?? null,
+              }
+            : null;
+        const reincidenciaCount =
+          typeof issueData.reincidenciaCount === "number"
+            ? issueData.reincidenciaCount
+            : 0;
 
         builtItems.push({
           id: issueDoc.id,
@@ -516,11 +604,15 @@ export default function AdminNonConformitiesPage() {
           questionId,
           machineId: machineId ?? sourceInspection?.machineId ?? null,
           machineLabel:
-            sourceInspection?.machineLabel ?? buildMachineLabelFromOption(machineOption, issueTag),
-          machineTag: sourceInspection?.machineTag ?? machineOption?.tag ?? issueTag,
+            sourceInspection?.machineLabel ??
+            buildMachineLabelFromOption(machineOption, issueTag),
+          machineTag:
+            sourceInspection?.machineTag ?? machineOption?.tag ?? issueTag,
           templateId,
-          templateLabel: sourceInspection?.templateLabel ?? templateMeta?.nome ?? "Template",
-          templateVersion: sourceInspection?.templateVersion ?? templateMeta?.versao ?? null,
+          templateLabel:
+            sourceInspection?.templateLabel ?? templateMeta?.nome ?? "Template",
+          templateVersion:
+            sourceInspection?.templateVersion ?? templateMeta?.versao ?? null,
           questionText:
             answerData?.questionText ??
             templateItem?.oQueChecar ??
@@ -529,14 +621,19 @@ export default function AdminNonConformitiesPage() {
             `Item ${questionId}`,
           checklistDate:
             sourceInspection?.checklistDate ??
-            (typeof issueData.createdAt === "string" ? issueData.createdAt : null),
+            (typeof issueData.createdAt === "string"
+              ? issueData.createdAt
+              : null),
           operatorNome: sourceInspection?.operatorNome ?? null,
           operatorMatricula: sourceInspection?.operatorMatricula ?? null,
           observation:
             typeof issueData.descricao === "string"
               ? issueData.descricao
-              : answerData?.observation ?? null,
-          photos: mergeStoredImageCollections(issueData.fotos, answerData?.photoUrls),
+              : (answerData?.observation ?? null),
+          photos: mergeStoredImageCollections(
+            issueData.fotos,
+            answerData?.photoUrls,
+          ),
           itemOsNumero:
             answerData?.itemOsNumero ??
             normalizeOsNumero(issueData.osNumero) ??
@@ -554,48 +651,110 @@ export default function AdminNonConformitiesPage() {
         });
       });
 
-      setTreatmentsByResponse(prev => (append ? { ...prev, ...treatmentsRecord } : treatmentsRecord));
-      setItems(prev => {
-        const nextItems = sortByLastActivityDesc(builtItems);
-        if (!append) return nextItems;
-        const merged = new Map(prev.map(item => [item.id, item] as const));
-        nextItems.forEach(item => merged.set(item.id, item));
-        return sortByLastActivityDesc(Array.from(merged.values()));
-      });
-      issueCursorRef.current = issuesSnap.docs.at(-1) ?? null;
-      setHasMoreInitialItems(!fullLoad && issuesSnap.docs.length === PAGE_SIZE);
-    } catch (err: unknown) {
-      const message = err instanceof Error && err.message ? err.message : "Erro ao carregar dados";
-      setError(message);
-    } finally {
-      if (append) {
-        setLoadingMore(false);
-      } else {
+      return {
+        builtItems: sortByLastActivityDesc(builtItems),
+        treatmentsRecord,
+      };
+    },
+    [],
+  );
+
+  const loadData = useCallback(
+    async (mode: "reset" | "append" | "all" = "reset") => {
+      const isAppend = mode === "append";
+      const isAll = mode === "all";
+      if (isAppend) setLoadingMore(true);
+      else if (isAll) setLoadingAll(true);
+      else setLoading(true);
+      setError(null);
+      try {
+        const session = await fetch("/api/admin-session", {
+          cache: "no-store",
+        });
+        if (session.status === 401) {
+          window.location.href = "/admin/login";
+          return;
+        }
+
+        const loadedDocs: QueryDocumentSnapshot<DocumentData>[] = [];
+        let cursor = isAppend || isAll ? issueCursor : null;
+        let lastBatchSize = 0;
+
+        do {
+          const issuesQuery = cursor
+            ? query(
+                collection(firebaseDb, "issues"),
+                orderBy("updatedAt", "desc"),
+                startAfter(cursor),
+                limit(PAGE_SIZE),
+              )
+            : query(
+                collection(firebaseDb, "issues"),
+                orderBy("updatedAt", "desc"),
+                limit(PAGE_SIZE),
+              );
+          const issuesSnap = await getDocs(issuesQuery);
+          loadedDocs.push(...issuesSnap.docs);
+          lastBatchSize = issuesSnap.docs.length;
+          cursor = issuesSnap.docs.at(-1) ?? cursor;
+        } while (isAll && lastBatchSize === PAGE_SIZE);
+
+        const { builtItems, treatmentsRecord } =
+          await buildItemsFromIssueDocs(loadedDocs);
+        setTreatmentsByResponse((prev) =>
+          isAppend || isAll
+            ? { ...prev, ...treatmentsRecord }
+            : treatmentsRecord,
+        );
+        setItems((prev) => {
+          const nextItems =
+            isAppend || isAll ? [...prev, ...builtItems] : builtItems;
+          return sortByLastActivityDesc(
+            Array.from(
+              new Map(nextItems.map((item) => [item.id, item])).values(),
+            ),
+          );
+        });
+        setIssueCursor(cursor);
+        setHasMoreIssues(lastBatchSize === PAGE_SIZE);
+      } catch (err: unknown) {
+        const message =
+          err instanceof Error && err.message
+            ? err.message
+            : "Erro ao carregar dados";
+        setError(message);
+      } finally {
         setLoading(false);
+        setLoadingMore(false);
+        setLoadingAll(false);
       }
-    }
-  }, []);
+    },
+    [buildItemsFromIssueDocs, issueCursor],
+  );
 
   useEffect(() => {
-    loadData("initial");
+    loadData();
   }, [loadData]);
 
   useEffect(() => {
     setForceVisibleIds(new Set());
-    if (hasActiveFilter && usingInitialLimit) {
-      loadData("full");
-    }
-  }, [dueDateFilter, hasActiveFilter, loadData, machineFilter, maintainerFilter, statusFilter, usingInitialLimit]);
+  }, [
+    dueDateFilter,
+    hasActiveFilter,
+    machineFilter,
+    maintainerFilter,
+    statusFilter,
+  ]);
 
   const machineOptionsForFilter = useMemo(() => {
-    return Array.from(new Set(items.map(item => item.machineLabel.trim()).filter(Boolean))).sort((a, b) =>
-      a.localeCompare(b, "pt-BR")
-    );
+    return Array.from(
+      new Set(items.map((item) => item.machineLabel.trim()).filter(Boolean)),
+    ).sort((a, b) => a.localeCompare(b, "pt-BR"));
   }, [items]);
 
   const maintainerOptionsForFilter = useMemo(() => {
     const maintainers = new Map<string, string>();
-    items.forEach(item => {
+    items.forEach((item) => {
       const nome = item.operatorNome?.trim();
       if (!nome) return;
       const matricula = item.operatorMatricula?.trim();
@@ -609,7 +768,7 @@ export default function AdminNonConformitiesPage() {
 
   const filteredItems = useMemo(() => {
     const machineSearch = machineFilter.trim().toLowerCase();
-    const visibleItems = items.filter(item => {
+    const visibleItems = items.filter((item) => {
       if (forceVisibleIds.has(item.id)) {
         return true;
       }
@@ -629,10 +788,14 @@ export default function AdminNonConformitiesPage() {
         return false;
       }
       if (statusFilter === "planned") {
-        return Boolean(item.summary.trim() || item.responsible.trim() || item.dueDate);
+        return Boolean(
+          item.summary.trim() || item.responsible.trim() || item.dueDate,
+        );
       }
       if (statusFilter === "unplanned") {
-        return !Boolean(item.summary.trim() || item.responsible.trim() || item.dueDate);
+        return !Boolean(
+          item.summary.trim() || item.responsible.trim() || item.dueDate,
+        );
       }
       if (statusFilter === "all") {
         return true;
@@ -648,28 +811,49 @@ export default function AdminNonConformitiesPage() {
     }
 
     return visibleItems;
-  }, [items, machineFilter, maintainerFilter, statusFilter, dueDateFilter, forceVisibleIds]);
+  }, [
+    items,
+    machineFilter,
+    maintainerFilter,
+    statusFilter,
+    dueDateFilter,
+    forceVisibleIds,
+  ]);
 
   const keepItemVisibleInCurrentFilter = useCallback((id: string) => {
-    setForceVisibleIds(prev => new Set(prev).add(id));
+    setForceVisibleIds((prev) => new Set(prev).add(id));
   }, []);
 
-  const handleUpdateItem = useCallback((id: string, updates: Partial<NonConformityItem>) => {
-    setForceVisibleIds(prev => new Set(prev).add(id));
-    setItems(prev => prev.map(item => (item.id === id ? { ...item, ...updates } : item)));
-  }, []);
+  const handleUpdateItem = useCallback(
+    (id: string, updates: Partial<NonConformityItem>) => {
+      setForceVisibleIds((prev) => new Set(prev).add(id));
+      setItems((prev) =>
+        prev.map((item) => (item.id === id ? { ...item, ...updates } : item)),
+      );
+    },
+    [],
+  );
 
   const handleSave = useCallback(
     async (item: NonConformityItem) => {
       setSavingId(item.id);
-      setFeedback(prev => ({ ...prev, [item.id]: { type: "success", message: "" } }));
+      setFeedback((prev) => ({
+        ...prev,
+        [item.id]: { type: "success", message: "" },
+      }));
       try {
-        const existing = item.responseId ? (treatmentsByResponse[item.responseId] ?? []) : [];
+        const existing = item.responseId
+          ? (treatmentsByResponse[item.responseId] ?? [])
+          : [];
         const nowIso = new Date().toISOString();
         const summary = item.summary.trim();
         const responsible = item.responsible.trim();
-        const dueDateIso = item.dueDate ? new Date(`${item.dueDate}T00:00:00`).toISOString() : null;
-        const existingTreatment = existing.find(t => t.questionId === item.questionId);
+        const dueDateIso = item.dueDate
+          ? new Date(`${item.dueDate}T00:00:00`).toISOString()
+          : null;
+        const existingTreatment = existing.find(
+          (t) => t.questionId === item.questionId,
+        );
 
         const updatedTreatment: ChecklistNonConformityTreatment = {
           questionId: item.questionId,
@@ -684,14 +868,20 @@ export default function AdminNonConformitiesPage() {
         if (item.responseId) {
           const responseId = item.responseId;
           const nextTreatments = [
-            ...existing.filter(t => t.questionId !== item.questionId),
+            ...existing.filter((t) => t.questionId !== item.questionId),
             updatedTreatment,
           ];
-          await updateDoc(doc(collection(firebaseDb, "inspecoes"), responseId), {
-            nonConformityTreatments: nextTreatments,
-            updatedAt: nowIso,
-          });
-          setTreatmentsByResponse(prev => ({ ...prev, [responseId]: nextTreatments }));
+          await updateDoc(
+            doc(collection(firebaseDb, "inspecoes"), responseId),
+            {
+              nonConformityTreatments: nextTreatments,
+              updatedAt: nowIso,
+            },
+          );
+          setTreatmentsByResponse((prev) => ({
+            ...prev,
+            [responseId]: nextTreatments,
+          }));
         }
 
         const issueUpdatePayload: Record<string, unknown> = {
@@ -699,7 +889,8 @@ export default function AdminNonConformitiesPage() {
           updatedAt: nowIso,
         };
         if (item.status === "resolved") {
-          const resolvedIssueStatus = item.issueStatus === "resolvida" ? "resolvida" : "concluida";
+          const resolvedIssueStatus =
+            item.issueStatus === "resolvida" ? "resolvida" : "concluida";
           issueUpdatePayload.status = resolvedIssueStatus;
           if (resolvedIssueStatus === "concluida") {
             issueUpdatePayload.concluidaEm = nowIso;
@@ -710,7 +901,10 @@ export default function AdminNonConformitiesPage() {
           issueUpdatePayload.concluidaEm = deleteField();
           issueUpdatePayload.concluidaPorTratativa = deleteField();
         }
-        await updateDoc(doc(collection(firebaseDb, "issues"), item.id), issueUpdatePayload);
+        await updateDoc(
+          doc(collection(firebaseDb, "issues"), item.id),
+          issueUpdatePayload,
+        );
 
         handleUpdateItem(item.id, {
           summary,
@@ -718,22 +912,35 @@ export default function AdminNonConformitiesPage() {
           dueDate: item.dueDate,
           dueDateIso,
           status: item.status,
-          issueStatus: item.status === "resolved"
-            ? item.issueStatus === "resolvida"
-              ? "resolvida"
-              : "concluida"
-            : "aberta",
+          issueStatus:
+            item.status === "resolved"
+              ? item.issueStatus === "resolvida"
+                ? "resolvida"
+                : "concluida"
+              : "aberta",
           updatedAt: nowIso,
         });
-        setFeedback(prev => ({ ...prev, [item.id]: { type: "success", message: "Tratativa salva com sucesso" } }));
+        setFeedback((prev) => ({
+          ...prev,
+          [item.id]: {
+            type: "success",
+            message: "Tratativa salva com sucesso",
+          },
+        }));
       } catch (err: unknown) {
-        const message = err instanceof Error && err.message ? err.message : "Erro ao salvar tratativa";
-        setFeedback(prev => ({ ...prev, [item.id]: { type: "error", message } }));
+        const message =
+          err instanceof Error && err.message
+            ? err.message
+            : "Erro ao salvar tratativa";
+        setFeedback((prev) => ({
+          ...prev,
+          [item.id]: { type: "error", message },
+        }));
       } finally {
         setSavingId(null);
       }
     },
-    [handleUpdateItem, treatmentsByResponse]
+    [handleUpdateItem, treatmentsByResponse],
   );
 
   const handleStatusClick = useCallback(
@@ -743,12 +950,12 @@ export default function AdminNonConformitiesPage() {
       handleUpdateItem(item.id, { status });
       await handleSave(updatedItem);
     },
-    [handleSave, handleUpdateItem, keepItemVisibleInCurrentFilter]
+    [handleSave, handleUpdateItem, keepItemVisibleInCurrentFilter],
   );
 
   const handleBulkStatusChange = useCallback(
     async (status: NonConformityStatus) => {
-      const targetItems = items.filter(item => selectedIds.includes(item.id));
+      const targetItems = items.filter((item) => selectedIds.includes(item.id));
       if (targetItems.length === 0) return;
 
       setBulkSaving(true);
@@ -763,22 +970,32 @@ export default function AdminNonConformitiesPage() {
         setBulkSaving(false);
       }
     },
-    [handleSave, handleUpdateItem, items, keepItemVisibleInCurrentFilter, selectedIds]
+    [
+      handleSave,
+      handleUpdateItem,
+      items,
+      keepItemVisibleInCurrentFilter,
+      selectedIds,
+    ],
   );
 
   const handleToggleItemSelection = useCallback((id: string) => {
-    setSelectedIds(prev =>
-      prev.includes(id) ? prev.filter(itemId => itemId !== id) : [...prev, id]
+    setSelectedIds((prev) =>
+      prev.includes(id)
+        ? prev.filter((itemId) => itemId !== id)
+        : [...prev, id],
     );
   }, []);
 
   const handleToggleAllVisible = useCallback(() => {
-    const visibleIds = filteredItems.map(item => item.id);
-    const allSelected = visibleIds.length > 0 && visibleIds.every(id => selectedIds.includes(id));
+    const visibleIds = filteredItems.map((item) => item.id);
+    const allSelected =
+      visibleIds.length > 0 &&
+      visibleIds.every((id) => selectedIds.includes(id));
 
-    setSelectedIds(prev => {
+    setSelectedIds((prev) => {
       if (allSelected) {
-        return prev.filter(id => !visibleIds.includes(id));
+        return prev.filter((id) => !visibleIds.includes(id));
       }
       const merged = new Set([...prev, ...visibleIds]);
       return Array.from(merged);
@@ -786,7 +1003,7 @@ export default function AdminNonConformitiesPage() {
   }, [filteredItems, selectedIds]);
 
   const handleToggleResolution = useCallback((itemId: string) => {
-    setExpandedResolutions(prev => {
+    setExpandedResolutions((prev) => {
       const next = new Set(prev);
       if (next.has(itemId)) {
         next.delete(itemId);
@@ -802,51 +1019,68 @@ export default function AdminNonConformitiesPage() {
 
     setDeletingId(deleteDialogItem.id);
     try {
-      const response = await fetch(`/api/admin/nc/${deleteDialogItem.id}`, { method: "DELETE" });
+      const response = await fetch(`/api/admin/nc/${deleteDialogItem.id}`, {
+        method: "DELETE",
+      });
       if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        const payload = (await response.json().catch(() => null)) as {
+          error?: string;
+        } | null;
         throw new Error(payload?.error || "Erro ao excluir não conformidade");
       }
 
-      setItems(prev => prev.filter(item => item.id !== deleteDialogItem.id));
-      setSelectedIds(prev => prev.filter(id => id !== deleteDialogItem.id));
-      setForceVisibleIds(prev => {
+      setItems((prev) =>
+        prev.filter((item) => item.id !== deleteDialogItem.id),
+      );
+      setSelectedIds((prev) => prev.filter((id) => id !== deleteDialogItem.id));
+      setForceVisibleIds((prev) => {
         const next = new Set(prev);
         next.delete(deleteDialogItem.id);
         return next;
       });
-      setFeedback(prev => {
+      setFeedback((prev) => {
         const next = { ...prev };
         delete next[deleteDialogItem.id];
         return next;
       });
       setDeleteDialogItem(null);
     } catch (err: unknown) {
-      const message = err instanceof Error && err.message ? err.message : "Erro ao excluir não conformidade";
-      setFeedback(prev => ({ ...prev, [deleteDialogItem.id]: { type: "error", message } }));
+      const message =
+        err instanceof Error && err.message
+          ? err.message
+          : "Erro ao excluir não conformidade";
+      setFeedback((prev) => ({
+        ...prev,
+        [deleteDialogItem.id]: { type: "error", message },
+      }));
     } finally {
       setDeletingId(null);
     }
   }, [deleteDialogItem]);
 
   const allVisibleSelected =
-    filteredItems.length > 0 && filteredItems.every(item => selectedIds.includes(item.id));
+    filteredItems.length > 0 &&
+    filteredItems.every((item) => selectedIds.includes(item.id));
   const selectedCount = selectedIds.length;
-  const canLoadMoreInitialItems = usingInitialLimit && hasMoreInitialItems;
+  const canLoadMoreInitialItems = hasMoreIssues;
 
   if (loading) {
     return (
       <div className="max-w-7xl mx-auto space-y-6 p-6">
         <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-2xl font-semibold text-[var(--text)]">Não conformidades</h1>
-            <p className="text-sm text-[var(--muted)]">Visualize e trate as respostas marcadas como NC.</p>
+            <h1 className="text-2xl font-semibold text-[var(--text)]">
+              Não conformidades
+            </h1>
+            <p className="text-sm text-[var(--muted)]">
+              Visualize e trate as respostas marcadas como NC.
+            </p>
           </div>
           <Button variant="secondary" disabled>
             Recarregar
           </Button>
         </header>
-        {[0, 1, 2].map(key => (
+        {[0, 1, 2].map((key) => (
           <Card key={key}>
             <CardHeader>
               <Skeleton className="h-6 w-1/3" />
@@ -867,10 +1101,14 @@ export default function AdminNonConformitiesPage() {
       <div className="max-w-4xl mx-auto space-y-6 p-6">
         <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-2xl font-semibold text-[var(--text)]">Não conformidades</h1>
-            <p className="text-sm text-[var(--muted)]">Visualize e trate as respostas marcadas como NC.</p>
+            <h1 className="text-2xl font-semibold text-[var(--text)]">
+              Não conformidades
+            </h1>
+            <p className="text-sm text-[var(--muted)]">
+              Visualize e trate as respostas marcadas como NC.
+            </p>
           </div>
-          <Button variant="secondary" onClick={() => loadData(hasActiveFilter ? "full" : "initial")}>
+          <Button variant="secondary" onClick={() => loadData("reset")}>
             Recarregar
           </Button>
         </header>
@@ -885,17 +1123,24 @@ export default function AdminNonConformitiesPage() {
     <div className="max-w-7xl mx-auto space-y-6 p-6">
       <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-[var(--text)]">Não conformidades</h1>
-          <p className="text-sm text-[var(--muted)]">Somente respostas &quot;NC&quot; aparecem nesta lista para tratativa.</p>
+          <h1 className="text-2xl font-semibold text-[var(--text)]">
+            Não conformidades
+          </h1>
+          <p className="text-sm text-[var(--muted)]">
+            Somente respostas &quot;NC&quot; aparecem nesta lista para
+            tratativa.
+          </p>
         </div>
-        <Button variant="secondary" onClick={() => loadData(hasActiveFilter ? "full" : "initial")}>
+        <Button variant="secondary" onClick={() => loadData("reset")}>
           Recarregar
         </Button>
       </header>
 
       <Card>
         <CardHeader className="pb-4">
-          <CardTitle className="text-base text-[var(--text)]">Filtros</CardTitle>
+          <CardTitle className="text-base text-[var(--text)]">
+            Filtros
+          </CardTitle>
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-4">
           <label className="space-y-1 text-sm">
@@ -903,21 +1148,24 @@ export default function AdminNonConformitiesPage() {
             <Input
               type="text"
               value={machineFilter}
-              onChange={event => setMachineFilter(event.target.value)}
+              onChange={(event) => setMachineFilter(event.target.value)}
               list="machine-filter-options"
               placeholder="Digite nome, tag ou ID"
             />
             <datalist id="machine-filter-options">
-              {machineOptionsForFilter.map(option => (
+              {machineOptionsForFilter.map((option) => (
                 <option key={option} value={option} />
               ))}
             </datalist>
           </label>
           <label className="space-y-1 text-sm">
             <span className="text-[var(--muted)]">Mantenedor</span>
-            <Select value={maintainerFilter} onChange={event => setMaintainerFilter(event.target.value)}>
+            <Select
+              value={maintainerFilter}
+              onChange={(event) => setMaintainerFilter(event.target.value)}
+            >
               <option value="">Todos</option>
-              {maintainerOptionsForFilter.map(option => (
+              {maintainerOptionsForFilter.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>
@@ -926,18 +1174,26 @@ export default function AdminNonConformitiesPage() {
           </label>
           <label className="space-y-1 text-sm">
             <span className="text-[var(--muted)]">Status</span>
-            <Select value={statusFilter} onChange={event => setStatusFilter(event.target.value)}>
+            <Select
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value)}
+            >
               <option value="planned">Com tratativa planejada</option>
               <option value="unplanned">Sem tratativa planejada</option>
               <option value="all">Todos</option>
               <option value="open">Abertas</option>
               <option value="resolved">Resolvidas</option>
-              <option value="maintainer_resolved">Realizado pelo mantenedor</option>
+              <option value="maintainer_resolved">
+                Realizado pelo mantenedor
+              </option>
             </Select>
           </label>
           <label className="space-y-1 text-sm">
             <span className="text-[var(--muted)]">Data de vencimento</span>
-            <Select value={dueDateFilter} onChange={event => setDueDateFilter(event.target.value)}>
+            <Select
+              value={dueDateFilter}
+              onChange={(event) => setDueDateFilter(event.target.value)}
+            >
               <option value="default">Padrão: atividade mais recente</option>
               <option value="oldest_first">Mais antigo para mais novo</option>
             </Select>
@@ -956,7 +1212,9 @@ export default function AdminNonConformitiesPage() {
                 onChange={handleToggleAllVisible}
               />
               <div className="leading-tight">
-                <div>Selecionar todas as {filteredItems.length} NC exibidas</div>
+                <div>
+                  Selecionar todas as {filteredItems.length} NC exibidas
+                </div>
                 <div className="text-[var(--muted)]">
                   {selectedCount} selecionada{selectedCount === 1 ? "" : "s"}
                 </div>
@@ -999,22 +1257,31 @@ export default function AdminNonConformitiesPage() {
             description="Ajuste os filtros ou aguarde novas inspeções com NC registradas."
           />
           {canLoadMoreInitialItems ? (
-            <div className="flex justify-center">
+            <div className="flex flex-wrap justify-center gap-3">
               <Button
                 type="button"
                 variant="outline"
                 onClick={() => loadData("append")}
-                disabled={loadingMore}
+                disabled={loadingMore || loadingAll}
                 loading={loadingMore}
               >
                 Carregar mais 20 NC
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => loadData("all")}
+                disabled={loadingMore || loadingAll}
+                loading={loadingAll}
+              >
+                Carregar todas
               </Button>
             </div>
           ) : null}
         </div>
       ) : (
         <div className="space-y-6">
-          {filteredItems.map(item => {
+          {filteredItems.map((item) => {
             const itemFeedback = feedback[item.id];
             const hasMaintainerResolution = item.maintainerResolution != null;
             const reincidenciaCount = item.reincidenciaCount;
@@ -1034,13 +1301,27 @@ export default function AdminNonConformitiesPage() {
                         <div className="flex flex-wrap items-center gap-3">
                           {renderStatusBadge(item.status)}
                           {reincidenciaCount > 0 && (
-                            <Badge variant="danger">{"REINCID\u00caNCIA H\u00c1: " + reincidenciaCount + (reincidenciaCount === 1 ? " INSPE\u00c7\u00c3O" : " INSPE\u00c7\u00d5ES")}</Badge>
+                            <Badge variant="danger">
+                              {"REINCID\u00caNCIA H\u00c1: " +
+                                reincidenciaCount +
+                                (reincidenciaCount === 1
+                                  ? " INSPE\u00c7\u00c3O"
+                                  : " INSPE\u00c7\u00d5ES")}
+                            </Badge>
                           )}
                           {hasMaintainerResolution && (
-                            <Badge variant="info">REALIZADO PELO MANTENEDOR</Badge>
+                            <Badge variant="info">
+                              REALIZADO PELO MANTENEDOR
+                            </Badge>
                           )}
-                          {item.recurrence && !reincidenciaCount && <Badge variant="warning">Reincid\u00eancia</Badge>}
-                          {item.templateVersion && <Badge variant="muted">Versão {item.templateVersion}</Badge>}
+                          {item.recurrence && !reincidenciaCount && (
+                            <Badge variant="warning">Reincid\u00eancia</Badge>
+                          )}
+                          {item.templateVersion && (
+                            <Badge variant="muted">
+                              Versão {item.templateVersion}
+                            </Badge>
+                          )}
                         </div>
                         {hasMaintainerResolution && (
                           <div className="space-y-2">
@@ -1049,58 +1330,88 @@ export default function AdminNonConformitiesPage() {
                               onClick={() => handleToggleResolution(item.id)}
                               className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-800 transition"
                             >
-                              {isResolutionExpanded ? "Fechar detalhes" : "Ver detalhes da resolução do mantenedor"}
-                              <span className="text-[10px]">{isResolutionExpanded ? "\u25B2" : "\u25BC"}</span>
+                              {isResolutionExpanded
+                                ? "Fechar detalhes"
+                                : "Ver detalhes da resolução do mantenedor"}
+                              <span className="text-[10px]">
+                                {isResolutionExpanded ? "\u25B2" : "\u25BC"}
+                              </span>
                             </button>
-                            {isResolutionExpanded && item.maintainerResolution && (
-                              <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900 space-y-1">
-                                {item.maintainerResolution.resolvedAt && (
-                                  <p>
-                                    <span className="font-semibold">Realizado em:</span>{" "}
-                                    {formatDateTime(item.maintainerResolution.resolvedAt)}
-                                  </p>
-                                )}
-                                {item.maintainerResolution.resolvedByName && (
-                                  <p>
-                                    <span className="font-semibold">Mantenedor:</span>{" "}
-                                    {item.maintainerResolution.resolvedByName}
-                                    {item.maintainerResolution.resolvedByMatricula
-                                      ? ` (mat. ${item.maintainerResolution.resolvedByMatricula})`
-                                      : ""}
-                                  </p>
-                                )}
-                                {item.maintainerResolution.description && (
-                                  <p>
-                                    <span className="font-semibold">Descrição:</span>{" "}
-                                    {item.maintainerResolution.description}
-                                  </p>
-                                )}
-                                {item.maintainerResolution.osNumero && (
-                                  <p>
-                                    <span className="font-semibold">Nº da O.S.:</span>{" "}
-                                    {item.maintainerResolution.osNumero}
-                                  </p>
-                                )}
-                              </div>
-                            )}
+                            {isResolutionExpanded &&
+                              item.maintainerResolution && (
+                                <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900 space-y-1">
+                                  {item.maintainerResolution.resolvedAt && (
+                                    <p>
+                                      <span className="font-semibold">
+                                        Realizado em:
+                                      </span>{" "}
+                                      {formatDateTime(
+                                        item.maintainerResolution.resolvedAt,
+                                      )}
+                                    </p>
+                                  )}
+                                  {item.maintainerResolution.resolvedByName && (
+                                    <p>
+                                      <span className="font-semibold">
+                                        Mantenedor:
+                                      </span>{" "}
+                                      {item.maintainerResolution.resolvedByName}
+                                      {item.maintainerResolution
+                                        .resolvedByMatricula
+                                        ? ` (mat. ${item.maintainerResolution.resolvedByMatricula})`
+                                        : ""}
+                                    </p>
+                                  )}
+                                  {item.maintainerResolution.description && (
+                                    <p>
+                                      <span className="font-semibold">
+                                        Descrição:
+                                      </span>{" "}
+                                      {item.maintainerResolution.description}
+                                    </p>
+                                  )}
+                                  {item.maintainerResolution.osNumero && (
+                                    <p>
+                                      <span className="font-semibold">
+                                        Nº da O.S.:
+                                      </span>{" "}
+                                      {item.maintainerResolution.osNumero}
+                                    </p>
+                                  )}
+                                </div>
+                              )}
                           </div>
                         )}
                         <div className="space-y-1">
-                          <CardTitle className="text-lg text-[var(--text)]">{item.questionText}</CardTitle>
+                          <CardTitle className="text-lg text-[var(--text)]">
+                            {item.questionText}
+                          </CardTitle>
                           <p className="text-sm text-[var(--muted)]">
-                            Checklist em {formatDateTime(item.checklistDate)} — {item.templateLabel}
+                            Checklist em {formatDateTime(item.checklistDate)} —{" "}
+                            {item.templateLabel}
                           </p>
                         </div>
                         <div className="grid gap-2 text-sm text-[var(--muted)] md:grid-cols-2">
                           <div>
-                            <span className="font-medium text-[var(--text)]">Máquina:</span> {item.machineLabel}
+                            <span className="font-medium text-[var(--text)]">
+                              Máquina:
+                            </span>{" "}
+                            {item.machineLabel}
                           </div>
                           <div>
-                            <span className="font-medium text-[var(--text)]">Operador:</span> {item.operatorNome || "-"}
-                            {item.operatorMatricula ? ` (${item.operatorMatricula})` : ""}
+                            <span className="font-medium text-[var(--text)]">
+                              Operador:
+                            </span>{" "}
+                            {item.operatorNome || "-"}
+                            {item.operatorMatricula
+                              ? ` (${item.operatorMatricula})`
+                              : ""}
                           </div>
                           <div className="md:col-span-2">
-                            <span className="font-medium text-[var(--text)]">Nº da O.S. do item:</span> {item.itemOsNumero ?? "-"}
+                            <span className="font-medium text-[var(--text)]">
+                              Nº da O.S. do item:
+                            </span>{" "}
+                            {item.itemOsNumero ?? "-"}
                           </div>
                         </div>
                       </div>
@@ -1109,7 +1420,9 @@ export default function AdminNonConformitiesPage() {
                   <CardContent className="space-y-6">
                     {item.observation && (
                       <section className="space-y-2">
-                        <h3 className="text-sm font-semibold text-[var(--text)]">Observações do operador</h3>
+                        <h3 className="text-sm font-semibold text-[var(--text)]">
+                          Observações do operador
+                        </h3>
                         <p className="rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-sm text-[var(--text)]">
                           {item.observation}
                         </p>
@@ -1118,7 +1431,9 @@ export default function AdminNonConformitiesPage() {
 
                     {item.photos.length > 0 && (
                       <section className="space-y-2">
-                        <h3 className="text-sm font-semibold text-[var(--text)]">Fotos</h3>
+                        <h3 className="text-sm font-semibold text-[var(--text)]">
+                          Fotos
+                        </h3>
                         <div className="flex flex-wrap gap-3">
                           {item.photos.map((photo, index) => (
                             <a
@@ -1144,18 +1459,30 @@ export default function AdminNonConformitiesPage() {
                     )}
 
                     <section className="space-y-3">
-                      <h3 className="text-sm font-semibold text-[var(--text)]">Tratativa planejada</h3>
+                      <h3 className="text-sm font-semibold text-[var(--text)]">
+                        Tratativa planejada
+                      </h3>
                       <Textarea
                         value={item.summary}
-                        onChange={event => handleUpdateItem(item.id, { summary: event.target.value })}
+                        onChange={(event) =>
+                          handleUpdateItem(item.id, {
+                            summary: event.target.value,
+                          })
+                        }
                         placeholder="Descreva a tratativa planejada"
                       />
                       <div className="grid gap-4 md:grid-cols-3">
                         <label className="space-y-1 text-sm">
-                          <span className="text-[var(--muted)]">Responsável</span>
+                          <span className="text-[var(--muted)]">
+                            Responsável
+                          </span>
                           <Input
                             value={item.responsible}
-                            onChange={event => handleUpdateItem(item.id, { responsible: event.target.value })}
+                            onChange={(event) =>
+                              handleUpdateItem(item.id, {
+                                responsible: event.target.value,
+                              })
+                            }
                             placeholder="Nome do responsável"
                           />
                         </label>
@@ -1164,18 +1491,28 @@ export default function AdminNonConformitiesPage() {
                           <Input
                             type="date"
                             value={item.dueDate}
-                            onChange={event => handleUpdateItem(item.id, { dueDate: event.target.value })}
+                            onChange={(event) =>
+                              handleUpdateItem(item.id, {
+                                dueDate: event.target.value,
+                              })
+                            }
                           />
                         </label>
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        {STATUS_OPTIONS.map(option => (
+                        {STATUS_OPTIONS.map((option) => (
                           <Button
                             key={option.value}
                             type="button"
-                            variant={item.status === option.value ? "default" : "outline"}
+                            variant={
+                              item.status === option.value
+                                ? "default"
+                                : "outline"
+                            }
                             disabled={savingId === item.id || bulkSaving}
-                            onClick={() => handleStatusClick(item, option.value)}
+                            onClick={() =>
+                              handleStatusClick(item, option.value)
+                            }
                           >
                             {option.label}
                           </Button>
@@ -1185,14 +1522,20 @@ export default function AdminNonConformitiesPage() {
 
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                       <div className="text-sm text-[var(--muted)]">
-                        {item.updatedAt ? `Atualizado em ${formatDateTime(item.updatedAt)}` : "Tratativa ainda não salva"}
+                        {item.updatedAt
+                          ? `Atualizado em ${formatDateTime(item.updatedAt)}`
+                          : "Tratativa ainda não salva"}
                       </div>
                       <div className="flex items-center gap-3">
                         <Button
                           type="button"
                           variant="destructive"
                           onClick={() => setDeleteDialogItem(item)}
-                          disabled={savingId === item.id || bulkSaving || deletingId === item.id}
+                          disabled={
+                            savingId === item.id ||
+                            bulkSaving ||
+                            deletingId === item.id
+                          }
                         >
                           Excluir NC
                         </Button>
@@ -1222,15 +1565,24 @@ export default function AdminNonConformitiesPage() {
             );
           })}
           {canLoadMoreInitialItems ? (
-            <div className="flex justify-center pt-2">
+            <div className="flex flex-wrap justify-center gap-3 pt-2">
               <Button
                 type="button"
                 variant="outline"
                 onClick={() => loadData("append")}
-                disabled={loadingMore}
+                disabled={loadingMore || loadingAll}
                 loading={loadingMore}
               >
                 Carregar mais 20 NC
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => loadData("all")}
+                disabled={loadingMore || loadingAll}
+                loading={loadingAll}
+              >
+                Carregar todas
               </Button>
             </div>
           ) : null}
