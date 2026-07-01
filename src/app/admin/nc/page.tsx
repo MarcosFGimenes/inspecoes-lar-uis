@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import {
   collection,
@@ -8,14 +8,9 @@ import {
   doc,
   getDoc,
   getDocs,
-  limit,
-  orderBy,
   query,
-  startAfter,
   updateDoc,
   where,
-  type DocumentData,
-  type QueryDocumentSnapshot,
 } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase-client";
 import { Button } from "@/components/ui/button";
@@ -253,9 +248,6 @@ function renderStatusBadge(status: NonConformityStatus) {
   return <Badge variant="danger">Aberta</Badge>;
 }
 
-const PAGE_SIZE = 20;
-type IssueCursor = QueryDocumentSnapshot<DocumentData>;
-
 const STATUS_OPTIONS: Array<{ value: NonConformityStatus; label: string }> = [
   { value: "open", label: "Aberta" },
   { value: "in_progress", label: "Em andamento" },
@@ -264,10 +256,6 @@ const STATUS_OPTIONS: Array<{ value: NonConformityStatus; label: string }> = [
 
 export default function AdminNonConformitiesPage() {
   const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const issueCursorRef = useRef<IssueCursor | null>(null);
-  const [hasMoreInitialItems, setHasMoreInitialItems] = useState(false);
-  const [usingInitialLimit, setUsingInitialLimit] = useState(true);
   const [forceVisibleIds, setForceVisibleIds] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<NonConformityItem[]>([]);
@@ -290,19 +278,8 @@ export default function AdminNonConformitiesPage() {
     setSelectedIds(prev => prev.filter(id => items.some(item => item.id === id)));
   }, [items]);
 
-  const loadData = useCallback(async (mode: "initial" | "append" | "full" = "initial") => {
-    const append = mode === "append";
-    const fullLoad = mode === "full";
-    if (append && !issueCursorRef.current) return;
-
-    if (append) {
-      setLoadingMore(true);
-    } else {
-      setLoading(true);
-      issueCursorRef.current = null;
-      setHasMoreInitialItems(false);
-      setUsingInitialLimit(!fullLoad);
-    }
+  const loadData = useCallback(async () => {
+    setLoading(true);
     setError(null);
     try {
       const session = await fetch("/api/admin-session", { cache: "no-store" });
@@ -311,20 +288,7 @@ export default function AdminNonConformitiesPage() {
         return;
       }
 
-      const issueConstraints = fullLoad
-        ? [where("status", "in", ["aberta", "concluida", "resolvida"])]
-        : append && issueCursorRef.current
-          ? [
-              where("status", "in", ["aberta", "concluida", "resolvida"]),
-              orderBy("updatedAt", "desc"),
-              startAfter(issueCursorRef.current),
-              limit(PAGE_SIZE),
-            ]
-          : [
-              where("status", "in", ["aberta", "concluida", "resolvida"]),
-              orderBy("updatedAt", "desc"),
-              limit(PAGE_SIZE),
-            ];
+      const issueConstraints = [where("status", "in", ["aberta", "concluida", "resolvida"])] as const;
 
       const [machinesSnap, templatesSnap, issuesSnap] = await Promise.all([
         getDocs(collection(firebaseDb, "machines")),
@@ -554,38 +518,26 @@ export default function AdminNonConformitiesPage() {
         });
       });
 
-      setTreatmentsByResponse(prev => (append ? { ...prev, ...treatmentsRecord } : treatmentsRecord));
-      setItems(prev => {
-        const nextItems = sortByLastActivityDesc(builtItems);
-        if (!append) return nextItems;
-        const merged = new Map(prev.map(item => [item.id, item] as const));
-        nextItems.forEach(item => merged.set(item.id, item));
-        return sortByLastActivityDesc(Array.from(merged.values()));
-      });
-      issueCursorRef.current = issuesSnap.docs.at(-1) ?? null;
-      setHasMoreInitialItems(!fullLoad && issuesSnap.docs.length === PAGE_SIZE);
+      setTreatmentsByResponse(treatmentsRecord);
+      setItems(sortByLastActivityDesc(builtItems));
     } catch (err: unknown) {
       const message = err instanceof Error && err.message ? err.message : "Erro ao carregar dados";
       setError(message);
     } finally {
-      if (append) {
-        setLoadingMore(false);
-      } else {
-        setLoading(false);
-      }
+      setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    loadData("initial");
+    loadData();
   }, [loadData]);
 
   useEffect(() => {
     setForceVisibleIds(new Set());
-    if (hasActiveFilter && usingInitialLimit) {
-      loadData("full");
+    if (hasActiveFilter) {
+      loadData();
     }
-  }, [dueDateFilter, hasActiveFilter, loadData, machineFilter, maintainerFilter, statusFilter, usingInitialLimit]);
+  }, [dueDateFilter, hasActiveFilter, loadData, machineFilter, maintainerFilter, statusFilter]);
 
   const machineOptionsForFilter = useMemo(() => {
     return Array.from(new Set(items.map(item => item.machineLabel.trim()).filter(Boolean))).sort((a, b) =>
@@ -832,7 +784,7 @@ export default function AdminNonConformitiesPage() {
   const allVisibleSelected =
     filteredItems.length > 0 && filteredItems.every(item => selectedIds.includes(item.id));
   const selectedCount = selectedIds.length;
-  const canLoadMoreInitialItems = usingInitialLimit && hasMoreInitialItems;
+  const canLoadMoreInitialItems = false;
 
   if (loading) {
     return (
@@ -870,7 +822,7 @@ export default function AdminNonConformitiesPage() {
             <h1 className="text-2xl font-semibold text-[var(--text)]">Não conformidades</h1>
             <p className="text-sm text-[var(--muted)]">Visualize e trate as respostas marcadas como NC.</p>
           </div>
-          <Button variant="secondary" onClick={() => loadData(hasActiveFilter ? "full" : "initial")}>
+          <Button variant="secondary" onClick={() => loadData()}>
             Recarregar
           </Button>
         </header>
@@ -888,7 +840,7 @@ export default function AdminNonConformitiesPage() {
           <h1 className="text-2xl font-semibold text-[var(--text)]">Não conformidades</h1>
           <p className="text-sm text-[var(--muted)]">Somente respostas &quot;NC&quot; aparecem nesta lista para tratativa.</p>
         </div>
-        <Button variant="secondary" onClick={() => loadData(hasActiveFilter ? "full" : "initial")}>
+        <Button variant="secondary" onClick={() => loadData()}>
           Recarregar
         </Button>
       </header>
@@ -1003,9 +955,9 @@ export default function AdminNonConformitiesPage() {
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => loadData("append")}
-                disabled={loadingMore}
-                loading={loadingMore}
+                onClick={() => loadData()}
+                disabled={loading}
+                loading={loading}
               >
                 Carregar mais 20 NC
               </Button>
@@ -1226,9 +1178,9 @@ export default function AdminNonConformitiesPage() {
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => loadData("append")}
-                disabled={loadingMore}
-                loading={loadingMore}
+                onClick={() => loadData()}
+                disabled={loading}
+                loading={loading}
               >
                 Carregar mais 20 NC
               </Button>
