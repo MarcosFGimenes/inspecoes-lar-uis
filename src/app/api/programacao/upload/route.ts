@@ -282,7 +282,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const buffer = Buffer.from(await file.arrayBuffer());
-    const rows = parseCsv(buffer, { delimiter: ",", skipEmptyLines: true }) as RawRow[];
+    const rows = parseCsv(buffer, { skipEmptyLines: true }) as RawRow[];
 
     if (!rows.length) {
       return NextResponse.json({ error: "EMPTY_CSV" }, { status: 400 });

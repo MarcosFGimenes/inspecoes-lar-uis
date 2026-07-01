@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import {
   collection,
@@ -8,9 +8,14 @@ import {
   doc,
   getDoc,
   getDocs,
+  limit,
+  orderBy,
   query,
+  startAfter,
   updateDoc,
   where,
+  type DocumentData,
+  type QueryDocumentSnapshot,
 } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase-client";
 import { Button } from "@/components/ui/button";
@@ -124,6 +129,11 @@ function formatDateInput(value: string | null | undefined) {
   return date.toISOString().slice(0, 10);
 }
 
+
+function normalizeOsNumero(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim().toUpperCase() : null;
+}
+
 function normalizeStatus(value: unknown): NonConformityStatus | null {
   if (value === "open" || value === "in_progress" || value === "resolved") {
     return value;
@@ -182,9 +192,7 @@ function normalizeAnswers(
           observation: typeof item.observacaoItem === "string" ? item.observacaoItem : null,
           photoUrls: normalizeStoredImages(item.fotos ?? []),
           recurrence: false,
-          itemOsNumero: typeof item.osNumeroItem === "string" && item.osNumeroItem.trim()
-            ? item.osNumeroItem.trim().toUpperCase()
-            : null,
+          itemOsNumero: normalizeOsNumero(item.osNumeroItem),
         } satisfies ChecklistAnswer;
       })
   );
@@ -215,7 +223,7 @@ function normalizeAnswers(
           observation: item.observation ?? fallbackFromItens?.observation ?? null,
           photoUrls: mergeStoredImageCollections(item.photoUrls, fallbackFromItens?.photoUrls),
           recurrence: item.recurrence === true || fallbackFromItens?.recurrence === true,
-          itemOsNumero: item.itemOsNumero ?? fallbackFromItens?.itemOsNumero ?? null,
+          itemOsNumero: normalizeOsNumero(item.itemOsNumero) ?? fallbackFromItens?.itemOsNumero ?? null,
         } satisfies ChecklistAnswer;
       })
   );
@@ -245,6 +253,9 @@ function renderStatusBadge(status: NonConformityStatus) {
   return <Badge variant="danger">Aberta</Badge>;
 }
 
+const PAGE_SIZE = 20;
+type IssueCursor = QueryDocumentSnapshot<DocumentData>;
+
 const STATUS_OPTIONS: Array<{ value: NonConformityStatus; label: string }> = [
   { value: "open", label: "Aberta" },
   { value: "in_progress", label: "Em andamento" },
@@ -253,6 +264,11 @@ const STATUS_OPTIONS: Array<{ value: NonConformityStatus; label: string }> = [
 
 export default function AdminNonConformitiesPage() {
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const issueCursorRef = useRef<IssueCursor | null>(null);
+  const [hasMoreInitialItems, setHasMoreInitialItems] = useState(false);
+  const [usingInitialLimit, setUsingInitialLimit] = useState(true);
+  const [forceVisibleIds, setForceVisibleIds] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<NonConformityItem[]>([]);
   const [treatmentsByResponse, setTreatmentsByResponse] = useState<Record<string, ChecklistNonConformityTreatment[]>>({});
@@ -268,12 +284,25 @@ export default function AdminNonConformitiesPage() {
   const [deleteDialogItem, setDeleteDialogItem] = useState<NonConformityItem | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
+  const hasActiveFilter = Boolean(machineFilter.trim() || maintainerFilter || statusFilter !== "open" || dueDateFilter !== "default");
+
   useEffect(() => {
     setSelectedIds(prev => prev.filter(id => items.some(item => item.id === id)));
   }, [items]);
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
+  const loadData = useCallback(async (mode: "initial" | "append" | "full" = "initial") => {
+    const append = mode === "append";
+    const fullLoad = mode === "full";
+    if (append && !issueCursorRef.current) return;
+
+    if (append) {
+      setLoadingMore(true);
+    } else {
+      setLoading(true);
+      issueCursorRef.current = null;
+      setHasMoreInitialItems(false);
+      setUsingInitialLimit(!fullLoad);
+    }
     setError(null);
     try {
       const session = await fetch("/api/admin-session", { cache: "no-store" });
@@ -282,10 +311,25 @@ export default function AdminNonConformitiesPage() {
         return;
       }
 
+      const issueConstraints = fullLoad
+        ? [where("status", "in", ["aberta", "concluida", "resolvida"])]
+        : append && issueCursorRef.current
+          ? [
+              where("status", "in", ["aberta", "concluida", "resolvida"]),
+              orderBy("updatedAt", "desc"),
+              startAfter(issueCursorRef.current),
+              limit(PAGE_SIZE),
+            ]
+          : [
+              where("status", "in", ["aberta", "concluida", "resolvida"]),
+              orderBy("updatedAt", "desc"),
+              limit(PAGE_SIZE),
+            ];
+
       const [machinesSnap, templatesSnap, issuesSnap] = await Promise.all([
         getDocs(collection(firebaseDb, "machines")),
         getDocs(collection(firebaseDb, "templates")),
-        getDocs(query(collection(firebaseDb, "issues"), where("status", "in", ["aberta", "concluida", "resolvida"]))),
+        getDocs(query(collection(firebaseDb, "issues"), ...issueConstraints)),
       ]);
 
       const machineOptions: MachineOption[] = machinesSnap.docs.map(docSnap => {
@@ -320,13 +364,11 @@ export default function AdminNonConformitiesPage() {
       const sourceInspectionIds = Array.from(
         new Set(
           issuesSnap.docs
-            .map(issueDoc => {
+            .flatMap(issueDoc => {
               const issueData = issueDoc.data() ?? {};
-              return typeof issueData.abertaEmInspecaoId === "string"
-                ? issueData.abertaEmInspecaoId
-                : null;
+              return [issueData.abertaEmInspecaoId, issueData.ultimaReincidenciaInspecaoId]
+                .filter((value): value is string => typeof value === "string" && value.trim().length > 0);
             })
-            .filter((value): value is string => Boolean(value))
         )
       );
 
@@ -412,7 +454,9 @@ export default function AdminNonConformitiesPage() {
 
         const responseId =
           typeof issueData.abertaEmInspecaoId === "string" ? issueData.abertaEmInspecaoId : null;
-        const sourceInspection = responseId ? sourceInspectionMap.get(responseId) : undefined;
+        const latestOccurrenceId =
+          typeof issueData.ultimaReincidenciaInspecaoId === "string" ? issueData.ultimaReincidenciaInspecaoId : responseId;
+        const sourceInspection = latestOccurrenceId ? sourceInspectionMap.get(latestOccurrenceId) : undefined;
         const machineOption = machineId ? machinesById.get(machineId) : undefined;
         const issueTag = typeof issueData.tag === "string" ? issueData.tag : null;
         const templateId = sourceInspection?.templateId ?? machineOption?.templateId ?? null;
@@ -494,9 +538,9 @@ export default function AdminNonConformitiesPage() {
               : answerData?.observation ?? null,
           photos: mergeStoredImageCollections(issueData.fotos, answerData?.photoUrls),
           itemOsNumero:
-            typeof issueData.osNumero === "string"
-              ? issueData.osNumero
-              : answerData?.itemOsNumero ?? null,
+            answerData?.itemOsNumero ??
+            normalizeOsNumero(issueData.osNumero) ??
+            null,
           issueStatus,
           status,
           summary: summaryValue ? String(summaryValue) : "",
@@ -510,19 +554,38 @@ export default function AdminNonConformitiesPage() {
         });
       });
 
-      setItems(sortByLastActivityDesc(builtItems));
-      setTreatmentsByResponse(treatmentsRecord);
+      setTreatmentsByResponse(prev => (append ? { ...prev, ...treatmentsRecord } : treatmentsRecord));
+      setItems(prev => {
+        const nextItems = sortByLastActivityDesc(builtItems);
+        if (!append) return nextItems;
+        const merged = new Map(prev.map(item => [item.id, item] as const));
+        nextItems.forEach(item => merged.set(item.id, item));
+        return sortByLastActivityDesc(Array.from(merged.values()));
+      });
+      issueCursorRef.current = issuesSnap.docs.at(-1) ?? null;
+      setHasMoreInitialItems(!fullLoad && issuesSnap.docs.length === PAGE_SIZE);
     } catch (err: unknown) {
       const message = err instanceof Error && err.message ? err.message : "Erro ao carregar dados";
       setError(message);
     } finally {
-      setLoading(false);
+      if (append) {
+        setLoadingMore(false);
+      } else {
+        setLoading(false);
+      }
     }
   }, []);
 
   useEffect(() => {
-    loadData();
+    loadData("initial");
   }, [loadData]);
+
+  useEffect(() => {
+    setForceVisibleIds(new Set());
+    if (hasActiveFilter && usingInitialLimit) {
+      loadData("full");
+    }
+  }, [dueDateFilter, hasActiveFilter, loadData, machineFilter, maintainerFilter, statusFilter, usingInitialLimit]);
 
   const machineOptionsForFilter = useMemo(() => {
     return Array.from(new Set(items.map(item => item.machineLabel.trim()).filter(Boolean))).sort((a, b) =>
@@ -547,6 +610,9 @@ export default function AdminNonConformitiesPage() {
   const filteredItems = useMemo(() => {
     const machineSearch = machineFilter.trim().toLowerCase();
     const visibleItems = items.filter(item => {
+      if (forceVisibleIds.has(item.id)) {
+        return true;
+      }
       if (machineSearch) {
         const machineLabel = item.machineLabel.toLowerCase();
         const machineTag = (item.machineTag ?? "").toLowerCase();
@@ -582,9 +648,14 @@ export default function AdminNonConformitiesPage() {
     }
 
     return visibleItems;
-  }, [items, machineFilter, maintainerFilter, statusFilter, dueDateFilter]);
+  }, [items, machineFilter, maintainerFilter, statusFilter, dueDateFilter, forceVisibleIds]);
+
+  const keepItemVisibleInCurrentFilter = useCallback((id: string) => {
+    setForceVisibleIds(prev => new Set(prev).add(id));
+  }, []);
 
   const handleUpdateItem = useCallback((id: string, updates: Partial<NonConformityItem>) => {
+    setForceVisibleIds(prev => new Set(prev).add(id));
     setItems(prev => prev.map(item => (item.id === id ? { ...item, ...updates } : item)));
   }, []);
 
@@ -668,10 +739,11 @@ export default function AdminNonConformitiesPage() {
   const handleStatusClick = useCallback(
     async (item: NonConformityItem, status: NonConformityStatus) => {
       const updatedItem = { ...item, status };
+      keepItemVisibleInCurrentFilter(item.id);
       handleUpdateItem(item.id, { status });
       await handleSave(updatedItem);
     },
-    [handleSave, handleUpdateItem]
+    [handleSave, handleUpdateItem, keepItemVisibleInCurrentFilter]
   );
 
   const handleBulkStatusChange = useCallback(
@@ -683,6 +755,7 @@ export default function AdminNonConformitiesPage() {
       try {
         for (const target of targetItems) {
           const updatedItem = { ...target, status };
+          keepItemVisibleInCurrentFilter(target.id);
           handleUpdateItem(target.id, { status });
           await handleSave(updatedItem);
         }
@@ -690,7 +763,7 @@ export default function AdminNonConformitiesPage() {
         setBulkSaving(false);
       }
     },
-    [handleSave, handleUpdateItem, items, selectedIds]
+    [handleSave, handleUpdateItem, items, keepItemVisibleInCurrentFilter, selectedIds]
   );
 
   const handleToggleItemSelection = useCallback((id: string) => {
@@ -737,6 +810,11 @@ export default function AdminNonConformitiesPage() {
 
       setItems(prev => prev.filter(item => item.id !== deleteDialogItem.id));
       setSelectedIds(prev => prev.filter(id => id !== deleteDialogItem.id));
+      setForceVisibleIds(prev => {
+        const next = new Set(prev);
+        next.delete(deleteDialogItem.id);
+        return next;
+      });
       setFeedback(prev => {
         const next = { ...prev };
         delete next[deleteDialogItem.id];
@@ -754,6 +832,7 @@ export default function AdminNonConformitiesPage() {
   const allVisibleSelected =
     filteredItems.length > 0 && filteredItems.every(item => selectedIds.includes(item.id));
   const selectedCount = selectedIds.length;
+  const canLoadMoreInitialItems = usingInitialLimit && hasMoreInitialItems;
 
   if (loading) {
     return (
@@ -791,7 +870,7 @@ export default function AdminNonConformitiesPage() {
             <h1 className="text-2xl font-semibold text-[var(--text)]">Não conformidades</h1>
             <p className="text-sm text-[var(--muted)]">Visualize e trate as respostas marcadas como NC.</p>
           </div>
-          <Button variant="secondary" onClick={() => loadData()}>
+          <Button variant="secondary" onClick={() => loadData(hasActiveFilter ? "full" : "initial")}>
             Recarregar
           </Button>
         </header>
@@ -809,7 +888,7 @@ export default function AdminNonConformitiesPage() {
           <h1 className="text-2xl font-semibold text-[var(--text)]">Não conformidades</h1>
           <p className="text-sm text-[var(--muted)]">Somente respostas &quot;NC&quot; aparecem nesta lista para tratativa.</p>
         </div>
-        <Button variant="secondary" onClick={() => loadData()}>
+        <Button variant="secondary" onClick={() => loadData(hasActiveFilter ? "full" : "initial")}>
           Recarregar
         </Button>
       </header>
@@ -914,10 +993,25 @@ export default function AdminNonConformitiesPage() {
       )}
 
       {filteredItems.length === 0 ? (
-        <EmptyState
-          title="Nenhuma não conformidade encontrada"
-          description="Ajuste os filtros ou aguarde novas inspeções com NC registradas."
-        />
+        <div className="space-y-4">
+          <EmptyState
+            title="Nenhuma não conformidade encontrada"
+            description="Ajuste os filtros ou aguarde novas inspeções com NC registradas."
+          />
+          {canLoadMoreInitialItems ? (
+            <div className="flex justify-center">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => loadData("append")}
+                disabled={loadingMore}
+                loading={loadingMore}
+              >
+                Carregar mais 20 NC
+              </Button>
+            </div>
+          ) : null}
+        </div>
       ) : (
         <div className="space-y-6">
           {filteredItems.map(item => {
@@ -1127,6 +1221,19 @@ export default function AdminNonConformitiesPage() {
               </article>
             );
           })}
+          {canLoadMoreInitialItems ? (
+            <div className="flex justify-center pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => loadData("append")}
+                disabled={loadingMore}
+                loading={loadingMore}
+              >
+                Carregar mais 20 NC
+              </Button>
+            </div>
+          ) : null}
         </div>
       )}
 

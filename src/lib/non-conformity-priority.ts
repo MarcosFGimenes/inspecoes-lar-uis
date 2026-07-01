@@ -9,6 +9,10 @@ export interface IssueRecurrenceUpdateInput {
   descricao?: string | null;
 }
 
+function normalizeOsNumero(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim().toUpperCase() : null;
+}
+
 export function buildIssueRecurrenceUpdates({
   issueData,
   inspectionId,
@@ -26,8 +30,9 @@ export function buildIssueRecurrenceUpdates({
     updatedAt: nowIso,
   };
 
-  if (osNumeroItem && issueData.osNumero !== osNumeroItem) {
-    updates.osNumero = osNumeroItem;
+  const normalizedOsNumeroItem = normalizeOsNumero(osNumeroItem);
+  if (normalizedOsNumeroItem && normalizeOsNumero(issueData.osNumero) !== normalizedOsNumeroItem) {
+    updates.osNumero = normalizedOsNumeroItem;
   }
   if (fotos.length > 0) {
     updates.fotos = fotos;
