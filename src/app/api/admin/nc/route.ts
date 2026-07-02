@@ -436,7 +436,7 @@ export async function GET(req: NextRequest) {
       operatorMatricula: sourceInspection?.operatorMatricula ?? null,
       observation: typeof issueData.descricao === "string" ? issueData.descricao : answerData?.observation ?? null,
       photos: mergeStoredImageCollections(issueData.fotos, answerData?.photoUrls),
-      itemOsNumero: answerData?.itemOsNumero ?? normalizeOsNumero(issueData.osNumero) ?? null,
+      itemOsNumero: normalizeOsNumero(issueData.osNumero) ?? answerData?.itemOsNumero ?? null,
       issueStatus,
       status,
       summary: summaryValue ? String(summaryValue) : "",

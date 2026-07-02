@@ -502,8 +502,8 @@ export default function AdminNonConformitiesPage() {
               : answerData?.observation ?? null,
           photos: mergeStoredImageCollections(issueData.fotos, answerData?.photoUrls),
           itemOsNumero:
-            answerData?.itemOsNumero ??
             normalizeOsNumero(issueData.osNumero) ??
+            answerData?.itemOsNumero ??
             null,
           issueStatus,
           status,
