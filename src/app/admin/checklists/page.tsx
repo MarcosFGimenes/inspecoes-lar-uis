@@ -158,6 +158,7 @@ function computeNcCount(data: Record<string, unknown>): number {
 }
 
 const PAGE_SIZE = 20;
+const FILTERED_PAGE_SIZE = 100;
 type InspectionCursor = QueryDocumentSnapshot<DocumentData>;
 
 export default function AdminChecklistsPage() {
@@ -365,6 +366,18 @@ export default function AdminChecklistsPage() {
     });
   }, [filter, maintainerById]);
 
+  const hasActiveFilters = useMemo(() => {
+    return Boolean(
+      filter.machineTag?.trim() ||
+        filter.matricula?.trim() ||
+        filter.from ||
+        filter.to ||
+        filter.maintainerId !== "all" ||
+        filter.templateId !== "all" ||
+        filter.hasNc !== "all"
+    );
+  }, [filter]);
+
   const fetchRows = useCallback(async (mode: "reset" | "append" = "reset") => {
     const shouldAppend = mode === "append";
     const cursor = lastInspectionCursorRef.current;
@@ -379,14 +392,27 @@ export default function AdminChecklistsPage() {
     }
     setError(null);
     try {
-      const constraints = shouldAppend && cursor
-        ? [orderBy("createdAt", "desc"), startAfter(cursor), limit(PAGE_SIZE)]
-        : [orderBy("createdAt", "desc"), limit(PAGE_SIZE)];
-      const snap = await getDocs(query(inspectionsCol, ...constraints));
-      const pageRows = applyCurrentFilters(snap.docs.map(mapInspectionDoc));
-      setRows(prev => (shouldAppend ? [...prev, ...pageRows] : pageRows));
-      lastInspectionCursorRef.current = snap.docs.at(-1) ?? null;
-      setHasMoreRows(snap.docs.length === PAGE_SIZE);
+      const pageSize = hasActiveFilters && !shouldAppend ? FILTERED_PAGE_SIZE : PAGE_SIZE;
+      let queryCursor = shouldAppend ? cursor : null;
+      let keepFetching = true;
+      let lastSnapSize = 0;
+      const nextRows: ChecklistRow[] = [];
+
+      while (keepFetching) {
+        const constraints = queryCursor
+          ? [orderBy("createdAt", "desc"), startAfter(queryCursor), limit(pageSize)]
+          : [orderBy("createdAt", "desc"), limit(pageSize)];
+        const snap = await getDocs(query(inspectionsCol, ...constraints));
+        lastSnapSize = snap.docs.length;
+        nextRows.push(...applyCurrentFilters(snap.docs.map(mapInspectionDoc)));
+        queryCursor = snap.docs.at(-1) ?? null;
+
+        keepFetching = Boolean(hasActiveFilters && !shouldAppend && snap.docs.length === pageSize && queryCursor);
+      }
+
+      setRows(prev => (shouldAppend ? [...prev, ...nextRows] : nextRows));
+      lastInspectionCursorRef.current = queryCursor;
+      setHasMoreRows(!hasActiveFilters && lastSnapSize === PAGE_SIZE);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Erro ao carregar checklists";
       setError(message);
@@ -397,7 +423,7 @@ export default function AdminChecklistsPage() {
         setLoadingRows(false);
       }
     }
-  }, [applyCurrentFilters, inspectionsCol, mapInspectionDoc]);
+  }, [applyCurrentFilters, hasActiveFilters, inspectionsCol, mapInspectionDoc]);
 
   useEffect(() => {
     if (!loadingLookups) {
