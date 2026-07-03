@@ -420,19 +420,26 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
           const issueDocs = issuesByQuestionId.get(item.questionId) ?? [];
           const activeIssueDoc = issueDocs.find(doc => !isIssueResolvedStatus(doc.data()?.status));
           if (activeIssueDoc) {
-            const updatesIssue: Record<string, unknown> = {};
+            const issueData = activeIssueDoc.data() ?? {};
+            const updatesIssue: Record<string, unknown> = {
+              ultimaOcorrenciaEm: nowIso,
+              ultimaReincidenciaEm: nowIso,
+              ultimaReincidenciaInspecaoId: id,
+              updatedAt: nowIso,
+            };
             const osValue = item.osNumeroItem?.trim() ? item.osNumeroItem.trim().toUpperCase() : null;
-            if (osValue && activeIssueDoc.data()?.osNumero !== osValue) {
+            if (osValue && issueData.osNumero !== osValue) {
               updatesIssue.osNumero = osValue;
             }
             // Sempre sincronize as fotos atuais do item para o issue ativo
             updatesIssue.fotos = photoUrls;
-            if (observation && activeIssueDoc.data()?.descricao !== observation) {
+            if (observation && issueData.descricao !== observation) {
               updatesIssue.descricao = observation;
             }
-            if (Object.keys(updatesIssue).length > 0) {
-              await activeIssueDoc.ref.update(updatesIssue);
+            if (issueData.maintainerResolution) {
+              updatesIssue.maintainerResolution = null;
             }
+            await activeIssueDoc.ref.update(updatesIssue);
           } else if (inspection.machine?.machineId) {
             const issueRef = adminDb.collection("issues").doc();
             const latestResolvedIssue = issueDocs

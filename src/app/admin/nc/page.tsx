@@ -272,7 +272,7 @@ export default function AdminNonConformitiesPage() {
   const [deleteDialogItem, setDeleteDialogItem] = useState<NonConformityItem | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  const hasActiveFilter = Boolean(machineFilter.trim() || maintainerFilter || statusFilter !== "open" || dueDateFilter !== "default");
+  const shouldRefreshOnFilterChange = Boolean(maintainerFilter || statusFilter !== "open" || dueDateFilter !== "default");
 
   useEffect(() => {
     setSelectedIds(prev => prev.filter(id => items.some(item => item.id === id)));
@@ -502,8 +502,8 @@ export default function AdminNonConformitiesPage() {
               : answerData?.observation ?? null,
           photos: mergeStoredImageCollections(issueData.fotos, answerData?.photoUrls),
           itemOsNumero:
-            answerData?.itemOsNumero ??
             normalizeOsNumero(issueData.osNumero) ??
+            answerData?.itemOsNumero ??
             null,
           issueStatus,
           status,
@@ -534,10 +534,13 @@ export default function AdminNonConformitiesPage() {
 
   useEffect(() => {
     setForceVisibleIds(new Set());
-    if (hasActiveFilter) {
+  }, [dueDateFilter, machineFilter, maintainerFilter, statusFilter]);
+
+  useEffect(() => {
+    if (shouldRefreshOnFilterChange) {
       loadData();
     }
-  }, [dueDateFilter, hasActiveFilter, loadData, machineFilter, maintainerFilter, statusFilter]);
+  }, [dueDateFilter, loadData, maintainerFilter, shouldRefreshOnFilterChange, statusFilter]);
 
   const machineOptionsForFilter = useMemo(() => {
     return Array.from(new Set(items.map(item => item.machineLabel.trim()).filter(Boolean))).sort((a, b) =>
