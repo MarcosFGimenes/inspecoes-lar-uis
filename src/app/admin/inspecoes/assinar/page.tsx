@@ -251,93 +251,6 @@ function SignatureModal({
                   </div>
                 </div>
 
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h4 className="text-sm font-semibold text-[var(--text)]">Itens avaliados</h4>
-                    <Badge variant={inspectionInfo.qtdNC && inspectionInfo.qtdNC > 0 ? "danger" : "success"}>
-                      {inspectionInfo.qtdNC && inspectionInfo.qtdNC > 0
-                        ? `${inspectionInfo.qtdNC} NC`
-                        : "Sem NC"}
-                    </Badge>
-                  </div>
-                  {normalizedAnswers.length === 0 ? (
-                    <EmptyState
-                      title="Sem itens registrados"
-                      description="Não foi possível localizar as respostas desta inspeção."
-                      className="py-10"
-                    />
-                  ) : (
-                    <div className="space-y-3">
-                      {normalizedAnswers.map(answer => (
-                        <div
-                          key={answer.questionId}
-                          className={cn(
-                            "rounded-lg border p-4",
-                            answer.response === "nc"
-                              ? "border-[var(--danger)] bg-[color-mix(in_oklab,var(--danger),#fff_92%)]"
-                              : "border-[var(--border)] bg-white"
-                          )}
-                        >
-                          <div className="flex flex-wrap items-center justify-between gap-3">
-                            <p className="text-sm font-medium text-[var(--text)]">
-                              {answer.questionText ?? `Item ${answer.questionId}`}
-                            </p>
-                            <Badge variant={responseBadgeVariant[answer.response]}>
-                              {responseLabels[answer.response]}
-                            </Badge>
-                          </div>
-                          {answer.recurrence ? (
-                            <div className="mt-2">
-                              <Badge variant="warning">Reincidência</Badge>
-                            </div>
-                          ) : null}
-                          {answer.observation?.trim() ? (
-                            <p className="mt-2 text-sm text-[var(--text)]">
-                              <span className="font-medium text-[var(--muted)]">Observação:</span> {answer.observation}
-                            </p>
-                          ) : null}
-                          {answer.itemOsNumero?.trim() ? (
-                            <p className="text-xs text-[var(--muted)]">
-                              Nº da O.S. do item: <span className="font-medium text-[var(--text)]">{answer.itemOsNumero}</span>
-                            </p>
-                          ) : null}
-                          {answer.photoUrls && answer.photoUrls.length > 0 ? (
-                            <div className="mt-3 flex flex-wrap gap-2">
-                              {answer.photoUrls.map((photo, index) => (
-                                <a
-                                  key={`${answer.questionId}-photo-${index}`}
-                                  href={photo.url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="group overflow-hidden rounded-md border focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--primary)]"
-                                >
-                                  <Image
-                                    src={photo.url}
-                                    alt={`Foto da inspeção - item ${answer.questionId}`}
-                                    width={160}
-                                    height={120}
-                                    className="h-24 w-40 object-cover transition-transform duration-200 group-hover:scale-105"
-                                    unoptimized
-                                  />
-                                </a>
-                              ))}
-                            </div>
-                          ) : null}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            ) : (
-              <EmptyState
-                title="Inspeção não encontrada"
-                description="Não foi possível carregar os detalhes desta inspeção."
-                className="py-10"
-              />
-            )}
-          </section>
-
           <section className="space-y-4">
             <h3 className="text-base font-semibold text-[var(--text)]">Assinatura do PCM</h3>
             <div className="grid gap-4 md:grid-cols-2">
@@ -462,22 +375,116 @@ function SignatureModal({
                 </label>
               ) : null}
             </div>
+            <div className="flex flex-col gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs text-[var(--muted)]">
+                Confira a assinatura acima e confirme sem precisar rolar pelos itens avaliados.
+              </p>
+              <div className="flex flex-wrap justify-end gap-3">
+                <Button type="button" variant="ghost" onClick={onClose} disabled={loading}>
+                  Cancelar
+                </Button>
+                <Button
+                  type="button"
+                  onClick={onConfirm}
+                  loading={loading}
+                  disabled={loading || detailLoading}
+                >
+                  Confirmar assinatura
+                </Button>
+              </div>
+            </div>
             {error && <p className="text-sm text-[var(--danger)]">{error}</p>}
           </section>
 
-          <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
-            <Button type="button" variant="ghost" onClick={onClose} disabled={loading}>
-              Cancelar
-            </Button>
-            <Button
-              type="button"
-              onClick={onConfirm}
-              loading={loading}
-              disabled={loading || detailLoading}
-            >
-              Confirmar assinatura
-            </Button>
-          </div>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-sm font-semibold text-[var(--text)]">Itens avaliados</h4>
+                    <Badge variant={inspectionInfo.qtdNC && inspectionInfo.qtdNC > 0 ? "danger" : "success"}>
+                      {inspectionInfo.qtdNC && inspectionInfo.qtdNC > 0
+                        ? `${inspectionInfo.qtdNC} NC`
+                        : "Sem NC"}
+                    </Badge>
+                  </div>
+                  {normalizedAnswers.length === 0 ? (
+                    <EmptyState
+                      title="Sem itens registrados"
+                      description="Não foi possível localizar as respostas desta inspeção."
+                      className="py-10"
+                    />
+                  ) : (
+                    <div className="space-y-3">
+                      {normalizedAnswers.map(answer => (
+                        <div
+                          key={answer.questionId}
+                          className={cn(
+                            "rounded-lg border p-4",
+                            answer.response === "nc"
+                              ? "border-[var(--danger)] bg-[color-mix(in_oklab,var(--danger),#fff_92%)]"
+                              : "border-[var(--border)] bg-white"
+                          )}
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <p className="text-sm font-medium text-[var(--text)]">
+                              {answer.questionText ?? `Item ${answer.questionId}`}
+                            </p>
+                            <Badge variant={responseBadgeVariant[answer.response]}>
+                              {responseLabels[answer.response]}
+                            </Badge>
+                          </div>
+                          {answer.recurrence ? (
+                            <div className="mt-2">
+                              <Badge variant="warning">Reincidência</Badge>
+                            </div>
+                          ) : null}
+                          {answer.observation?.trim() ? (
+                            <p className="mt-2 text-sm text-[var(--text)]">
+                              <span className="font-medium text-[var(--muted)]">Observação:</span> {answer.observation}
+                            </p>
+                          ) : null}
+                          {answer.itemOsNumero?.trim() ? (
+                            <p className="text-xs text-[var(--muted)]">
+                              Nº da O.S. do item: <span className="font-medium text-[var(--text)]">{answer.itemOsNumero}</span>
+                            </p>
+                          ) : null}
+                          {answer.photoUrls && answer.photoUrls.length > 0 ? (
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              {answer.photoUrls.map((photo, index) => (
+                                <a
+                                  key={`${answer.questionId}-photo-${index}`}
+                                  href={photo.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="group overflow-hidden rounded-md border focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--primary)]"
+                                >
+                                  <Image
+                                    src={photo.url}
+                                    alt={`Foto da inspeção - item ${answer.questionId}`}
+                                    width={160}
+                                    height={120}
+                                    className="h-24 w-40 object-cover transition-transform duration-200 group-hover:scale-105"
+                                    unoptimized
+                                  />
+                                </a>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <EmptyState
+                title="Inspeção não encontrada"
+                description="Não foi possível carregar os detalhes desta inspeção."
+                className="py-10"
+              />
+            )}
+          </section>
+
+
+
         </div>
       </div>
     </div>,

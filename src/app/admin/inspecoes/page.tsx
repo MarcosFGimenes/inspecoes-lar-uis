@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   collection,
@@ -20,6 +20,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   Table,
   TableBody,
@@ -51,6 +52,13 @@ interface InspectionListItem {
 }
 
 
+interface MaintainerOption {
+  id: string;
+  nome: string | null;
+  matricula: string | null;
+  ativo?: boolean;
+}
+
 interface InspectionStats {
   total: number;
   signed: number;
@@ -59,6 +67,7 @@ interface InspectionStats {
 }
 
 const PAGE_SIZE = 20;
+const MAINTAINERS_SESSION_CACHE_KEY = "admin-inspecoes-maintainers-v1";
 type InspectionCursor = QueryDocumentSnapshot<DocumentData>;
 
 const emptyStats: InspectionStats = {
@@ -67,6 +76,47 @@ const emptyStats: InspectionStats = {
   pending: 0,
   withNc: 0,
 };
+
+function readSessionCache<T>(key: string): T[] | null {
+  if (typeof window === "undefined") return null;
+  const cached = window.sessionStorage.getItem(key);
+  if (!cached) return null;
+  try {
+    const parsed = JSON.parse(cached);
+    return Array.isArray(parsed) ? (parsed as T[]) : null;
+  } catch {
+    window.sessionStorage.removeItem(key);
+    return null;
+  }
+}
+
+function writeSessionCache<T>(key: string, records: T[]) {
+  if (typeof window === "undefined") return;
+  window.sessionStorage.setItem(key, JSON.stringify(records));
+}
+
+function extractFirebaseIndexUrl(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  const match = message.match(/https:\/\/console\.firebase\.google\.com\/[^\s)]+/);
+  return match?.[0] ?? null;
+}
+
+async function loadMaintainers(): Promise<MaintainerOption[]> {
+  const cached = readSessionCache<MaintainerOption>(MAINTAINERS_SESSION_CACHE_KEY);
+  if (cached) return cached;
+  const snap = await getDocs(collection(firebaseDb, "mantenedores"));
+  const records = snap.docs.map(docSnap => {
+    const data = docSnap.data() ?? {};
+    return {
+      id: docSnap.id,
+      nome: typeof data.nome === "string" ? data.nome : null,
+      matricula: typeof data.matricula === "string" ? data.matricula.toUpperCase() : null,
+      ativo: data.ativo !== false,
+    } satisfies MaintainerOption;
+  }).sort((a, b) => (a.nome ?? a.matricula ?? a.id).localeCompare(b.nome ?? b.matricula ?? b.id, "pt-BR"));
+  writeSessionCache(MAINTAINERS_SESSION_CACHE_KEY, records);
+  return records;
+}
 
 async function loadInspectionStats(): Promise<InspectionStats> {
   const inspectionsRef = collection(firebaseDb, "inspecoes");
@@ -170,14 +220,19 @@ export default function AdminInspectionsPage() {
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<InspectionListItem[]>([]);
   const [stats, setStats] = useState<InspectionStats>(emptyStats);
-  const [selectedMaintainers, setSelectedMaintainers] = useState<string[]>([]);
+  const [maintainers, setMaintainers] = useState<MaintainerOption[]>([]);
+  const [selectedMaintainerId, setSelectedMaintainerId] = useState<string | null>(null);
+  const [indexUrl, setIndexUrl] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMoreItems, setHasMoreItems] = useState(false);
   const lastInspectionCursorRef = useRef<InspectionCursor | null>(null);
+  const maintainerQueryFieldRef = useRef<"maintainer.maintId" | "maintainer.id">("maintainer.maintId");
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [returningId, setReturningId] = useState<string | null>(null);
+  const [returnDialogItem, setReturnDialogItem] = useState<InspectionListItem | null>(null);
   const [actionFeedback, setActionFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
-  const fetchInspectionPage = useCallback(async (mode: "reset" | "append" = "reset") => {
+  const fetchInspectionPage = useCallback(async (maintainerId: string, mode: "reset" | "append" = "reset") => {
     const shouldAppend = mode === "append";
     const cursor = lastInspectionCursorRef.current;
     if (shouldAppend && !cursor) return;
@@ -188,9 +243,11 @@ export default function AdminInspectionsPage() {
       setLoading(true);
       lastInspectionCursorRef.current = null;
       setHasMoreItems(false);
+      setItems([]);
       setActionFeedback(null);
     }
     setError(null);
+    setIndexUrl(null);
 
     try {
       if (!shouldAppend) {
@@ -201,40 +258,81 @@ export default function AdminInspectionsPage() {
         }
       }
 
-      const inspectionsQuery = cursor && shouldAppend
-        ? query(collection(firebaseDb, "inspecoes"), orderBy("createdAt", "desc"), startAfter(cursor), limit(PAGE_SIZE))
-        : query(collection(firebaseDb, "inspecoes"), orderBy("createdAt", "desc"), limit(PAGE_SIZE));
+      const buildInspectionQuery = (field: "maintainer.maintId" | "maintainer.id", pageCursor: InspectionCursor | null) => {
+        const constraints = [where(field, "==", maintainerId), orderBy("createdAt", "desc")];
+        return query(
+          collection(firebaseDb, "inspecoes"),
+          ...(shouldAppend && pageCursor ? [...constraints, startAfter(pageCursor), limit(PAGE_SIZE)] : [...constraints, limit(PAGE_SIZE)])
+        );
+      };
 
-      const [inspectionsSnap, inspectionStats] = await Promise.all([
-        getDocs(inspectionsQuery),
-        shouldAppend ? Promise.resolve(null) : loadInspectionStats(),
-      ]);
+      let activeField = shouldAppend ? maintainerQueryFieldRef.current : "maintainer.maintId" as const;
+      let inspectionsQuery = buildInspectionQuery(activeField, cursor);
+      const inspectionStatsPromise = shouldAppend ? Promise.resolve(null) : loadInspectionStats();
+      let inspectionsSnap = await getDocs(inspectionsQuery);
+
+      if (!shouldAppend && inspectionsSnap.empty) {
+        activeField = "maintainer.id";
+        inspectionsQuery = buildInspectionQuery(activeField, null);
+        inspectionsSnap = await getDocs(inspectionsQuery);
+      }
+      maintainerQueryFieldRef.current = activeField;
+      const inspectionStats = await inspectionStatsPromise;
 
       const mapped = inspectionsSnap.docs.map(mapInspectionDoc);
       setItems(prev => (shouldAppend ? [...prev, ...mapped] : mapped));
-      if (inspectionStats) {
-        setStats(inspectionStats);
-      }
+      if (inspectionStats) setStats(inspectionStats);
       lastInspectionCursorRef.current = inspectionsSnap.docs.at(-1) ?? null;
       setHasMoreItems(inspectionsSnap.docs.length === PAGE_SIZE);
     } catch (err: unknown) {
+      const indexLink = extractFirebaseIndexUrl(err);
+      if (indexLink) setIndexUrl(indexLink);
       const message = err instanceof Error && err.message ? err.message : "Erro ao carregar inspeções";
-      setError(message);
+      setError(indexLink ? "O Firestore exige um índice composto para esta consulta." : message);
     } finally {
-      if (shouldAppend) {
-        setLoadingMore(false);
-      } else {
-        setLoading(false);
-      }
+      if (shouldAppend) setLoadingMore(false);
+      else setLoading(false);
     }
   }, []);
 
-  const loadData = useCallback(() => fetchInspectionPage("reset"), [fetchInspectionPage]);
-  const handleLoadMore = useCallback(() => fetchInspectionPage("append"), [fetchInspectionPage]);
+  const loadData = useCallback(() => {
+    if (selectedMaintainerId) {
+      fetchInspectionPage(selectedMaintainerId, "reset");
+      return;
+    }
+    setItems([]);
+    setLoading(false);
+  }, [fetchInspectionPage, selectedMaintainerId]);
+  const handleLoadMore = useCallback(() => {
+    if (selectedMaintainerId) fetchInspectionPage(selectedMaintainerId, "append");
+  }, [fetchInspectionPage, selectedMaintainerId]);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    let mounted = true;
+    async function initialize() {
+      setLoading(true);
+      setError(null);
+      try {
+        const session = await fetch("/api/admin-session", { cache: "no-store" });
+        if (session.status === 401) {
+          window.location.href = "/admin/login";
+          return;
+        }
+        const [maintainerRecords, inspectionStats] = await Promise.all([loadMaintainers(), loadInspectionStats()]);
+        if (!mounted) return;
+        setMaintainers(maintainerRecords);
+        setStats(inspectionStats);
+      } catch (err) {
+        if (!mounted) return;
+        const message = err instanceof Error && err.message ? err.message : "Erro ao carregar mantenedores";
+        setError(message);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    }
+    initialize();
+    return () => { mounted = false; };
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined" || !("BroadcastChannel" in window)) {
@@ -274,65 +372,47 @@ export default function AdminInspectionsPage() {
     };
   }, []);
 
-  useEffect(() => {
-    setSelectedMaintainers(prev => {
-      if (prev.length === 0) return prev;
-      const validMaintainers = new Set(items.map(item => item.maintainerKey));
-      const filtered = prev.filter(id => validMaintainers.has(id));
-      return filtered.length === prev.length ? prev : filtered;
-    });
-  }, [items]);
-
-  const maintainerOptions = useMemo(() => {
-    const map = new Map<
-      string,
-      { id: string; nome: string | null; matricula: string | null; total: number }
-    >();
-
-    for (const item of items) {
-      const key = item.maintainerKey || "unknown";
-      const current = map.get(key) ?? {
-        id: key,
-        nome: item.maintainerNome,
-        matricula: item.maintainerMatricula,
-        total: 0,
-      };
-      current.nome = current.nome ?? item.maintainerNome;
-      current.matricula = current.matricula ?? item.maintainerMatricula;
-      current.total += 1;
-      map.set(key, current);
-    }
-
-    return Array.from(map.values()).sort((a, b) => {
-      const nameA = (a.nome ?? a.matricula ?? a.id).toLowerCase();
-      const nameB = (b.nome ?? b.matricula ?? b.id).toLowerCase();
-      return nameA.localeCompare(nameB, "pt-BR");
-    });
-  }, [items]);
-
-  const filteredItems = useMemo(() => {
-    if (selectedMaintainers.length === 0) {
-      return [];
-    }
-    const selectedSet = new Set(selectedMaintainers);
-    return items.filter(item => selectedSet.has(item.maintainerKey));
-  }, [items, selectedMaintainers]);
-
-  const visibleItems = filteredItems;
+  const maintainerOptions = maintainers;
+  const visibleItems = items;
   const hasMore = hasMoreItems;
 
-  const toggleMaintainer = useCallback((maintainerId: string) => {
-    setSelectedMaintainers(prev => {
-      if (prev.includes(maintainerId)) {
-        return prev.filter(id => id !== maintainerId);
-      }
-      return [...prev, maintainerId];
-    });
-  }, []);
+  const selectMaintainer = useCallback((maintainerId: string) => {
+    setSelectedMaintainerId(maintainerId);
+    fetchInspectionPage(maintainerId, "reset");
+  }, [fetchInspectionPage]);
 
   const clearMaintainers = useCallback(() => {
-    setSelectedMaintainers([]);
+    setSelectedMaintainerId(null);
+    setItems([]);
+    lastInspectionCursorRef.current = null;
+    setHasMoreItems(false);
+    setIndexUrl(null);
+    setError(null);
   }, []);
+
+
+  const handleReturnInspection = useCallback(async () => {
+    if (!returnDialogItem) return;
+
+    setReturningId(returnDialogItem.id);
+    setActionFeedback(null);
+    try {
+      const response = await fetch(`/api/inspecoes/${returnDialogItem.id}/return`, { method: "PATCH" });
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(payload?.error || "Falha ao devolver inspeção");
+      }
+
+      setItems(prev => prev.filter(item => item.id !== returnDialogItem.id));
+      setActionFeedback({ type: "success", message: "Inspeção devolvida ao mantenedor como rascunho." });
+      setReturnDialogItem(null);
+    } catch (err: unknown) {
+      const message = err instanceof Error && err.message ? err.message : "Erro ao devolver inspeção";
+      setActionFeedback({ type: "error", message });
+    } finally {
+      setReturningId(null);
+    }
+  }, [returnDialogItem]);
 
   const handleDeleteInspection = useCallback(
     async (inspectionId: string) => {
@@ -393,7 +473,8 @@ export default function AdminInspectionsPage() {
 
       {error ? (
         <div className="rounded-lg border border-[var(--danger)] bg-[color-mix(in_oklab,var(--danger),#fff_85%)] px-4 py-3 text-[var(--danger)]">
-          {error}
+          <p>{error}</p>
+          {indexUrl ? <a className="underline" href={indexUrl} target="_blank" rel="noreferrer">Criar índice composto no Firebase</a> : null}
         </div>
       ) : null}
 
@@ -470,7 +551,7 @@ export default function AdminInspectionsPage() {
             <div className="flex flex-col gap-2">
               <span className="text-sm font-medium text-[var(--text)]">Filtrar por mantenedor</span>
               <p className="text-xs text-[var(--muted)]">
-                Selecione um ou mais mantenedores para visualizar apenas suas inspeções recentes.
+                Selecione um mantenedor para buscar no Firestore as últimas 20 inspeções vinculadas a ele.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -479,19 +560,19 @@ export default function AdminInspectionsPage() {
                 size="sm"
                 variant="ghost"
                 onClick={clearMaintainers}
-                disabled={selectedMaintainers.length === 0}
+                disabled={!selectedMaintainerId}
               >
                 Limpar seleção
               </Button>
             </div>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {maintainerOptions.map(option => {
-                const isActive = selectedMaintainers.includes(option.id);
+                const isActive = selectedMaintainerId === option.id;
                 return (
                   <button
                     key={option.id}
                     type="button"
-                    onClick={() => toggleMaintainer(option.id)}
+                    onClick={() => selectMaintainer(option.id)}
                     className={cn(
                       buttonStyles({ variant: "ghost", size: "lg" }),
                       "group flex h-full min-h-[120px] w-full flex-col items-stretch justify-between gap-4 rounded-3xl border px-4 py-5 text-left",
@@ -529,13 +610,13 @@ export default function AdminInspectionsPage() {
                           : "bg-[rgba(37,99,235,0.08)] text-[color-mix(in_oklab,#1d4ed8,#0f172a_35%)]"
                       )}
                     >
-                      {option.total} inspeções
+                      Ver histórico
                     </span>
                   </button>
                 );
               })}
             </div>
-            {selectedMaintainers.length === 0 ? (
+            {!selectedMaintainerId ? (
               <p className="text-xs text-[var(--muted)]">Selecione um mantenedor para carregar suas inspeções.</p>
             ) : null}
           </div>
@@ -552,10 +633,10 @@ export default function AdminInspectionsPage() {
             </div>
           ) : null}
 
-          {selectedMaintainers.length === 0 ? (
+          {!selectedMaintainerId ? (
             <EmptyState
-              title="Selecione mantenedores"
-              description="Escolha pelo menos um mantenedor para visualizar as inspeções correspondentes."
+              title="Selecione um mantenedor"
+              description="Selecione um mantenedor acima para carregar o histórico de inspeções"
               className="py-12"
             />
           ) : loading ? (
@@ -567,7 +648,7 @@ export default function AdminInspectionsPage() {
                 </div>
               ))}
             </div>
-          ) : filteredItems.length === 0 ? (
+          ) : visibleItems.length === 0 ? (
             <EmptyState
               title="Nenhuma inspeção encontrada"
               description="Não há inspeções registradas para os mantenedores selecionados."
@@ -646,6 +727,16 @@ export default function AdminInspectionsPage() {
                             Assinar
                           </Link>
                         ) : null}
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100"
+                          onClick={() => setReturnDialogItem(item)}
+                          loading={returningId === item.id}
+                        >
+                          ↩ Devolver
+                        </Button>
                         <Link
                           href={`/admin/inspecoes/${item.id}/edit`}
                           className={buttonStyles({ size: "sm", variant: "secondary" })}
@@ -676,10 +767,10 @@ export default function AdminInspectionsPage() {
               </TableBody>
             </Table>
           )}
-          {!loading && filteredItems.length > 0 ? (
+          {!loading && visibleItems.length > 0 ? (
             <div className="mt-6 flex items-center justify-between text-sm text-[var(--muted)]">
               <span>
-                Mostrando {visibleItems.length} inspeções carregadas para os filtros selecionados.
+                Mostrando {visibleItems.length} inspeções carregadas para o mantenedor selecionado.
               </span>
               {hasMore ? (
                 <Button type="button" variant="outline" size="sm" onClick={handleLoadMore} disabled={loadingMore} loading={loadingMore}>
@@ -690,6 +781,20 @@ export default function AdminInspectionsPage() {
           ) : null}
         </CardContent>
       </Card>
+
+      <ConfirmDialog
+        open={Boolean(returnDialogItem)}
+        title="Devolver inspeção"
+        description="Deseja devolver esta inspeção para o mantenedor? Ela voltará como rascunho para que ele possa corrigir e reenviar."
+        confirmLabel="Devolver"
+        cancelLabel="Cancelar"
+        busy={returningId != null}
+        onCancel={() => {
+          if (returningId) return;
+          setReturnDialogItem(null);
+        }}
+        onConfirm={handleReturnInspection}
+      />
     </div>
   );
 }

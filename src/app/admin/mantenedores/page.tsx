@@ -2,14 +2,17 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { collection, getDocs, query, where, writeBatch } from "firebase/firestore";
 
 import { Button, buttonStyles } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { firebaseDb } from "@/lib/firebase-client";
 
 type Maintainer = {
   id: string;
@@ -20,6 +23,29 @@ type Maintainer = {
   ativo: boolean;
 };
 
+type TransferTarget = {
+  original: Maintainer;
+  substituteId: string;
+  active: boolean;
+};
+
+function normalizeName(value: string | null | undefined) {
+  return (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+function chunkArray<T>(items: T[], chunkSize: number) {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += chunkSize) {
+    chunks.push(items.slice(index, index + chunkSize));
+  }
+  return chunks;
+}
+
 export default function MantenedoresPage() {
   const [data, setData] = useState<Maintainer[]>([]);
   const [q, setQ] = useState("");
@@ -28,6 +54,8 @@ export default function MantenedoresPage() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Maintainer | null>(null);
+  const [transferTarget, setTransferTarget] = useState<TransferTarget | null>(null);
+  const [transferring, setTransferring] = useState(false);
 
   useEffect(() => {
     fetch("/api/admin-session", { cache: "no-store" }).then(r => {
@@ -50,6 +78,11 @@ export default function MantenedoresPage() {
         return m.matricula.toLowerCase().includes(term) || m.nome.toLowerCase().includes(term);
       }),
     [data, q]
+  );
+
+  const activeMaintainers = useMemo(
+    () => data.filter(maintainer => maintainer.ativo),
+    [data]
   );
 
   function handleOpenDelete(target: Maintainer) {
@@ -79,6 +112,118 @@ export default function MantenedoresPage() {
       setFeedback({ type: "error", message });
     } finally {
       setDeleting(false);
+    }
+  }
+
+
+  function handleOpenTransfer(original: Maintainer) {
+    const firstSubstitute = activeMaintainers.find(maintainer => maintainer.id !== original.id) ?? null;
+    setTransferTarget({ original, substituteId: firstSubstitute?.id ?? "", active: true });
+    setFeedback(null);
+  }
+
+  async function handleTransferInspections() {
+    if (!transferTarget?.original || !transferTarget.substituteId) return;
+    const substitute = data.find(maintainer => maintainer.id === transferTarget.substituteId);
+    if (!substitute) {
+      setFeedback({ type: "error", message: "Selecione um mantenedor substituto válido." });
+      return;
+    }
+    if (!transferTarget.active) {
+      setFeedback({
+        type: "success",
+        message: "Transferência desativada. Nenhuma inspeção programada foi alterada.",
+      });
+      setTransferTarget(null);
+      return;
+    }
+
+    setTransferring(true);
+    setFeedback(null);
+    try {
+      const programacoesRef = collection(firebaseDb, "programacoes_inspecao");
+      const [responsavelIdsSnap, maintainerIdSnap, responsavelPrincipalSnap] = await Promise.all([
+        getDocs(query(programacoesRef, where("status", "==", "PENDENTE"), where("responsavelIds", "array-contains", transferTarget.original.id))),
+        getDocs(query(programacoesRef, where("status", "==", "PENDENTE"), where("maintainerId", "==", transferTarget.original.id))),
+        getDocs(query(programacoesRef, where("status", "==", "PENDENTE"), where("responsavel.maintId", "==", transferTarget.original.id))),
+      ]);
+      const docsById = new Map([
+        ...responsavelIdsSnap.docs,
+        ...maintainerIdSnap.docs,
+        ...responsavelPrincipalSnap.docs,
+      ].map(docSnap => [docSnap.id, docSnap] as const));
+      const docs = Array.from(docsById.values());
+      const substituteNormalizedName = normalizeName(substitute.nome);
+
+      for (const docsChunk of chunkArray(docs, 450)) {
+        const batch = writeBatch(firebaseDb);
+        docsChunk.forEach(docSnap => {
+          const current = docSnap.data() ?? {};
+          const responsaveisRaw = Array.isArray(current.responsaveis) ? current.responsaveis : [];
+          const nextResponsaveis = responsaveisRaw.map(item => {
+            const maintId = typeof item?.maintId === "string" ? item.maintId : null;
+            if (maintId !== transferTarget.original.id) return item;
+            return {
+              ...item,
+              maintId: substitute.id,
+              nome: substitute.nome,
+              matricula: substitute.matricula,
+              origem: "transferencia_ferias",
+              transferidoDe: {
+                maintId: transferTarget.original.id,
+                nome: transferTarget.original.nome,
+                matricula: transferTarget.original.matricula,
+              },
+            };
+          });
+          const responsavelIds = Array.isArray(current.responsavelIds)
+            ? current.responsavelIds.filter((id): id is string => typeof id === "string" && id !== transferTarget.original.id)
+            : [];
+          const nextResponsavelIds = Array.from(new Set([...responsavelIds, substitute.id]));
+          const normalizedNames = Array.isArray(current.responsavelNomesNormalizados)
+            ? current.responsavelNomesNormalizados.filter((name): name is string => typeof name === "string" && name !== normalizeName(transferTarget.original.nome))
+            : [];
+          const nextNormalizedNames = Array.from(new Set([...normalizedNames, substituteNormalizedName].filter(Boolean)));
+
+          batch.update(docSnap.ref, {
+            responsavel: {
+              ...(typeof current.responsavel === "object" && current.responsavel ? current.responsavel : {}),
+              maintId: substitute.id,
+              nome: substitute.nome,
+              nomeNormalizado: substituteNormalizedName || null,
+              matricula: substitute.matricula,
+              origem: "transferencia_ferias",
+              transferidoDe: {
+                maintId: transferTarget.original.id,
+                nome: transferTarget.original.nome,
+                matricula: transferTarget.original.matricula,
+              },
+            },
+            responsaveis: nextResponsaveis.length > 0
+              ? nextResponsaveis
+              : [{ maintId: substitute.id, nome: substitute.nome, matricula: substitute.matricula, origem: "transferencia_ferias" }],
+            responsavelIds: nextResponsavelIds,
+            responsavelNomesNormalizados: nextNormalizedNames,
+            maintainerId: substitute.id,
+            maintainerNome: substitute.nome,
+            maintainerMatricula: substitute.matricula,
+            transferredFromMaintainerId: transferTarget.original.id,
+            transferredAt: new Date().toISOString(),
+          });
+        });
+        await batch.commit();
+      }
+
+      setFeedback({
+        type: "success",
+        message: `${docs.length} inspeções programadas foram transferidas com sucesso para ${substitute.nome}.`,
+      });
+      setTransferTarget(null);
+    } catch (error: unknown) {
+      const message = error instanceof Error && error.message ? error.message : "Erro ao transferir programações";
+      setFeedback({ type: "error", message });
+    } finally {
+      setTransferring(false);
     }
   }
 
@@ -200,6 +345,17 @@ export default function MantenedoresPage() {
                         </Link>
                         <Button
                           type="button"
+                          variant="outline"
+                          size="sm"
+                          className="border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100"
+                          onClick={() => handleOpenTransfer(m)}
+                          disabled={!m.ativo || activeMaintainers.length < 2}
+                        >
+                          <i className="fas fa-calendar-alt" aria-hidden />
+                          Transferir Inspeções
+                        </Button>
+                        <Button
+                          type="button"
                           variant="ghost"
                           size="sm"
                           className="text-rose-600 hover:bg-rose-50 hover:text-rose-700"
@@ -217,6 +373,88 @@ export default function MantenedoresPage() {
           )}
         </CardContent>
       </Card>
+
+
+      <ConfirmDialog
+        open={Boolean(transferTarget)}
+        title="Transferir inspeções"
+        description="Transfira as inspeções programadas deste mantenedor para um substituto."
+        onConfirm={handleTransferInspections}
+        onCancel={() => {
+          if (transferring) return;
+          setTransferTarget(null);
+        }}
+        busy={transferring}
+        footer={
+          <div className="space-y-5">
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              {transferTarget ? (
+                <p>
+                  As programações pendentes de <strong>{transferTarget.original.nome}</strong> serão atribuídas ao substituto selecionado abaixo.
+                </p>
+              ) : null}
+            </div>
+            <label className="flex items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
+              <input
+                type="checkbox"
+                className="h-4 w-4 accent-[var(--primary)]"
+                checked={transferTarget?.active ?? false}
+                onChange={event => {
+                  const active = event.target.checked;
+                  setTransferTarget(current => current ? { ...current, active } : current);
+                }}
+                disabled={transferring}
+              />
+              <span>
+                Transferência ativa
+                {transferTarget?.substituteId ? (
+                  <strong className="ml-1">
+                    para {activeMaintainers.find(maintainer => maintainer.id === transferTarget.substituteId)?.nome ?? "substituto selecionado"}
+                  </strong>
+                ) : null}
+              </span>
+            </label>
+            <label className="space-y-2 text-sm">
+              <span className="font-medium text-[var(--text)]">Substituto</span>
+              <Select
+                value={transferTarget?.substituteId ?? ""}
+                onChange={event => {
+                  const substituteId = event.target.value;
+                  setTransferTarget(current => current ? { ...current, substituteId } : current);
+                }}
+                disabled={transferring}
+              >
+                <option value="" disabled>Selecione um mantenedor ativo</option>
+                {activeMaintainers
+                  .filter(maintainer => maintainer.id !== transferTarget?.original.id)
+                  .map(maintainer => (
+                    <option key={maintainer.id} value={maintainer.id}>
+                      {maintainer.matricula ? `${maintainer.matricula} — ` : ""}{maintainer.nome}
+                    </option>
+                  ))}
+              </Select>
+            </label>
+            <div className="flex justify-end gap-3">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setTransferTarget(null)}
+                disabled={transferring}
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                onClick={handleTransferInspections}
+                loading={transferring}
+                disabled={!transferTarget?.substituteId}
+              >
+                Transferir
+              </Button>
+            </div>
+          </div>
+        }
+      />
 
       <ConfirmDialog
         open={confirmOpen}
