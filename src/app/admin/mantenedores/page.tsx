@@ -23,7 +23,7 @@ type Maintainer = {
   ativo: boolean;
 };
 
-type TransferTarget = {
+type ShareTarget = {
   original: Maintainer;
   substituteId: string;
   active: boolean;
@@ -54,8 +54,8 @@ export default function MantenedoresPage() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Maintainer | null>(null);
-  const [transferTarget, setTransferTarget] = useState<TransferTarget | null>(null);
-  const [transferring, setTransferring] = useState(false);
+  const [shareTarget, setShareTarget] = useState<ShareTarget | null>(null);
+  const [sharing, setSharing] = useState(false);
 
   useEffect(() => {
     fetch("/api/admin-session", { cache: "no-store" }).then(r => {
@@ -116,36 +116,35 @@ export default function MantenedoresPage() {
   }
 
 
-  function handleOpenTransfer(original: Maintainer) {
-    const firstSubstitute = activeMaintainers.find(maintainer => maintainer.id !== original.id) ?? null;
-    setTransferTarget({ original, substituteId: firstSubstitute?.id ?? "", active: true });
+  function handleOpenShare(original: Maintainer) {
+    setShareTarget({ original, substituteId: "", active: false });
     setFeedback(null);
   }
 
-  async function handleTransferInspections() {
-    if (!transferTarget?.original || !transferTarget.substituteId) return;
-    const substitute = data.find(maintainer => maintainer.id === transferTarget.substituteId);
+  async function handleShareInspections() {
+    if (!shareTarget?.original || !shareTarget.substituteId) return;
+    const substitute = data.find(maintainer => maintainer.id === shareTarget.substituteId);
     if (!substitute) {
-      setFeedback({ type: "error", message: "Selecione um mantenedor substituto válido." });
+      setFeedback({ type: "error", message: "Selecione um mantenedor válido para compartilhar." });
       return;
     }
-    if (!transferTarget.active) {
+    if (!shareTarget.active) {
       setFeedback({
         type: "success",
-        message: "Transferência desativada. Nenhuma inspeção programada foi alterada.",
+        message: "Compartilhamento desativado. Nenhuma alteração foi feita.",
       });
-      setTransferTarget(null);
+      setShareTarget(null);
       return;
     }
 
-    setTransferring(true);
+    setSharing(true);
     setFeedback(null);
     try {
       const programacoesRef = collection(firebaseDb, "programacoes_inspecao");
       const [responsavelIdsSnap, maintainerIdSnap, responsavelPrincipalSnap] = await Promise.all([
-        getDocs(query(programacoesRef, where("status", "==", "PENDENTE"), where("responsavelIds", "array-contains", transferTarget.original.id))),
-        getDocs(query(programacoesRef, where("status", "==", "PENDENTE"), where("maintainerId", "==", transferTarget.original.id))),
-        getDocs(query(programacoesRef, where("status", "==", "PENDENTE"), where("responsavel.maintId", "==", transferTarget.original.id))),
+        getDocs(query(programacoesRef, where("status", "==", "PENDENTE"), where("responsavelIds", "array-contains", shareTarget.original.id))),
+        getDocs(query(programacoesRef, where("status", "==", "PENDENTE"), where("maintainerId", "==", shareTarget.original.id))),
+        getDocs(query(programacoesRef, where("status", "==", "PENDENTE"), where("responsavel.maintId", "==", shareTarget.original.id))),
       ]);
       const docsById = new Map([
         ...responsavelIdsSnap.docs,
@@ -160,55 +159,33 @@ export default function MantenedoresPage() {
         docsChunk.forEach(docSnap => {
           const current = docSnap.data() ?? {};
           const responsaveisRaw = Array.isArray(current.responsaveis) ? current.responsaveis : [];
-          const nextResponsaveis = responsaveisRaw.map(item => {
-            const maintId = typeof item?.maintId === "string" ? item.maintId : null;
-            if (maintId !== transferTarget.original.id) return item;
-            return {
-              ...item,
-              maintId: substitute.id,
-              nome: substitute.nome,
-              matricula: substitute.matricula,
-              origem: "transferencia_ferias",
-              transferidoDe: {
-                maintId: transferTarget.original.id,
-                nome: transferTarget.original.nome,
-                matricula: transferTarget.original.matricula,
-              },
-            };
-          });
+          const substituteAlreadyIncluded = responsaveisRaw.some(
+            item => typeof item?.maintId === "string" && item.maintId === substitute.id,
+          );
+          const nextResponsaveis = substituteAlreadyIncluded
+            ? responsaveisRaw
+            : [
+                ...responsaveisRaw,
+                {
+                  maintId: substitute.id,
+                  nome: substitute.nome,
+                  matricula: substitute.matricula,
+                  origem: "compartilhado",
+                },
+              ];
           const responsavelIds = Array.isArray(current.responsavelIds)
-            ? current.responsavelIds.filter((id): id is string => typeof id === "string" && id !== transferTarget.original.id)
+            ? current.responsavelIds.filter((id): id is string => typeof id === "string")
             : [];
           const nextResponsavelIds = Array.from(new Set([...responsavelIds, substitute.id]));
           const normalizedNames = Array.isArray(current.responsavelNomesNormalizados)
-            ? current.responsavelNomesNormalizados.filter((name): name is string => typeof name === "string" && name !== normalizeName(transferTarget.original.nome))
+            ? current.responsavelNomesNormalizados.filter((name): name is string => typeof name === "string")
             : [];
           const nextNormalizedNames = Array.from(new Set([...normalizedNames, substituteNormalizedName].filter(Boolean)));
 
           batch.update(docSnap.ref, {
-            responsavel: {
-              ...(typeof current.responsavel === "object" && current.responsavel ? current.responsavel : {}),
-              maintId: substitute.id,
-              nome: substitute.nome,
-              nomeNormalizado: substituteNormalizedName || null,
-              matricula: substitute.matricula,
-              origem: "transferencia_ferias",
-              transferidoDe: {
-                maintId: transferTarget.original.id,
-                nome: transferTarget.original.nome,
-                matricula: transferTarget.original.matricula,
-              },
-            },
-            responsaveis: nextResponsaveis.length > 0
-              ? nextResponsaveis
-              : [{ maintId: substitute.id, nome: substitute.nome, matricula: substitute.matricula, origem: "transferencia_ferias" }],
+            responsaveis: nextResponsaveis,
             responsavelIds: nextResponsavelIds,
             responsavelNomesNormalizados: nextNormalizedNames,
-            maintainerId: substitute.id,
-            maintainerNome: substitute.nome,
-            maintainerMatricula: substitute.matricula,
-            transferredFromMaintainerId: transferTarget.original.id,
-            transferredAt: new Date().toISOString(),
           });
         });
         await batch.commit();
@@ -216,14 +193,14 @@ export default function MantenedoresPage() {
 
       setFeedback({
         type: "success",
-        message: `${docs.length} inspeções programadas foram transferidas com sucesso para ${substitute.nome}.`,
+        message: `${docs.length} inspeções pendentes foram compartilhadas com sucesso com ${substitute.nome}.`,
       });
-      setTransferTarget(null);
+      setShareTarget(null);
     } catch (error: unknown) {
-      const message = error instanceof Error && error.message ? error.message : "Erro ao transferir programações";
+      const message = error instanceof Error && error.message ? error.message : "Erro ao compartilhar programações";
       setFeedback({ type: "error", message });
     } finally {
-      setTransferring(false);
+      setSharing(false);
     }
   }
 
@@ -349,11 +326,11 @@ export default function MantenedoresPage() {
                             variant="outline"
                             size="sm"
                             className="border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100"
-                            onClick={() => handleOpenTransfer(m)}
+                            onClick={() => handleOpenShare(m)}
                             disabled={!m.ativo || activeMaintainers.length < 2}
                           >
-                            <i className="fas fa-calendar-alt" aria-hidden />
-                            Transferir Inspeções
+                            <i className="fas fa-share" aria-hidden />
+                            Compartilhar
                           </Button>
                           <Button
                             type="button"
@@ -366,72 +343,66 @@ export default function MantenedoresPage() {
                             Excluir
                           </Button>
                         </div>
-                      </TableCell>
-                    </TableRow>
-                    {transferTarget?.original.id === m.id ? (
-                      <TableRow className="bg-amber-50/80">
-                        <TableCell colSpan={6} className="p-4">
-                          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                            <div className="flex flex-wrap items-center gap-3 text-sm text-slate-700">
-                              <label className="inline-flex items-center gap-2 rounded-full border border-amber-300 bg-white px-3 py-2">
-                                <input
-                                  type="checkbox"
-                                  className="h-4 w-4 accent-[var(--primary)]"
-                                  checked={transferTarget.active}
-                                  onChange={event => {
-                                    const active = event.target.checked;
-                                    setTransferTarget(current => current ? { ...current, active } : current);
-                                  }}
-                                  disabled={transferring}
-                                />
-                                <span>Transferência ativa</span>
-                              </label>
-                              <span className="text-sm text-slate-700">
-                                para <strong>{activeMaintainers.find(maintainer => maintainer.id === transferTarget.substituteId)?.nome ?? "substituto selecionado"}</strong>
-                              </span>
-                            </div>
-                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
-                              <label className="min-w-[210px] text-sm">
-                                <span className="sr-only">Substituto</span>
-                                <Select
-                                  value={transferTarget.substituteId}
-                                  onChange={event => {
-                                    const substituteId = event.target.value;
-                                    setTransferTarget(current => current ? { ...current, substituteId } : current);
-                                  }}
-                                  disabled={transferring}
-                                >
-                                  <option value="" disabled>Selecione um mantenedor ativo</option>
-                                  {activeMaintainers
-                                    .filter(maintainer => maintainer.id !== transferTarget.original.id)
-                                    .map(maintainer => (
-                                      <option key={maintainer.id} value={maintainer.id}>
-                                        {maintainer.matricula ? `${maintainer.matricula} — ` : ""}{maintainer.nome}
-                                      </option>
-                                    ))}
-                                </Select>
-                              </label>
+                        {shareTarget?.original.id === m.id ? (
+                          <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-slate-700 sm:mt-0 sm:flex sm:items-center sm:justify-end sm:gap-3">
+                            <label className="inline-flex items-center gap-2 rounded-full border border-amber-300 bg-white px-3 py-2">
+                              <input
+                                type="checkbox"
+                                className="h-4 w-4 accent-[var(--primary)]"
+                                checked={shareTarget.active}
+                                onChange={event => {
+                                  const active = event.target.checked;
+                                  setShareTarget(current => current ? { ...current, active } : current);
+                                }}
+                                disabled={sharing}
+                              />
+                              <span>Compartilhar inspeções</span>
+                            </label>
+                            <span className="text-sm">
+                              com <strong>{activeMaintainers.find(maintainer => maintainer.id === shareTarget.substituteId)?.nome ?? "mantenedor"}</strong>
+                            </span>
+                            <label className="min-w-[220px] text-sm">
+                              <span className="sr-only">Mantenedor compartilhado</span>
+                              <Select
+                                value={shareTarget.substituteId}
+                                onChange={event => {
+                                  const substituteId = event.target.value;
+                                  setShareTarget(current => current ? { ...current, substituteId } : current);
+                                }}
+                                disabled={sharing}
+                              >
+                                <option value="" disabled>Selecione um mantenedor ativo</option>
+                                {activeMaintainers
+                                  .filter(maintainer => maintainer.id !== shareTarget.original.id)
+                                  .map(maintainer => (
+                                    <option key={maintainer.id} value={maintainer.id}>
+                                      {maintainer.matricula ? `${maintainer.matricula} — ` : ""}{maintainer.nome}
+                                    </option>
+                                  ))}
+                              </Select>
+                            </label>
+                            <div className="flex flex-wrap gap-2">
                               <Button
                                 type="button"
-                                onClick={handleTransferInspections}
-                                loading={transferring}
-                                disabled={!transferTarget.substituteId}
+                                onClick={handleShareInspections}
+                                loading={sharing}
+                                disabled={!shareTarget.substituteId || !shareTarget.active}
                               >
-                                Transferir
+                                Compartilhar
                               </Button>
                               <Button
                                 type="button"
                                 variant="ghost"
-                                onClick={() => setTransferTarget(null)}
-                                disabled={transferring}
+                                onClick={() => setShareTarget(null)}
+                                disabled={sharing}
                               >
-                                Cancelar
+                                Fechar
                               </Button>
                             </div>
                           </div>
-                        </TableCell>
-                      </TableRow>
-                    ) : null}
+                        ) : null}
+                      </TableCell>
+                    </TableRow>
                   </Fragment>
                 ))}
               </TableBody>
