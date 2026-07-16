@@ -1,16 +1,20 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import {
   collection,
   deleteField,
   doc,
-  getDoc,
   getDocs,
+  limit,
+  orderBy,
   query,
+  startAfter,
   updateDoc,
   where,
+  type DocumentData,
+  type QueryDocumentSnapshot,
 } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase-client";
 import { Button } from "@/components/ui/button";
@@ -50,6 +54,13 @@ interface TemplateMeta {
   nome?: string | null;
   versao?: string | null;
   itensMap: Map<string, TemplateItemData>;
+}
+
+interface TemplateCacheRecord {
+  id: string;
+  nome: string | null;
+  versao: string | null;
+  itens: TemplateItemData[];
 }
 
 interface NonConformityItem {
@@ -248,6 +259,40 @@ function renderStatusBadge(status: NonConformityStatus) {
   return <Badge variant="danger">Aberta</Badge>;
 }
 
+
+const PAGE_SIZE = 20;
+const FIRESTORE_IN_QUERY_LIMIT = 30;
+const MACHINES_SESSION_CACHE_KEY = "admin-nc-machines-v1";
+const TEMPLATES_SESSION_CACHE_KEY = "admin-nc-templates-v1";
+type IssueCursor = QueryDocumentSnapshot<DocumentData>;
+
+
+function readSessionCache<T>(key: string): T[] | null {
+  if (typeof window === "undefined") return null;
+  const cached = window.sessionStorage.getItem(key);
+  if (!cached) return null;
+  try {
+    const parsed = JSON.parse(cached);
+    return Array.isArray(parsed) ? (parsed as T[]) : null;
+  } catch {
+    window.sessionStorage.removeItem(key);
+    return null;
+  }
+}
+
+function writeSessionCache<T>(key: string, records: T[]) {
+  if (typeof window === "undefined") return;
+  window.sessionStorage.setItem(key, JSON.stringify(records));
+}
+
+function chunkArray<T>(items: T[], chunkSize: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += chunkSize) {
+    chunks.push(items.slice(index, index + chunkSize));
+  }
+  return chunks;
+}
+
 const STATUS_OPTIONS: Array<{ value: NonConformityStatus; label: string }> = [
   { value: "open", label: "Aberta" },
   { value: "in_progress", label: "Em andamento" },
@@ -271,6 +316,9 @@ export default function AdminNonConformitiesPage() {
   const [expandedResolutions, setExpandedResolutions] = useState<Set<string>>(new Set());
   const [deleteDialogItem, setDeleteDialogItem] = useState<NonConformityItem | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMoreItems, setHasMoreItems] = useState(false);
+  const lastIssueCursorRef = useRef<IssueCursor | null>(null);
 
   const shouldRefreshOnFilterChange = Boolean(maintainerFilter || statusFilter !== "open" || dueDateFilter !== "default");
 
@@ -278,25 +326,41 @@ export default function AdminNonConformitiesPage() {
     setSelectedIds(prev => prev.filter(id => items.some(item => item.id === id)));
   }, [items]);
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
+  const loadData = useCallback(async (mode: "reset" | "append" = "reset") => {
+    const shouldAppend = mode === "append";
+    const cursor = lastIssueCursorRef.current;
+    if (shouldAppend && !cursor) return;
+
+    if (shouldAppend) {
+      setLoadingMore(true);
+    } else {
+      setLoading(true);
+      lastIssueCursorRef.current = null;
+      setHasMoreItems(false);
+    }
     setError(null);
     try {
-      const session = await fetch("/api/admin-session", { cache: "no-store" });
-      if (session.status === 401) {
-        window.location.href = "/admin/login";
-        return;
+      if (!shouldAppend) {
+        const session = await fetch("/api/admin-session", { cache: "no-store" });
+        if (session.status === 401) {
+          window.location.href = "/admin/login";
+          return;
+        }
       }
 
-      const issueConstraints = [where("status", "in", ["aberta", "concluida", "resolvida"])] as const;
+      const cachedMachines = readSessionCache<MachineOption>(MACHINES_SESSION_CACHE_KEY);
+      const cachedTemplates = readSessionCache<TemplateCacheRecord>(TEMPLATES_SESSION_CACHE_KEY);
+      const issueConstraints = cursor && shouldAppend
+        ? [where("status", "in", ["aberta", "concluida", "resolvida"]), orderBy("updatedAt", "desc"), startAfter(cursor), limit(PAGE_SIZE)]
+        : [where("status", "in", ["aberta", "concluida", "resolvida"]), orderBy("updatedAt", "desc"), limit(PAGE_SIZE)];
 
       const [machinesSnap, templatesSnap, issuesSnap] = await Promise.all([
-        getDocs(collection(firebaseDb, "machines")),
-        getDocs(collection(firebaseDb, "templates")),
+        cachedMachines ? Promise.resolve(null) : getDocs(collection(firebaseDb, "machines")),
+        cachedTemplates ? Promise.resolve(null) : getDocs(collection(firebaseDb, "templates")),
         getDocs(query(collection(firebaseDb, "issues"), ...issueConstraints)),
       ]);
 
-      const machineOptions: MachineOption[] = machinesSnap.docs.map(docSnap => {
+      const machineOptions: MachineOption[] = cachedMachines ?? machinesSnap!.docs.map(docSnap => {
         const data = docSnap.data() ?? {};
         return {
           id: docSnap.id,
@@ -306,21 +370,31 @@ export default function AdminNonConformitiesPage() {
           ativo: data.ativo !== false,
         } satisfies MachineOption;
       });
+      if (!cachedMachines) writeSessionCache(MACHINES_SESSION_CACHE_KEY, machineOptions);
       const machinesById = new Map(machineOptions.map(machine => [machine.id, machine]));
 
-      const templateMap = new Map<string, TemplateMeta>();
-      templatesSnap.docs.forEach(docSnap => {
+      const templateRecords: TemplateCacheRecord[] = cachedTemplates ?? templatesSnap!.docs.map(docSnap => {
         const data = docSnap.data() ?? {};
-        const itens = Array.isArray(data.itens) ? (data.itens as TemplateItemData[]) : [];
+        return {
+          id: docSnap.id,
+          nome: data.nome ? String(data.nome) : docSnap.id,
+          versao: data.versao ? String(data.versao) : null,
+          itens: Array.isArray(data.itens) ? (data.itens as TemplateItemData[]) : [],
+        };
+      });
+      if (!cachedTemplates) writeSessionCache(TEMPLATES_SESSION_CACHE_KEY, templateRecords);
+
+      const templateMap = new Map<string, TemplateMeta>();
+      templateRecords.forEach(template => {
         const itensMap = new Map<string, TemplateItemData>();
-        itens.forEach(item => {
+        template.itens.forEach(item => {
           if (item?.id) {
             itensMap.set(String(item.id), item);
           }
         });
-        templateMap.set(docSnap.id, {
-          nome: data.nome ? String(data.nome) : docSnap.id,
-          versao: data.versao ? String(data.versao) : null,
+        templateMap.set(template.id, {
+          nome: template.nome,
+          versao: template.versao,
           itensMap,
         });
       });
@@ -336,14 +410,15 @@ export default function AdminNonConformitiesPage() {
         )
       );
 
-      const sourceInspectionEntries = await Promise.all(
-        sourceInspectionIds.map(async inspectionId => {
-          const inspectionRef = doc(collection(firebaseDb, "inspecoes"), inspectionId);
-          const inspectionSnap = await getDoc(inspectionRef);
-          if (!inspectionSnap.exists()) {
-            return [inspectionId, null] as const;
-          }
+      const inspectionChunks = chunkArray(sourceInspectionIds, FIRESTORE_IN_QUERY_LIMIT);
+      const inspectionChunkSnaps = await Promise.all(
+        inspectionChunks.map(chunk =>
+          getDocs(query(collection(firebaseDb, "inspecoes"), where("__name__", "in", chunk)))
+        )
+      );
 
+      const sourceInspectionEntries = inspectionChunkSnaps.flatMap(chunkSnap =>
+        chunkSnap.docs.map(inspectionSnap => {
           const inspectionData = inspectionSnap.data() ?? {};
           const machine = (inspectionData.machine ?? {}) as Record<string, unknown>;
           const maintainer = (inspectionData.maintainer ?? {}) as Record<string, unknown>;
@@ -368,7 +443,7 @@ export default function AdminNonConformitiesPage() {
           });
 
           return [
-            inspectionId,
+            inspectionSnap.id,
             {
               machineId:
                 typeof machine.machineId === "string"
@@ -518,13 +593,22 @@ export default function AdminNonConformitiesPage() {
         });
       });
 
-      setTreatmentsByResponse(treatmentsRecord);
-      setItems(sortByLastActivityDesc(builtItems));
+      setTreatmentsByResponse(prev => (shouldAppend ? { ...prev, ...treatmentsRecord } : treatmentsRecord));
+      setItems(prev => {
+        const nextItems = shouldAppend ? [...prev, ...builtItems] : builtItems;
+        return sortByLastActivityDesc(nextItems);
+      });
+      lastIssueCursorRef.current = issuesSnap.docs.at(-1) ?? null;
+      setHasMoreItems(issuesSnap.docs.length === PAGE_SIZE);
     } catch (err: unknown) {
       const message = err instanceof Error && err.message ? err.message : "Erro ao carregar dados";
       setError(message);
     } finally {
-      setLoading(false);
+      if (shouldAppend) {
+        setLoadingMore(false);
+      } else {
+        setLoading(false);
+      }
     }
   }, []);
 
@@ -787,7 +871,7 @@ export default function AdminNonConformitiesPage() {
   const allVisibleSelected =
     filteredItems.length > 0 && filteredItems.every(item => selectedIds.includes(item.id));
   const selectedCount = selectedIds.length;
-  const canLoadMoreInitialItems = false;
+  const canLoadMoreInitialItems = hasMoreItems;
 
   if (loading) {
     return (
@@ -958,9 +1042,9 @@ export default function AdminNonConformitiesPage() {
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => loadData()}
-                disabled={loading}
-                loading={loading}
+                onClick={() => loadData("append")}
+                disabled={loadingMore}
+                loading={loadingMore}
               >
                 Carregar mais 20 NC
               </Button>
@@ -1181,9 +1265,9 @@ export default function AdminNonConformitiesPage() {
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => loadData()}
-                disabled={loading}
-                loading={loading}
+                onClick={() => loadData("append")}
+                disabled={loadingMore}
+                loading={loadingMore}
               >
                 Carregar mais 20 NC
               </Button>

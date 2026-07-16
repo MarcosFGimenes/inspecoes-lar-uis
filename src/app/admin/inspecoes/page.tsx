@@ -1,8 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { collection, getDocs, orderBy, query } from "firebase/firestore";
+import {
+  collection,
+  getCountFromServer,
+  getDocs,
+  limit,
+  orderBy,
+  query,
+  startAfter,
+  where,
+  type DocumentData,
+  type QueryDocumentSnapshot,
+} from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase-client";
 import { Button, buttonStyles } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -39,6 +50,43 @@ interface InspectionListItem {
   ncItems: Array<{ questionId: string; questionText: string | null; osNumero: string | null; photoUrls: StoredImage[] }>;
 }
 
+
+interface InspectionStats {
+  total: number;
+  signed: number;
+  pending: number;
+  withNc: number;
+}
+
+const PAGE_SIZE = 20;
+type InspectionCursor = QueryDocumentSnapshot<DocumentData>;
+
+const emptyStats: InspectionStats = {
+  total: 0,
+  signed: 0,
+  pending: 0,
+  withNc: 0,
+};
+
+async function loadInspectionStats(): Promise<InspectionStats> {
+  const inspectionsRef = collection(firebaseDb, "inspecoes");
+  const [totalSnap, signedSnap, withNcSnap] = await Promise.all([
+    getCountFromServer(inspectionsRef),
+    getCountFromServer(query(inspectionsRef, where("pcmSign.assinaturaUrl", ">", ""))),
+    getCountFromServer(query(inspectionsRef, where("qtdNC", ">", 0))),
+  ]);
+
+  const total = totalSnap.data().count;
+  const signed = signedSnap.data().count;
+
+  return {
+    total,
+    signed,
+    pending: Math.max(total - signed, 0),
+    withNc: withNcSnap.data().count,
+  };
+}
+
 function formatDateTime(value: string | null) {
   if (!value) return "-";
   const date = new Date(value);
@@ -46,118 +94,143 @@ function formatDateTime(value: string | null) {
   return date.toLocaleString("pt-BR");
 }
 
+
+function mapInspectionDoc(doc: InspectionCursor): InspectionListItem {
+  const data = doc.data() ?? {};
+  const machine = (data.machine ?? {}) as Record<string, unknown>;
+  const maintainer = (data.maintainer ?? {}) as Record<string, unknown>;
+  const answers = Array.isArray(data.answers) ? (data.answers as ChecklistAnswer[]) : [];
+  const itensRaw = Array.isArray(data.itens) ? (data.itens as Array<Record<string, unknown>>) : [];
+  const ncItems =
+    answers.length > 0
+      ? answers
+          .filter(answer => answer?.response === "nc")
+          .map(answer => ({
+            questionId: answer.questionId,
+            questionText: answer.questionText ?? null,
+            osNumero: answer.itemOsNumero ?? null,
+            photoUrls: normalizeStoredImages(answer.photoUrls ?? []),
+          }))
+      : itensRaw
+          .filter(item => String(item.resultado ?? item.response ?? "C").toLowerCase() === "nc")
+          .map(item => ({
+            questionId: String(item.templateItemId ?? item.questionId ?? ""),
+            questionText:
+              typeof item.componente === "string"
+                ? item.componente
+                : typeof item.criterio === "string"
+                ? item.criterio
+                : null,
+            osNumero:
+              typeof item.osNumeroItem === "string" && item.osNumeroItem.trim()
+                ? item.osNumeroItem.trim().toUpperCase()
+                : null,
+            photoUrls: normalizeStoredImages(item.fotos ?? []),
+          }));
+  const qtdNc = typeof data.qtdNC === "number" ? data.qtdNC : ncItems.length;
+  const pcmSign = (data.pcmSign ?? {}) as Record<string, unknown>;
+  const maintainerId =
+    typeof maintainer.id === "string" && maintainer.id.trim()
+      ? maintainer.id.trim()
+      : typeof maintainer.maintId === "string" && maintainer.maintId.trim()
+      ? maintainer.maintId.trim()
+      : null;
+  const maintainerMatricula =
+    typeof maintainer.matricula === "string" && maintainer.matricula.trim()
+      ? maintainer.matricula.trim().toUpperCase()
+      : null;
+  const maintainerNome = maintainer.nome ? String(maintainer.nome) : null;
+  const maintainerKey =
+    maintainerId ??
+    maintainerMatricula ??
+    (maintainerNome ? maintainerNome.trim().toLowerCase() : null) ??
+    "unknown";
+
+  return {
+    id: doc.id,
+    machineNome: machine.nome ? String(machine.nome) : null,
+    machineTag: machine.tag ? String(machine.tag) : null,
+    createdAt: data.createdAt ? String(data.createdAt) : null,
+    maintainerNome,
+    maintainerMatricula,
+    maintainerId,
+    maintainerKey,
+    qtdNc,
+    hasNc: qtdNc > 0,
+    osNumero: data.osNumero ? String(data.osNumero) : null,
+    signed: Boolean(pcmSign && pcmSign.assinaturaUrl),
+    signedAt: pcmSign?.signedAt ? String(pcmSign.signedAt) : null,
+    pcmNome: pcmSign?.nome ? String(pcmSign.nome) : null,
+    ncItems,
+  };
+}
+
 export default function AdminInspectionsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<InspectionListItem[]>([]);
+  const [stats, setStats] = useState<InspectionStats>(emptyStats);
   const [selectedMaintainers, setSelectedMaintainers] = useState<string[]>([]);
-  const [visibleCount, setVisibleCount] = useState<number>(0);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMoreItems, setHasMoreItems] = useState(false);
+  const lastInspectionCursorRef = useRef<InspectionCursor | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [actionFeedback, setActionFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
+  const fetchInspectionPage = useCallback(async (mode: "reset" | "append" = "reset") => {
+    const shouldAppend = mode === "append";
+    const cursor = lastInspectionCursorRef.current;
+    if (shouldAppend && !cursor) return;
+
+    if (shouldAppend) {
+      setLoadingMore(true);
+    } else {
+      setLoading(true);
+      lastInspectionCursorRef.current = null;
+      setHasMoreItems(false);
+      setActionFeedback(null);
+    }
     setError(null);
-    setActionFeedback(null);
+
     try {
-      const session = await fetch("/api/admin-session", { cache: "no-store" });
-      if (session.status === 401) {
-        window.location.href = "/admin/login";
-        setLoading(false);
-        return;
+      if (!shouldAppend) {
+        const session = await fetch("/api/admin-session", { cache: "no-store" });
+        if (session.status === 401) {
+          window.location.href = "/admin/login";
+          return;
+        }
       }
 
-      const inspectionsSnap = await getDocs(
-        query(collection(firebaseDb, "inspecoes"), orderBy("createdAt", "desc"))
-      );
+      const inspectionsQuery = cursor && shouldAppend
+        ? query(collection(firebaseDb, "inspecoes"), orderBy("createdAt", "desc"), startAfter(cursor), limit(PAGE_SIZE))
+        : query(collection(firebaseDb, "inspecoes"), orderBy("createdAt", "desc"), limit(PAGE_SIZE));
 
-      const mapped: InspectionListItem[] = inspectionsSnap.docs.map(doc => {
-        const data = doc.data() ?? {};
-        const machine = (data.machine ?? {}) as Record<string, unknown>;
-        const maintainer = (data.maintainer ?? {}) as Record<string, unknown>;
-        const answers = Array.isArray(data.answers) ? (data.answers as ChecklistAnswer[]) : [];
-        const itensRaw = Array.isArray(data.itens) ? (data.itens as Array<Record<string, unknown>>) : [];
-        const ncItems =
-          answers.length > 0
-            ? answers
-                .filter(answer => answer?.response === "nc")
-                .map(answer => ({
-                  questionId: answer.questionId,
-                  questionText: answer.questionText ?? null,
-                  osNumero: answer.itemOsNumero ?? null,
-                  photoUrls: normalizeStoredImages(answer.photoUrls ?? []),
-                }))
-            : itensRaw
-                .filter(item => String(item.resultado ?? item.response ?? "C").toLowerCase() === "nc")
-                .map(item => ({
-                  questionId: String(item.templateItemId ?? item.questionId ?? ""),
-                  questionText:
-                    typeof item.componente === "string"
-                      ? item.componente
-                      : typeof item.criterio === "string"
-                      ? item.criterio
-                      : null,
-                  osNumero:
-                    typeof item.osNumeroItem === "string" && item.osNumeroItem.trim()
-                      ? item.osNumeroItem.trim().toUpperCase()
-                      : null,
-                  photoUrls: normalizeStoredImages(item.fotos ?? []),
-                }));
-        const qtdNc = typeof data.qtdNC === "number" ? data.qtdNC : ncItems.length;
-        const pcmSign = (data.pcmSign ?? {}) as Record<string, unknown>;
-        const maintainerId =
-          typeof maintainer.id === "string" && maintainer.id.trim()
-            ? maintainer.id.trim()
-            : typeof maintainer.maintId === "string" && maintainer.maintId.trim()
-            ? maintainer.maintId.trim()
-            : null;
-        const maintainerMatricula =
-          typeof maintainer.matricula === "string" && maintainer.matricula.trim()
-            ? maintainer.matricula.trim().toUpperCase()
-            : null;
-        const maintainerNome = maintainer.nome ? String(maintainer.nome) : null;
-        const maintainerKey =
-          maintainerId ??
-          maintainerMatricula ??
-          (maintainerNome ? maintainerNome.trim().toLowerCase() : null) ??
-          "unknown";
+      const [inspectionsSnap, inspectionStats] = await Promise.all([
+        getDocs(inspectionsQuery),
+        shouldAppend ? Promise.resolve(null) : loadInspectionStats(),
+      ]);
 
-        return {
-          id: doc.id,
-          machineNome: machine.nome ? String(machine.nome) : null,
-          machineTag: machine.tag ? String(machine.tag) : null,
-          createdAt: data.createdAt ? String(data.createdAt) : null,
-          maintainerNome,
-          maintainerMatricula,
-          maintainerId,
-          maintainerKey,
-          qtdNc,
-          hasNc: qtdNc > 0,
-          osNumero: data.osNumero ? String(data.osNumero) : null,
-          signed: Boolean(pcmSign && pcmSign.assinaturaUrl),
-          signedAt: pcmSign?.signedAt ? String(pcmSign.signedAt) : null,
-          pcmNome: pcmSign?.nome ? String(pcmSign.nome) : null,
-          ncItems,
-        } satisfies InspectionListItem;
-      });
-
-      setItems(mapped);
+      const mapped = inspectionsSnap.docs.map(mapInspectionDoc);
+      setItems(prev => (shouldAppend ? [...prev, ...mapped] : mapped));
+      if (inspectionStats) {
+        setStats(inspectionStats);
+      }
+      lastInspectionCursorRef.current = inspectionsSnap.docs.at(-1) ?? null;
+      setHasMoreItems(inspectionsSnap.docs.length === PAGE_SIZE);
     } catch (err: unknown) {
       const message = err instanceof Error && err.message ? err.message : "Erro ao carregar inspeções";
       setError(message);
     } finally {
-      setLoading(false);
+      if (shouldAppend) {
+        setLoadingMore(false);
+      } else {
+        setLoading(false);
+      }
     }
   }, []);
 
-  useEffect(() => {
-    setVisibleCount(prev => {
-      if (selectedMaintainers.length === 0) {
-        return 0;
-      }
-      return prev === 0 ? 10 : prev;
-    });
-  }, [selectedMaintainers]);
+  const loadData = useCallback(() => fetchInspectionPage("reset"), [fetchInspectionPage]);
+  const handleLoadMore = useCallback(() => fetchInspectionPage("append"), [fetchInspectionPage]);
 
   useEffect(() => {
     loadData();
@@ -171,8 +244,17 @@ export default function AdminInspectionsPage() {
     const handler = (event: MessageEvent) => {
       const data = event.data as { type?: string; id?: string; nome?: string | null; signedAt?: string | null };
       if (data?.type === "inspection-signed" && data.id) {
-        setItems(prev =>
-          prev.map(item =>
+        setItems(prev => {
+          const changedItem = prev.find(item => item.id === data.id && !item.signed);
+          if (changedItem) {
+            setStats(current => ({
+              ...current,
+              signed: current.signed + 1,
+              pending: Math.max(current.pending - 1, 0),
+            }));
+          }
+
+          return prev.map(item =>
             item.id === data.id
               ? {
                   ...item,
@@ -181,8 +263,8 @@ export default function AdminInspectionsPage() {
                   pcmNome: data.nome ?? item.pcmNome,
                 }
               : item
-          )
-        );
+          );
+        });
       }
     };
     channel.addEventListener("message", handler);
@@ -236,16 +318,8 @@ export default function AdminInspectionsPage() {
     return items.filter(item => selectedSet.has(item.maintainerKey));
   }, [items, selectedMaintainers]);
 
-  const visibleItems = useMemo(
-    () => (visibleCount === 0 ? [] : filteredItems.slice(0, visibleCount)),
-    [filteredItems, visibleCount]
-  );
-
-  const hasMore = visibleCount > 0 && filteredItems.length > visibleItems.length;
-
-  const handleLoadMore = useCallback(() => {
-    setVisibleCount(prev => (prev === 0 ? 10 : prev + 10));
-  }, []);
+  const visibleItems = filteredItems;
+  const hasMore = hasMoreItems;
 
   const toggleMaintainer = useCallback((maintainerId: string) => {
     setSelectedMaintainers(prev => {
@@ -281,7 +355,18 @@ export default function AdminInspectionsPage() {
           throw new Error(payload?.error || "Falha ao excluir inspeção");
         }
 
-        setItems(prev => prev.filter(item => item.id !== inspectionId));
+        setItems(prev => {
+          const deletedItem = prev.find(item => item.id === inspectionId);
+          if (deletedItem) {
+            setStats(current => ({
+              total: Math.max(current.total - 1, 0),
+              signed: deletedItem.signed ? Math.max(current.signed - 1, 0) : current.signed,
+              pending: deletedItem.signed ? current.pending : Math.max(current.pending - 1, 0),
+              withNc: deletedItem.hasNc ? Math.max(current.withNc - 1, 0) : current.withNc,
+            }));
+          }
+          return prev.filter(item => item.id !== inspectionId);
+        });
         setActionFeedback({ type: "success", message: "Inspeção excluída com sucesso." });
       } catch (err) {
         const message = err instanceof Error && err.message ? err.message : "Erro ao excluir inspeção";
@@ -293,9 +378,9 @@ export default function AdminInspectionsPage() {
     []
   );
 
-  const signedCount = useMemo(() => items.filter(item => item.signed).length, [items]);
-  const pendingCount = useMemo(() => items.filter(item => !item.signed).length, [items]);
-  const withNcCount = useMemo(() => items.filter(item => item.hasNc).length, [items]);
+  const signedCount = stats.signed;
+  const pendingCount = stats.pending;
+  const withNcCount = stats.withNc;
 
   return (
     <div className="max-w-7xl mx-auto space-y-6 p-6">
@@ -336,7 +421,7 @@ export default function AdminInspectionsPage() {
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
             <div className="flex flex-wrap items-baseline gap-2">
-              <span className="text-2xl font-semibold text-[var(--text)]">{items.length}</span>
+              <span className="text-2xl font-semibold text-[var(--text)]">{stats.total}</span>
               <Badge variant="muted">Registros</Badge>
               {withNcCount > 0 ? <Badge variant="warning">{withNcCount} com NC</Badge> : null}
             </div>
@@ -594,11 +679,11 @@ export default function AdminInspectionsPage() {
           {!loading && filteredItems.length > 0 ? (
             <div className="mt-6 flex items-center justify-between text-sm text-[var(--muted)]">
               <span>
-                Mostrando {visibleItems.length} de {filteredItems.length} inspeções selecionadas.
+                Mostrando {visibleItems.length} inspeções carregadas para os filtros selecionados.
               </span>
               {hasMore ? (
-                <Button type="button" variant="outline" size="sm" onClick={handleLoadMore}>
-                  Carregar mais
+                <Button type="button" variant="outline" size="sm" onClick={handleLoadMore} disabled={loadingMore} loading={loadingMore}>
+                  Carregar mais 20 inspeções
                 </Button>
               ) : null}
             </div>
