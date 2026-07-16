@@ -159,6 +159,27 @@ function computeNcCount(data: Record<string, unknown>): number {
 
 const PAGE_SIZE = 20;
 const FILTERED_PAGE_SIZE = 100;
+const MACHINES_SESSION_CACHE_KEY = "admin-checklists-machines-v1";
+const TEMPLATES_SESSION_CACHE_KEY = "admin-checklists-templates-v1";
+
+function readSessionCache<T>(key: string): T[] | null {
+  if (typeof window === "undefined") return null;
+  const cached = window.sessionStorage.getItem(key);
+  if (!cached) return null;
+  try {
+    const parsed = JSON.parse(cached);
+    return Array.isArray(parsed) ? (parsed as T[]) : null;
+  } catch {
+    window.sessionStorage.removeItem(key);
+    return null;
+  }
+}
+
+function writeSessionCache<T>(key: string, records: T[]) {
+  if (typeof window === "undefined") return;
+  window.sessionStorage.setItem(key, JSON.stringify(records));
+}
+
 type InspectionCursor = QueryDocumentSnapshot<DocumentData>;
 
 export default function AdminChecklistsPage() {
@@ -197,15 +218,18 @@ export default function AdminChecklistsPage() {
           return;
         }
 
+        const cachedMachines = readSessionCache<MachineOption>(MACHINES_SESSION_CACHE_KEY);
+        const cachedTemplates = readSessionCache<TemplateOption>(TEMPLATES_SESSION_CACHE_KEY);
+
         const [machinesSnap, maintainersSnap, templatesSnap] = await Promise.all([
-          getDocs(machinesCol),
+          cachedMachines ? Promise.resolve(null) : getDocs(machinesCol),
           getDocs(maintainersCol),
-          getDocs(templatesCol),
+          cachedTemplates ? Promise.resolve(null) : getDocs(templatesCol),
         ]);
 
         if (cancelled) return;
 
-        const machineRecords: MachineOption[] = machinesSnap.docs
+        const machineRecords: MachineOption[] = cachedMachines ?? machinesSnap!.docs
           .map(docSnap => {
             const data = docSnap.data() ?? {};
             return {
@@ -221,6 +245,7 @@ export default function AdminChecklistsPage() {
             const labelB = (b.nome ?? b.tag ?? "").toLowerCase();
             return labelA.localeCompare(labelB);
           });
+        if (!cachedMachines) writeSessionCache(MACHINES_SESSION_CACHE_KEY, machineRecords);
 
         const maintainerRecords: MaintainerOption[] = maintainersSnap.docs
           .map(docSnap => {
@@ -237,7 +262,7 @@ export default function AdminChecklistsPage() {
             return labelA.localeCompare(labelB);
           });
 
-        const templateRecords: TemplateOption[] = templatesSnap.docs
+        const templateRecords: TemplateOption[] = cachedTemplates ?? templatesSnap!.docs
           .map(docSnap => {
             const data = docSnap.data() ?? {};
             return {
@@ -251,6 +276,7 @@ export default function AdminChecklistsPage() {
             const labelB = (b.nome ?? "").toLowerCase();
             return labelA.localeCompare(labelB);
           });
+        if (!cachedTemplates) writeSessionCache(TEMPLATES_SESSION_CACHE_KEY, templateRecords);
 
         setMachines(machineRecords);
         setMaintainers(maintainerRecords);
