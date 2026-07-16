@@ -514,14 +514,13 @@ export function drawLarHeader(doc: jsPDF, data: LarHeaderData): {
   const orientacoesValue = serializeIsoHeaderText(isoHeaderConfig.orientacoes.text).trim() || "—";
   const orientationLineHeight = 5;
   const orientationLabelGap = 4.5;
-  const orientationMaxLines = 5;
   let orientationSectionHeight = 0;
   let orientationLines: string[] = [];
   if (showOrientacoes) {
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
     orientationLines = doc.splitTextToSize(orientacoesValue, availableWidth);
-    const orientationLinesCount = Math.max(1, Math.min(orientationMaxLines, orientationLines.length));
+    const orientationLinesCount = Math.max(1, orientationLines.length);
     orientationSectionHeight = orientationLabelGap + orientationLineHeight * orientationLinesCount + 3.5;
   }
 
