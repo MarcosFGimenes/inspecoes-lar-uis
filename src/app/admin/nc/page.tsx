@@ -35,6 +35,13 @@ import type {
 import { resolveIssueLastActivityAt, sortByDueDateAsc, sortByLastActivityDesc } from "@/lib/non-conformity-priority";
 import { normalizeStoredImages } from "@/lib/storage/images";
 
+interface MaintainerOption {
+  id: string;
+  nome: string | null;
+  matricula: string | null;
+  ativo?: boolean;
+}
+
 interface MachineOption {
   id: string;
   nome: string;
@@ -263,6 +270,7 @@ function renderStatusBadge(status: NonConformityStatus) {
 const PAGE_SIZE = 20;
 const FIRESTORE_IN_QUERY_LIMIT = 30;
 const MACHINES_SESSION_CACHE_KEY = "admin-nc-machines-v1";
+const MAINTAINERS_SESSION_CACHE_KEY = "admin-nc-maintainers-v1";
 const TEMPLATES_SESSION_CACHE_KEY = "admin-nc-templates-v1";
 type IssueCursor = QueryDocumentSnapshot<DocumentData>;
 
@@ -283,6 +291,12 @@ function readSessionCache<T>(key: string): T[] | null {
 function writeSessionCache<T>(key: string, records: T[]) {
   if (typeof window === "undefined") return;
   window.sessionStorage.setItem(key, JSON.stringify(records));
+}
+
+function extractFirebaseIndexUrl(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  const match = message.match(/https:\/\/console\.firebase\.google\.com\/[^\s)]+/);
+  return match?.[0] ?? null;
 }
 
 function chunkArray<T>(items: T[], chunkSize: number): T[][] {
@@ -307,7 +321,10 @@ export default function AdminNonConformitiesPage() {
   const [treatmentsByResponse, setTreatmentsByResponse] = useState<Record<string, ChecklistNonConformityTreatment[]>>({});
   const [machineFilter, setMachineFilter] = useState("");
   const [maintainerFilter, setMaintainerFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState("open");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [machineOptions, setMachineOptions] = useState<MachineOption[]>([]);
+  const [maintainerOptions, setMaintainerOptions] = useState<MaintainerOption[]>([]);
+  const [indexUrl, setIndexUrl] = useState<string | null>(null);
   const [dueDateFilter, setDueDateFilter] = useState("default");
   const [savingId, setSavingId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<Record<string, FeedbackState>>({});
@@ -320,7 +337,6 @@ export default function AdminNonConformitiesPage() {
   const [hasMoreItems, setHasMoreItems] = useState(false);
   const lastIssueCursorRef = useRef<IssueCursor | null>(null);
 
-  const shouldRefreshOnFilterChange = Boolean(maintainerFilter || statusFilter !== "open" || dueDateFilter !== "default");
 
   useEffect(() => {
     setSelectedIds(prev => prev.filter(id => items.some(item => item.id === id)));
@@ -349,13 +365,20 @@ export default function AdminNonConformitiesPage() {
       }
 
       const cachedMachines = readSessionCache<MachineOption>(MACHINES_SESSION_CACHE_KEY);
+      const cachedMaintainers = readSessionCache<MaintainerOption>(MAINTAINERS_SESSION_CACHE_KEY);
       const cachedTemplates = readSessionCache<TemplateCacheRecord>(TEMPLATES_SESSION_CACHE_KEY);
-      const issueConstraints = cursor && shouldAppend
-        ? [where("status", "in", ["aberta", "concluida", "resolvida"]), orderBy("updatedAt", "desc"), startAfter(cursor), limit(PAGE_SIZE)]
-        : [where("status", "in", ["aberta", "concluida", "resolvida"]), orderBy("updatedAt", "desc"), limit(PAGE_SIZE)];
+      const issueConstraints = [];
+      if (machineFilter) issueConstraints.push(where("machineId", "==", machineFilter));
+      if (maintainerFilter) issueConstraints.push(where("maintainerResolution.resolvedByMatricula", "==", maintainerFilter));
+      if (statusFilter === "open") issueConstraints.push(where("status", "==", "aberta"));
+      if (statusFilter === "resolved") issueConstraints.push(where("status", "in", ["concluida", "resolvida"]));
+      issueConstraints.push(orderBy("updatedAt", "desc"));
+      if (cursor && shouldAppend) issueConstraints.push(startAfter(cursor));
+      issueConstraints.push(limit(PAGE_SIZE));
 
-      const [machinesSnap, templatesSnap, issuesSnap] = await Promise.all([
+      const [machinesSnap, maintainersSnap, templatesSnap, issuesSnap] = await Promise.all([
         cachedMachines ? Promise.resolve(null) : getDocs(collection(firebaseDb, "machines")),
+        cachedMaintainers ? Promise.resolve(null) : getDocs(collection(firebaseDb, "mantenedores")),
         cachedTemplates ? Promise.resolve(null) : getDocs(collection(firebaseDb, "templates")),
         getDocs(query(collection(firebaseDb, "issues"), ...issueConstraints)),
       ]);
@@ -371,6 +394,13 @@ export default function AdminNonConformitiesPage() {
         } satisfies MachineOption;
       });
       if (!cachedMachines) writeSessionCache(MACHINES_SESSION_CACHE_KEY, machineOptions);
+      setMachineOptions(machineOptions.sort((a, b) => buildMachineLabelFromOption(a).localeCompare(buildMachineLabelFromOption(b), "pt-BR")));
+      const maintainerRecords: MaintainerOption[] = cachedMaintainers ?? maintainersSnap!.docs.map(docSnap => {
+        const data = docSnap.data() ?? {};
+        return { id: docSnap.id, nome: typeof data.nome === "string" ? data.nome : null, matricula: typeof data.matricula === "string" ? data.matricula.toUpperCase() : null, ativo: data.ativo !== false };
+      });
+      if (!cachedMaintainers) writeSessionCache(MAINTAINERS_SESSION_CACHE_KEY, maintainerRecords);
+      setMaintainerOptions(maintainerRecords.sort((a, b) => (a.nome ?? a.matricula ?? a.id).localeCompare(b.nome ?? b.matricula ?? b.id, "pt-BR")));
       const machinesById = new Map(machineOptions.map(machine => [machine.id, machine]));
 
       const templateRecords: TemplateCacheRecord[] = cachedTemplates ?? templatesSnap!.docs.map(docSnap => {
@@ -601,8 +631,10 @@ export default function AdminNonConformitiesPage() {
       lastIssueCursorRef.current = issuesSnap.docs.at(-1) ?? null;
       setHasMoreItems(issuesSnap.docs.length === PAGE_SIZE);
     } catch (err: unknown) {
+      const indexLink = extractFirebaseIndexUrl(err);
+      if (indexLink) setIndexUrl(indexLink);
       const message = err instanceof Error && err.message ? err.message : "Erro ao carregar dados";
-      setError(message);
+      setError(indexLink ? "O Firestore exige um índice composto para esta consulta." : message);
     } finally {
       if (shouldAppend) {
         setLoadingMore(false);
@@ -610,84 +642,25 @@ export default function AdminNonConformitiesPage() {
         setLoading(false);
       }
     }
-  }, []);
+  }, [machineFilter, maintainerFilter, statusFilter]);
 
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
 
   useEffect(() => {
     setForceVisibleIds(new Set());
-  }, [dueDateFilter, machineFilter, maintainerFilter, statusFilter]);
-
-  useEffect(() => {
-    if (shouldRefreshOnFilterChange) {
-      loadData();
-    }
-  }, [dueDateFilter, loadData, maintainerFilter, shouldRefreshOnFilterChange, statusFilter]);
-
-  const machineOptionsForFilter = useMemo(() => {
-    return Array.from(new Set(items.map(item => item.machineLabel.trim()).filter(Boolean))).sort((a, b) =>
-      a.localeCompare(b, "pt-BR")
-    );
-  }, [items]);
-
-  const maintainerOptionsForFilter = useMemo(() => {
-    const maintainers = new Map<string, string>();
-    items.forEach(item => {
-      const nome = item.operatorNome?.trim();
-      if (!nome) return;
-      const matricula = item.operatorMatricula?.trim();
-      const label = matricula ? `${nome} (mat. ${matricula})` : nome;
-      maintainers.set(nome, label);
-    });
-    return Array.from(maintainers.entries())
-      .sort((a, b) => a[1].localeCompare(b[1], "pt-BR"))
-      .map(([value, label]) => ({ value, label }));
-  }, [items]);
+    loadData("reset");
+  }, [dueDateFilter, machineFilter, maintainerFilter, statusFilter, loadData]);
 
   const filteredItems = useMemo(() => {
-    const machineSearch = machineFilter.trim().toLowerCase();
     const visibleItems = items.filter(item => {
-      if (forceVisibleIds.has(item.id)) {
-        return true;
-      }
-      if (machineSearch) {
-        const machineLabel = item.machineLabel.toLowerCase();
-        const machineTag = (item.machineTag ?? "").toLowerCase();
-        const machineId = (item.machineId ?? "").toLowerCase();
-        if (
-          !machineLabel.includes(machineSearch) &&
-          !machineTag.includes(machineSearch) &&
-          !machineId.includes(machineSearch)
-        ) {
-          return false;
-        }
-      }
-      if (maintainerFilter && item.operatorNome !== maintainerFilter) {
-        return false;
-      }
-      if (statusFilter === "planned") {
-        return Boolean(item.summary.trim() || item.responsible.trim() || item.dueDate);
-      }
-      if (statusFilter === "unplanned") {
-        return !Boolean(item.summary.trim() || item.responsible.trim() || item.dueDate);
-      }
-      if (statusFilter === "all") {
-        return true;
-      }
-      if (statusFilter === "maintainer_resolved") {
-        return item.maintainerResolution != null;
-      }
-      return item.status === statusFilter;
+      if (forceVisibleIds.has(item.id)) return true;
+      if (statusFilter === "planned") return Boolean(item.summary.trim() || item.responsible.trim() || item.dueDate);
+      if (statusFilter === "unplanned") return !Boolean(item.summary.trim() || item.responsible.trim() || item.dueDate);
+      if (statusFilter === "maintainer_resolved") return item.maintainerResolution != null;
+      return true;
     });
-
-    if (dueDateFilter === "oldest_first") {
-      return sortByDueDateAsc(visibleItems);
-    }
-
+    if (dueDateFilter === "oldest_first") return sortByDueDateAsc(visibleItems);
     return visibleItems;
-  }, [items, machineFilter, maintainerFilter, statusFilter, dueDateFilter, forceVisibleIds]);
+  }, [items, statusFilter, dueDateFilter, forceVisibleIds]);
 
   const keepItemVisibleInCurrentFilter = useCallback((id: string) => {
     setForceVisibleIds(prev => new Set(prev).add(id));
@@ -914,7 +887,8 @@ export default function AdminNonConformitiesPage() {
           </Button>
         </header>
         <div className="rounded-lg border border-[var(--danger)] bg-[color-mix(in_oklab,var(--danger),#fff_80%)] px-4 py-3 text-[var(--danger)]">
-          {error}
+          <p>{error}</p>
+          {indexUrl ? <a className="underline" href={indexUrl} target="_blank" rel="noreferrer">Criar índice composto no Firebase</a> : null}
         </div>
       </div>
     );
@@ -939,26 +913,22 @@ export default function AdminNonConformitiesPage() {
         <CardContent className="grid gap-4 md:grid-cols-4">
           <label className="space-y-1 text-sm">
             <span className="text-[var(--muted)]">Máquina</span>
-            <Input
-              type="text"
-              value={machineFilter}
-              onChange={event => setMachineFilter(event.target.value)}
-              list="machine-filter-options"
-              placeholder="Digite nome, tag ou ID"
-            />
-            <datalist id="machine-filter-options">
-              {machineOptionsForFilter.map(option => (
-                <option key={option} value={option} />
+            <Select value={machineFilter} onChange={event => setMachineFilter(event.target.value)}>
+              <option value="">Todas</option>
+              {machineOptions.map(option => (
+                <option key={option.id} value={option.id}>
+                  {buildMachineLabelFromOption(option)}
+                </option>
               ))}
-            </datalist>
+            </Select>
           </label>
           <label className="space-y-1 text-sm">
             <span className="text-[var(--muted)]">Mantenedor</span>
             <Select value={maintainerFilter} onChange={event => setMaintainerFilter(event.target.value)}>
               <option value="">Todos</option>
-              {maintainerOptionsForFilter.map(option => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
+              {maintainerOptions.map(option => (
+                <option key={option.id} value={option.matricula ?? option.id}>
+                  {option.matricula ? `${option.matricula} — ` : ""}{option.nome ?? option.id}
                 </option>
               ))}
             </Select>
