@@ -1,4 +1,4 @@
-import type { HTMLAttributes, TableHTMLAttributes } from "react";
+import type { HTMLAttributes, TableHTMLAttributes, TdHTMLAttributes } from "react";
 import { forwardRef } from "react";
 import { cn } from "@/lib/cn";
 
@@ -77,7 +77,7 @@ export const TableRow = forwardRef<HTMLTableRowElement, HTMLAttributes<HTMLTable
 
 TableRow.displayName = "TableRow";
 
-export const TableCell = forwardRef<HTMLTableCellElement, HTMLAttributes<HTMLTableCellElement>>(
+export const TableCell = forwardRef<HTMLTableCellElement, TdHTMLAttributes<HTMLTableCellElement>>(
   ({ className, ...props }, ref) => (
     <td
       ref={ref}

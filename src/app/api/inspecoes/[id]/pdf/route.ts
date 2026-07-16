@@ -2,9 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { jsPDF } from "jspdf";
 import { adminDb } from "@/lib/firebase-admin";
 import { requireAdmin, requireMaint } from "@/lib/guards";
-import { sanitizeIsoHeaderConfig } from "@/lib/iso-header-config";
+import { sanitizeIsoHeaderConfig, serializeIsoHeaderText } from "@/lib/iso-header-config";
 import { drawLarHeader } from "@/server/pdf/header-lar";
+import { normalizeStoredImages } from "@/lib/storage/images";
 import type { LarHeaderData } from "@/server/pdf/header-lar";
+import type { StoredImage } from "@/types/images";
 
 type TemplateItemData = {
   id?: string;
@@ -116,9 +118,14 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       .doc("cabecalho_iso_global")
       .get();
     const headerConfigData = headerConfigSnap.data() ?? {};
-    const itens: Array<{ templateItemId: string; resultado: string; observacaoItem?: string | null }> = Array.isArray(
-      inspectionData.itens
-    )
+    const globalIsoHeaderConfig = sanitizeIsoHeaderConfig(headerConfigData.isoHeaderConfig);
+    const itens: Array<{
+      templateItemId: string;
+      resultado: string;
+      observacaoItem?: string | null;
+      fotos?: unknown;
+      photoUrls?: unknown;
+    }> = Array.isArray(inspectionData.itens)
       ? inspectionData.itens
       : [];
 
@@ -212,12 +219,49 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       dataHoraISO: inspectionDate ? inspectionDate.toISOString() : undefined,
       lac,
       local: machineLocalRaw,
-      isoHeaderConfig: sanitizeIsoHeaderConfig(headerConfigData.isoHeaderConfig),
+      isoHeaderConfig: globalIsoHeaderConfig,
     };
 
     const { topHeightMm } = drawLarHeader(doc, headerData);
 
     let cursorY = margin + topHeightMm + 6;
+
+    const isoHeaderLines = [
+      `FO: ${serializeIsoHeaderText(globalIsoHeaderConfig.foNumero) || "-"}`,
+      `Emissão: ${serializeIsoHeaderText(globalIsoHeaderConfig.emissao) || "-"}`,
+      `Revisão: ${serializeIsoHeaderText(globalIsoHeaderConfig.revisao) || "-"}`,
+      `Nº da revisão: ${serializeIsoHeaderText(globalIsoHeaderConfig.revisaoNumero) || "-"}`,
+    ];
+    const isoHeading = "Configurações do cabeçalho ISO";
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.text(isoHeading, margin, cursorY);
+    cursorY += 7;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    isoHeaderLines.forEach(line => {
+      if (cursorY > pageHeight - margin) {
+        doc.addPage();
+        cursorY = margin;
+      }
+      doc.text(line, margin, cursorY);
+      cursorY += 6.5;
+    });
+    const orientacoesValue = serializeIsoHeaderText(globalIsoHeaderConfig.orientacoes.text).trim() || "-";
+    doc.setFont("helvetica", "bold");
+    doc.text("Orientações:", margin, cursorY);
+    cursorY += 6;
+    const orientacoesLines = doc.splitTextToSize(orientacoesValue, contentWidth);
+    doc.setFont("helvetica", "normal");
+    orientacoesLines.forEach((line: string) => {
+      if (cursorY > pageHeight - margin) {
+        doc.addPage();
+        cursorY = margin;
+      }
+      doc.text(line, margin, cursorY);
+      cursorY += 6;
+    });
+    cursorY += 8;
 
     const maintSignature = await fetchImageData(inspectionData.assinaturaUrl ?? null);
     const pcmSignatureUrl = typeof pcmSign.assinaturaUrl === "string" ? pcmSign.assinaturaUrl : null;
@@ -237,10 +281,16 @@ export async function GET(_req: NextRequest, context: RouteContext) {
     const boxPadding = 4;
     const lineHeight = 5;
 
-    itens.forEach((item, index) => {
+    for (let index = 0; index < itens.length; index += 1) {
+      const item = itens[index];
       const templateItem = templateItemsMap.get(item.templateItemId) ?? {};
       const componente = templateItem?.componente ?? item.templateItemId;
       const questionText = `${index + 1}. ${componente}`;
+      const itemImages = normalizeStoredImages(item.fotos ?? item.photoUrls ?? []);
+      const itemImageDataUrls = await Promise.all(
+        itemImages.slice(0, 4).map(image => fetchImageAsDataUrl(image.url))
+      );
+      const validItemImageDataUrls = itemImageDataUrls.filter((value): value is string => Boolean(value));
 
       doc.setFont("helvetica", "bold");
       doc.setFontSize(11);
@@ -275,10 +325,17 @@ export async function GET(_req: NextRequest, context: RouteContext) {
         obsLines = ["-"];
       }
 
+      const imageCount = validItemImageDataUrls.length;
+      const imagesPerRow = 2;
+      const imageBoxHeight = 40;
+      const imagePadding = 3;
+      const imageRows = imageCount > 0 ? Math.ceil(imageCount / imagesPerRow) : 0;
+      const imageSectionHeight = imageCount > 0 ? boxPadding + lineHeight + imageRows * (imageBoxHeight + imagePadding) : 0;
+
       const questionHeight = boxPadding * 2 + questionLines.length * lineHeight;
       const resultHeight = boxPadding * 2 + resultLines.length * lineHeight;
       const obsHeight = boxPadding * 2 + obsLines.length * lineHeight;
-      const boxHeight = questionHeight + resultHeight + obsHeight;
+      const boxHeight = questionHeight + resultHeight + obsHeight + imageSectionHeight;
 
       if (cursorY + boxHeight > pageHeight - margin) {
         doc.addPage();
@@ -291,8 +348,12 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       doc.setLineWidth(0.3);
       const questionBottom = cursorY + questionHeight;
       const resultBottom = questionBottom + resultHeight;
+      const obsBottom = resultBottom + obsHeight;
       doc.line(margin, questionBottom, margin + contentWidth, questionBottom);
       doc.line(margin, resultBottom, margin + contentWidth, resultBottom);
+      if (imageCount > 0) {
+        doc.line(margin, obsBottom, margin + contentWidth, obsBottom);
+      }
 
       let textY = cursorY + boxPadding + lineHeight;
       doc.setFont("helvetica", "bold");
@@ -330,8 +391,27 @@ export async function GET(_req: NextRequest, context: RouteContext) {
         doc.text(obsLines[i], obsValueX, textY);
       }
 
-      cursorY += boxHeight + 6;
-    });
+      if (imageCount > 0) {
+        const imageHeadingY = obsBottom + boxPadding + 6;
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(10);
+        doc.text("Imagens:", margin + boxPadding, imageHeadingY);
+
+        const imagesStartY = imageHeadingY + 5;
+        const imageWidth = (contentWidth - boxPadding * 2 - imagePadding) / imagesPerRow;
+        validItemImageDataUrls.forEach((dataUrl, imageIndex) => {
+          const row = Math.floor(imageIndex / imagesPerRow);
+          const col = imageIndex % imagesPerRow;
+          const imageX = margin + boxPadding + col * (imageWidth + imagePadding);
+          const imageY = imagesStartY + row * (imageBoxHeight + imagePadding);
+          drawImageContain(doc, dataUrl, imageX, imageY, imageWidth, imageBoxHeight);
+          doc.setLineWidth(0.2);
+          doc.rect(imageX, imageY, imageWidth, imageBoxHeight);
+        });
+      }
+
+      cursorY += boxHeight + 8;
+    }
 
     if (cursorY > pageHeight - 40) {
       doc.addPage();

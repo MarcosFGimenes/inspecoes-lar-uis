@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { collection, getDocs, query, where, writeBatch } from "firebase/firestore";
 
@@ -313,148 +313,132 @@ export default function MantenedoresPage() {
               </TableHeader>
               <TableBody>
                 {filtered.map(m => (
-                  <TableRow key={m.id}>
-                    <TableCell className="font-medium">{m.matricula}</TableCell>
-                    <TableCell>{m.nome}</TableCell>
-                    <TableCell className="text-[var(--muted)]">{m.setor}</TableCell>
-                    <TableCell className="text-[var(--muted)]">{m.lac}</TableCell>
-                    <TableCell>
-                      <span
-                        className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${
-                          m.ativo ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"
-                        }`}
-                      >
-                        {m.ativo ? "Ativo" : "Inativo"}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-2">
-                        <Link
-                          href={`/admin/mantenedores/${m.id}`}
-                          className={buttonStyles({ variant: "outline", size: "sm" })}
+                  <Fragment key={m.id}>
+                    <TableRow>
+                      <TableCell className="font-medium">{m.matricula}</TableCell>
+                      <TableCell>{m.nome}</TableCell>
+                      <TableCell className="text-[var(--muted)]">{m.setor}</TableCell>
+                      <TableCell className="text-[var(--muted)]">{m.lac}</TableCell>
+                      <TableCell>
+                        <span
+                          className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${
+                            m.ativo ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"
+                          }`}
                         >
-                          <i className="fas fa-pen" aria-hidden />
-                          Editar
-                        </Link>
-                        <Link
-                          href={`/admin/mantenedores/${m.id}/machines`}
-                          className={buttonStyles({ variant: "secondary", size: "sm" })}
-                        >
-                          <i className="fas fa-cogs" aria-hidden />
-                          Máquinas
-                        </Link>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100"
-                          onClick={() => handleOpenTransfer(m)}
-                          disabled={!m.ativo || activeMaintainers.length < 2}
-                        >
-                          <i className="fas fa-calendar-alt" aria-hidden />
-                          Transferir Inspeções
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="text-rose-600 hover:bg-rose-50 hover:text-rose-700"
-                          onClick={() => handleOpenDelete(m)}
-                        >
-                          <i className="fas fa-trash" aria-hidden />
-                          Excluir
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
+                          {m.ativo ? "Ativo" : "Inativo"}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-2">
+                          <Link
+                            href={`/admin/mantenedores/${m.id}`}
+                            className={buttonStyles({ variant: "outline", size: "sm" })}
+                          >
+                            <i className="fas fa-pen" aria-hidden />
+                            Editar
+                          </Link>
+                          <Link
+                            href={`/admin/mantenedores/${m.id}/machines`}
+                            className={buttonStyles({ variant: "secondary", size: "sm" })}
+                          >
+                            <i className="fas fa-cogs" aria-hidden />
+                            Máquinas
+                          </Link>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100"
+                            onClick={() => handleOpenTransfer(m)}
+                            disabled={!m.ativo || activeMaintainers.length < 2}
+                          >
+                            <i className="fas fa-calendar-alt" aria-hidden />
+                            Transferir Inspeções
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="text-rose-600 hover:bg-rose-50 hover:text-rose-700"
+                            onClick={() => handleOpenDelete(m)}
+                          >
+                            <i className="fas fa-trash" aria-hidden />
+                            Excluir
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                    {transferTarget?.original.id === m.id ? (
+                      <TableRow className="bg-amber-50/80">
+                        <TableCell colSpan={6} className="p-4">
+                          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="flex flex-wrap items-center gap-3 text-sm text-slate-700">
+                              <label className="inline-flex items-center gap-2 rounded-full border border-amber-300 bg-white px-3 py-2">
+                                <input
+                                  type="checkbox"
+                                  className="h-4 w-4 accent-[var(--primary)]"
+                                  checked={transferTarget.active}
+                                  onChange={event => {
+                                    const active = event.target.checked;
+                                    setTransferTarget(current => current ? { ...current, active } : current);
+                                  }}
+                                  disabled={transferring}
+                                />
+                                <span>Transferência ativa</span>
+                              </label>
+                              <span className="text-sm text-slate-700">
+                                para <strong>{activeMaintainers.find(maintainer => maintainer.id === transferTarget.substituteId)?.nome ?? "substituto selecionado"}</strong>
+                              </span>
+                            </div>
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+                              <label className="min-w-[210px] text-sm">
+                                <span className="sr-only">Substituto</span>
+                                <Select
+                                  value={transferTarget.substituteId}
+                                  onChange={event => {
+                                    const substituteId = event.target.value;
+                                    setTransferTarget(current => current ? { ...current, substituteId } : current);
+                                  }}
+                                  disabled={transferring}
+                                >
+                                  <option value="" disabled>Selecione um mantenedor ativo</option>
+                                  {activeMaintainers
+                                    .filter(maintainer => maintainer.id !== transferTarget.original.id)
+                                    .map(maintainer => (
+                                      <option key={maintainer.id} value={maintainer.id}>
+                                        {maintainer.matricula ? `${maintainer.matricula} — ` : ""}{maintainer.nome}
+                                      </option>
+                                    ))}
+                                </Select>
+                              </label>
+                              <Button
+                                type="button"
+                                onClick={handleTransferInspections}
+                                loading={transferring}
+                                disabled={!transferTarget.substituteId}
+                              >
+                                Transferir
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                onClick={() => setTransferTarget(null)}
+                                disabled={transferring}
+                              >
+                                Cancelar
+                              </Button>
+                            </div>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ) : null}
+                  </Fragment>
                 ))}
               </TableBody>
             </Table>
           )}
         </CardContent>
       </Card>
-
-
-      <ConfirmDialog
-        open={Boolean(transferTarget)}
-        title="Transferir inspeções"
-        description="Transfira as inspeções programadas deste mantenedor para um substituto."
-        onConfirm={handleTransferInspections}
-        onCancel={() => {
-          if (transferring) return;
-          setTransferTarget(null);
-        }}
-        busy={transferring}
-        footer={
-          <div className="space-y-5">
-            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-              {transferTarget ? (
-                <p>
-                  As programações pendentes de <strong>{transferTarget.original.nome}</strong> serão atribuídas ao substituto selecionado abaixo.
-                </p>
-              ) : null}
-            </div>
-            <label className="flex items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
-              <input
-                type="checkbox"
-                className="h-4 w-4 accent-[var(--primary)]"
-                checked={transferTarget?.active ?? false}
-                onChange={event => {
-                  const active = event.target.checked;
-                  setTransferTarget(current => current ? { ...current, active } : current);
-                }}
-                disabled={transferring}
-              />
-              <span>
-                Transferência ativa
-                {transferTarget?.substituteId ? (
-                  <strong className="ml-1">
-                    para {activeMaintainers.find(maintainer => maintainer.id === transferTarget.substituteId)?.nome ?? "substituto selecionado"}
-                  </strong>
-                ) : null}
-              </span>
-            </label>
-            <label className="space-y-2 text-sm">
-              <span className="font-medium text-[var(--text)]">Substituto</span>
-              <Select
-                value={transferTarget?.substituteId ?? ""}
-                onChange={event => {
-                  const substituteId = event.target.value;
-                  setTransferTarget(current => current ? { ...current, substituteId } : current);
-                }}
-                disabled={transferring}
-              >
-                <option value="" disabled>Selecione um mantenedor ativo</option>
-                {activeMaintainers
-                  .filter(maintainer => maintainer.id !== transferTarget?.original.id)
-                  .map(maintainer => (
-                    <option key={maintainer.id} value={maintainer.id}>
-                      {maintainer.matricula ? `${maintainer.matricula} — ` : ""}{maintainer.nome}
-                    </option>
-                  ))}
-              </Select>
-            </label>
-            <div className="flex justify-end gap-3">
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={() => setTransferTarget(null)}
-                disabled={transferring}
-              >
-                Cancelar
-              </Button>
-              <Button
-                type="button"
-                onClick={handleTransferInspections}
-                loading={transferring}
-                disabled={!transferTarget?.substituteId}
-              >
-                Transferir
-              </Button>
-            </div>
-          </div>
-        }
-      />
 
       <ConfirmDialog
         open={confirmOpen}
