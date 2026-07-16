@@ -512,14 +512,15 @@ export function drawLarHeader(doc: jsPDF, data: LarHeaderData): {
   const orientacoesLabel = "Orientacoes:";
   const showOrientacoes = shouldShowIsoHeaderFieldInPdf(isoHeaderConfig.orientacoes);
   const orientacoesValue = serializeIsoHeaderText(isoHeaderConfig.orientacoes.text).trim() || "—";
-  const orientationLineHeight = 4;
-  const orientationLabelGap = 4.2;
-  const orientationMaxLines = 4;
+  const orientationLineHeight = 5;
+  const orientationLabelGap = 4.5;
+  const orientationMaxLines = 5;
   let orientationSectionHeight = 0;
+  let orientationLines: string[] = [];
   if (showOrientacoes) {
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
-    const orientationLines = doc.splitTextToSize(orientacoesValue, availableWidth);
+    orientationLines = doc.splitTextToSize(orientacoesValue, availableWidth);
     const orientationLinesCount = Math.max(1, Math.min(orientationMaxLines, orientationLines.length));
     orientationSectionHeight = orientationLabelGap + orientationLineHeight * orientationLinesCount + 3.5;
   }
@@ -574,20 +575,13 @@ export function drawLarHeader(doc: jsPDF, data: LarHeaderData): {
     doc.setTextColor(0);
     doc.text(orientacoesLabel, labelX, textY);
     const orientationStartY = textY + orientationLabelGap;
-    const orientationDraw = drawStyledText(doc, isoHeaderConfig.orientacoes.text, {
-      x: labelX,
-      y: orientationStartY,
-      maxWidth: availableWidth,
-      lineHeight: orientationLineHeight,
-      maxLines: orientationMaxLines,
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    const usedLines = orientationLines.length || 1;
+    orientationLines.forEach((line, index) => {
+      doc.text(line, labelX, orientationStartY + index * orientationLineHeight);
     });
-    const orientationUsedLines = Math.max(1, orientationDraw.linesUsed || 0);
-    textY = orientationStartY + orientationUsedLines * orientationLineHeight + 1.5;
-
-    doc.setDrawColor(0);
-    doc.setLineWidth(0.25);
-    doc.line(labelX, textY, panelX + panelWidth - panelPadding, textY);
-    textY += 3.2;
+    textY = orientationStartY + usedLines * orientationLineHeight + 1.5;
   }
 
   measuredFields.forEach(({ field, labelWidth, lines, linesCount }, index) => {

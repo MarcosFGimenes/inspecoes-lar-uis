@@ -226,43 +226,6 @@ export async function GET(_req: NextRequest, context: RouteContext) {
 
     let cursorY = margin + topHeightMm + 6;
 
-    const isoHeaderLines = [
-      `FO: ${serializeIsoHeaderText(globalIsoHeaderConfig.foNumero) || "-"}`,
-      `Emissão: ${serializeIsoHeaderText(globalIsoHeaderConfig.emissao) || "-"}`,
-      `Revisão: ${serializeIsoHeaderText(globalIsoHeaderConfig.revisao) || "-"}`,
-      `Nº da revisão: ${serializeIsoHeaderText(globalIsoHeaderConfig.revisaoNumero) || "-"}`,
-    ];
-    const isoHeading = "Configurações do cabeçalho ISO";
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(12);
-    doc.text(isoHeading, margin, cursorY);
-    cursorY += 7;
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(10);
-    isoHeaderLines.forEach(line => {
-      if (cursorY > pageHeight - margin) {
-        doc.addPage();
-        cursorY = margin;
-      }
-      doc.text(line, margin, cursorY);
-      cursorY += 6.5;
-    });
-    const orientacoesValue = serializeIsoHeaderText(globalIsoHeaderConfig.orientacoes.text).trim() || "-";
-    doc.setFont("helvetica", "bold");
-    doc.text("Orientações:", margin, cursorY);
-    cursorY += 6;
-    const orientacoesLines = doc.splitTextToSize(orientacoesValue, contentWidth);
-    doc.setFont("helvetica", "normal");
-    orientacoesLines.forEach((line: string) => {
-      if (cursorY > pageHeight - margin) {
-        doc.addPage();
-        cursorY = margin;
-      }
-      doc.text(line, margin, cursorY);
-      cursorY += 6;
-    });
-    cursorY += 8;
-
     const maintSignature = await fetchImageData(inspectionData.assinaturaUrl ?? null);
     const pcmSignatureUrl = typeof pcmSign.assinaturaUrl === "string" ? pcmSign.assinaturaUrl : null;
     const pcmSignature = await fetchImageData(pcmSignatureUrl);
@@ -330,7 +293,10 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       const imageBoxHeight = 40;
       const imagePadding = 3;
       const imageRows = imageCount > 0 ? Math.ceil(imageCount / imagesPerRow) : 0;
-      const imageSectionHeight = imageCount > 0 ? boxPadding + lineHeight + imageRows * (imageBoxHeight + imagePadding) : 0;
+      const imageHeadingHeight = imageCount > 0 ? lineHeight : 0;
+      const imageHeadingGap = imageCount > 0 ? 5 : 0;
+      const imageRowsHeight = imageRows > 0 ? imageRows * imageBoxHeight + Math.max(0, imageRows - 1) * imagePadding : 0;
+      const imageSectionHeight = imageCount > 0 ? boxPadding + imageHeadingHeight + imageHeadingGap + imageRowsHeight + boxPadding : 0;
 
       const questionHeight = boxPadding * 2 + questionLines.length * lineHeight;
       const resultHeight = boxPadding * 2 + resultLines.length * lineHeight;
