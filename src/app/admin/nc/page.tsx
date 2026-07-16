@@ -320,8 +320,9 @@ export default function AdminNonConformitiesPage() {
   const [items, setItems] = useState<NonConformityItem[]>([]);
   const [treatmentsByResponse, setTreatmentsByResponse] = useState<Record<string, ChecklistNonConformityTreatment[]>>({});
   const [machineFilter, setMachineFilter] = useState("");
+  const [machineSearch, setMachineSearch] = useState("");
   const [maintainerFilter, setMaintainerFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("open");
   const [machineOptions, setMachineOptions] = useState<MachineOption[]>([]);
   const [maintainerOptions, setMaintainerOptions] = useState<MaintainerOption[]>([]);
   const [indexUrl, setIndexUrl] = useState<string | null>(null);
@@ -662,6 +663,42 @@ export default function AdminNonConformitiesPage() {
     return visibleItems;
   }, [items, statusFilter, dueDateFilter, forceVisibleIds]);
 
+  const machineDatalistOptions = useMemo(() => {
+    return machineOptions.map(machine => ({
+      id: machine.id,
+      label: buildMachineLabelFromOption(machine),
+      tag: machine.tag ?? "",
+    }));
+  }, [machineOptions]);
+
+  const applyMachineFilter = useCallback(() => {
+    const term = machineSearch.trim().toLowerCase();
+    if (!term) {
+      setMachineFilter("");
+      return;
+    }
+
+    const match = machineOptions.find(machine => {
+      const label = buildMachineLabelFromOption(machine).toLowerCase();
+      return (
+        machine.id.toLowerCase() === term ||
+        label === term ||
+        (machine.tag ?? "").toLowerCase() === term ||
+        label.includes(term)
+      );
+    });
+
+    setMachineFilter(match?.id ?? "");
+    if (match) {
+      setMachineSearch(buildMachineLabelFromOption(match));
+    }
+  }, [machineOptions, machineSearch]);
+
+  const clearMachineFilter = useCallback(() => {
+    setMachineSearch("");
+    setMachineFilter("");
+  }, []);
+
   const keepItemVisibleInCurrentFilter = useCallback((id: string) => {
     setForceVisibleIds(prev => new Set(prev).add(id));
   }, []);
@@ -913,14 +950,36 @@ export default function AdminNonConformitiesPage() {
         <CardContent className="grid gap-4 md:grid-cols-4">
           <label className="space-y-1 text-sm">
             <span className="text-[var(--muted)]">Máquina</span>
-            <Select value={machineFilter} onChange={event => setMachineFilter(event.target.value)}>
-              <option value="">Todas</option>
-              {machineOptions.map(option => (
-                <option key={option.id} value={option.id}>
-                  {buildMachineLabelFromOption(option)}
+            <div className="flex gap-2">
+              <Input
+                type="text"
+                value={machineSearch}
+                onChange={event => setMachineSearch(event.target.value)}
+                onKeyDown={event => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    applyMachineFilter();
+                  }
+                }}
+                list="machine-filter-options"
+                placeholder="Digite nome, TAG ou ID"
+              />
+              <Button type="button" variant="secondary" onClick={applyMachineFilter} disabled={loading}>
+                Aplicar
+              </Button>
+              {machineFilter ? (
+                <Button type="button" variant="ghost" onClick={clearMachineFilter} disabled={loading}>
+                  Limpar
+                </Button>
+              ) : null}
+            </div>
+            <datalist id="machine-filter-options">
+              {machineDatalistOptions.map(option => (
+                <option key={option.id} value={option.label}>
+                  {option.tag ? `TAG ${option.tag}` : option.id}
                 </option>
               ))}
-            </Select>
+            </datalist>
           </label>
           <label className="space-y-1 text-sm">
             <span className="text-[var(--muted)]">Mantenedor</span>

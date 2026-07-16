@@ -26,6 +26,7 @@ type Maintainer = {
 type TransferTarget = {
   original: Maintainer;
   substituteId: string;
+  active: boolean;
 };
 
 function normalizeName(value: string | null | undefined) {
@@ -117,7 +118,7 @@ export default function MantenedoresPage() {
 
   function handleOpenTransfer(original: Maintainer) {
     const firstSubstitute = activeMaintainers.find(maintainer => maintainer.id !== original.id) ?? null;
-    setTransferTarget({ original, substituteId: firstSubstitute?.id ?? "" });
+    setTransferTarget({ original, substituteId: firstSubstitute?.id ?? "", active: true });
     setFeedback(null);
   }
 
@@ -126,6 +127,14 @@ export default function MantenedoresPage() {
     const substitute = data.find(maintainer => maintainer.id === transferTarget.substituteId);
     if (!substitute) {
       setFeedback({ type: "error", message: "Selecione um mantenedor substituto válido." });
+      return;
+    }
+    if (!transferTarget.active) {
+      setFeedback({
+        type: "success",
+        message: "Transferência desativada. Nenhuma inspeção programada foi alterada.",
+      });
+      setTransferTarget(null);
       return;
     }
 
@@ -385,6 +394,26 @@ export default function MantenedoresPage() {
                 </p>
               ) : null}
             </div>
+            <label className="flex items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
+              <input
+                type="checkbox"
+                className="h-4 w-4 accent-[var(--primary)]"
+                checked={transferTarget?.active ?? false}
+                onChange={event => {
+                  const active = event.target.checked;
+                  setTransferTarget(current => current ? { ...current, active } : current);
+                }}
+                disabled={transferring}
+              />
+              <span>
+                Transferência ativa
+                {transferTarget?.substituteId ? (
+                  <strong className="ml-1">
+                    para {activeMaintainers.find(maintainer => maintainer.id === transferTarget.substituteId)?.nome ?? "substituto selecionado"}
+                  </strong>
+                ) : null}
+              </span>
+            </label>
             <label className="space-y-2 text-sm">
               <span className="font-medium text-[var(--text)]">Substituto</span>
               <Select

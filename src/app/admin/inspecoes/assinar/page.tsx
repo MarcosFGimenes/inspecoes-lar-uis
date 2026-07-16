@@ -375,6 +375,24 @@ function SignatureModal({
                 </label>
               ) : null}
             </div>
+            <div className="flex flex-col gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs text-[var(--muted)]">
+                Confira a assinatura acima e confirme sem precisar rolar pelos itens avaliados.
+              </p>
+              <div className="flex flex-wrap justify-end gap-3">
+                <Button type="button" variant="ghost" onClick={onClose} disabled={loading}>
+                  Cancelar
+                </Button>
+                <Button
+                  type="button"
+                  onClick={onConfirm}
+                  loading={loading}
+                  disabled={loading || detailLoading}
+                >
+                  Confirmar assinatura
+                </Button>
+              </div>
+            </div>
             {error && <p className="text-sm text-[var(--danger)]">{error}</p>}
           </section>
 
@@ -467,19 +485,6 @@ function SignatureModal({
 
 
 
-          <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
-            <Button type="button" variant="ghost" onClick={onClose} disabled={loading}>
-              Cancelar
-            </Button>
-            <Button
-              type="button"
-              onClick={onConfirm}
-              loading={loading}
-              disabled={loading || detailLoading}
-            >
-              Confirmar assinatura
-            </Button>
-          </div>
         </div>
       </div>
     </div>,

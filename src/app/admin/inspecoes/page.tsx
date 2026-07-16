@@ -226,6 +226,7 @@ export default function AdminInspectionsPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMoreItems, setHasMoreItems] = useState(false);
   const lastInspectionCursorRef = useRef<InspectionCursor | null>(null);
+  const maintainerQueryFieldRef = useRef<"maintainer.maintId" | "maintainer.id">("maintainer.maintId");
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [returningId, setReturningId] = useState<string | null>(null);
   const [returnDialogItem, setReturnDialogItem] = useState<InspectionListItem | null>(null);
@@ -257,16 +258,26 @@ export default function AdminInspectionsPage() {
         }
       }
 
-      const constraints = [where("maintainer.id", "==", maintainerId), orderBy("createdAt", "desc")];
-      const inspectionsQuery = query(
-        collection(firebaseDb, "inspecoes"),
-        ...(shouldAppend && cursor ? [...constraints, startAfter(cursor), limit(PAGE_SIZE)] : [...constraints, limit(PAGE_SIZE)])
-      );
+      const buildInspectionQuery = (field: "maintainer.maintId" | "maintainer.id", pageCursor: InspectionCursor | null) => {
+        const constraints = [where(field, "==", maintainerId), orderBy("createdAt", "desc")];
+        return query(
+          collection(firebaseDb, "inspecoes"),
+          ...(shouldAppend && pageCursor ? [...constraints, startAfter(pageCursor), limit(PAGE_SIZE)] : [...constraints, limit(PAGE_SIZE)])
+        );
+      };
 
-      const [inspectionsSnap, inspectionStats] = await Promise.all([
-        getDocs(inspectionsQuery),
-        shouldAppend ? Promise.resolve(null) : loadInspectionStats(),
-      ]);
+      let activeField = shouldAppend ? maintainerQueryFieldRef.current : "maintainer.maintId" as const;
+      let inspectionsQuery = buildInspectionQuery(activeField, cursor);
+      const inspectionStatsPromise = shouldAppend ? Promise.resolve(null) : loadInspectionStats();
+      let inspectionsSnap = await getDocs(inspectionsQuery);
+
+      if (!shouldAppend && inspectionsSnap.empty) {
+        activeField = "maintainer.id";
+        inspectionsQuery = buildInspectionQuery(activeField, null);
+        inspectionsSnap = await getDocs(inspectionsQuery);
+      }
+      maintainerQueryFieldRef.current = activeField;
+      const inspectionStats = await inspectionStatsPromise;
 
       const mapped = inspectionsSnap.docs.map(mapInspectionDoc);
       setItems(prev => (shouldAppend ? [...prev, ...mapped] : mapped));
