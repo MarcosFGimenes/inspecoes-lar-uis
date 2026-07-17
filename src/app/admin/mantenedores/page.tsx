@@ -417,70 +417,50 @@ export default function MantenedoresPage() {
                       </TableRow>
                       <TableRow className="bg-slate-50/80">
                         <TableCell colSpan={6}>
-                          <div className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white/80 p-4 shadow-sm sm:flex-row sm:items-end sm:justify-between">
-                            <div className="min-w-0 flex-1 space-y-2">
-                              <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
-                                <i className="fas fa-share-nodes text-[var(--primary)]" aria-hidden />
-                                Compartilhamento de inspeções
+                          <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white/80 p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+                            <label className="min-w-[240px] text-sm text-slate-700 sm:flex-1">
+                              <span className="block pb-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                                Mantenedor substituto
+                              </span>
+                              <Select
+                                value={shareState.substituteId}
+                                onChange={event => {
+                                  const substituteId = event.target.value;
+                                  updateShareState(m.id, { substituteId, active: shareState.active, loading: false });
+                                }}
+                                disabled={shareState.loading || !m.ativo || activeMaintainers.length < 2}
+                              >
+                                <option value="" disabled>Selecione um mantenedor ativo</option>
+                                {activeMaintainers
+                                  .filter(maintainer => maintainer.id !== m.id)
+                                  .map(maintainer => (
+                                    <option key={maintainer.id} value={maintainer.id}>
+                                      {maintainer.matricula ? `${maintainer.matricula} — ` : ""}
+                                      {maintainer.nome}
+                                    </option>
+                                  ))}
+                              </Select>
+                            </label>
+                            <div className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 sm:w-[280px]">
+                              <div>
+                                <p className="font-medium">{shareState.active ? "Compartilhamento ativo" : "Compartilhamento desligado"}</p>
                               </div>
-                              <p className="text-sm text-slate-500">
-                                Escolha outro mantenedor ativo e ative o interruptor para que as inspeções pendentes fiquem visíveis para ele sem alterar o dono original.
-                              </p>
-                            </div>
-                            <div className="flex flex-col gap-4 sm:min-w-[360px]">
-                              <label className="space-y-2 text-sm text-slate-600">
-                                <span className="font-medium">Mantenedor substituto</span>
-                                <Select
-                                  value={shareState.substituteId}
-                                  onChange={event => {
-                                    const substituteId = event.target.value;
-                                    updateShareState(m.id, { substituteId, active: shareState.active, loading: false });
-                                  }}
-                                  disabled={shareState.loading || !m.ativo || activeMaintainers.length < 2}
-                                >
-                                  <option value="" disabled>Selecione um mantenedor ativo</option>
-                                  {activeMaintainers
-                                    .filter(maintainer => maintainer.id !== m.id)
-                                    .map(maintainer => (
-                                      <option key={maintainer.id} value={maintainer.id}>
-                                        {maintainer.matricula ? `${maintainer.matricula} — ` : ""}
-                                        {maintainer.nome}
-                                      </option>
-                                    ))}
-                                </Select>
-                              </label>
-                              <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                                <div className="space-y-1">
-                                  <p className="text-sm font-medium text-slate-700">
-                                    {shareState.active ? "Compartilhamento ativo" : "Compartilhamento desligado"}
-                                  </p>
-                                  <p className="text-xs text-slate-500">
-                                    {shareState.loading ? "Aplicando alteração..." : "Ative para disponibilizar as inspeções pendentes ao substituto."}
-                                  </p>
-                                </div>
-                                <label className="inline-flex items-center gap-3">
-                                  <span className="text-sm font-medium text-slate-600">
-                                    {shareState.active ? "Ligado" : "Desligado"}
-                                  </span>
-                                  <button
-                                    type="button"
-                                    role="switch"
-                                    aria-checked={shareState.active}
-                                    className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors ${
-                                      shareState.active ? "bg-emerald-600" : "bg-slate-300"
-                                    } ${shareState.loading || !canToggleShare ? "cursor-not-allowed opacity-70" : "cursor-pointer"}`}
-                                    onClick={() => handleToggleShare(m, !shareState.active)}
-                                    disabled={shareState.loading || !canToggleShare}
-                                  >
-                                    <span
-                                      className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
-                                        shareState.active ? "translate-x-6" : "translate-x-1"
-                                      }`}
-                                    />
-                                  </button>
-                                  {shareState.loading ? <i className="fas fa-spinner fa-spin text-sm text-[var(--primary)]" aria-hidden /> : null}
-                                </label>
-                              </div>
+                              <button
+                                type="button"
+                                role="switch"
+                                aria-checked={shareState.active}
+                                className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors ${
+                                  shareState.active ? "bg-emerald-600" : "bg-slate-300"
+                                } ${shareState.loading || !canToggleShare ? "cursor-not-allowed opacity-70" : "cursor-pointer"}`}
+                                onClick={() => handleToggleShare(m, !shareState.active)}
+                                disabled={shareState.loading || !canToggleShare}
+                              >
+                                <span
+                                  className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
+                                    shareState.active ? "translate-x-6" : "translate-x-1"
+                                  }`}
+                                />
+                              </button>
                             </div>
                           </div>
                         </TableCell>
