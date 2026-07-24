@@ -377,12 +377,9 @@ export default function AdminNonConformitiesPage() {
       if (cursor && shouldAppend) issueConstraints.push(startAfter(cursor));
       issueConstraints.push(limit(PAGE_SIZE));
 
-      const [machinesSnap, maintainersSnap, templatesSnap, issuesSnap] = await Promise.all([
-        cachedMachines ? Promise.resolve(null) : getDocs(collection(firebaseDb, "machines")),
-        cachedMaintainers ? Promise.resolve(null) : getDocs(collection(firebaseDb, "mantenedores")),
-        cachedTemplates ? Promise.resolve(null) : getDocs(collection(firebaseDb, "templates")),
-        getDocs(query(collection(firebaseDb, "issues"), ...issueConstraints)),
-      ]);
+      const machinesSnap = cachedMachines ? null : await getDocs(collection(firebaseDb, "machines"));
+      const maintainersSnap = cachedMaintainers ? null : await getDocs(collection(firebaseDb, "mantenedores"));
+      const templatesSnap = cachedTemplates ? null : await getDocs(collection(firebaseDb, "templates"));
 
       const machineOptions: MachineOption[] = cachedMachines ?? machinesSnap!.docs.map(docSnap => {
         const data = docSnap.data() ?? {};
@@ -430,10 +427,34 @@ export default function AdminNonConformitiesPage() {
         });
       });
 
+      // Query issues: when filtering by machine, we need to include issues that reference
+      // the machine by `machineId` or by `tag`. Firestore doesn't support OR across fields
+      // in a single query, so run one or two queries and merge the results client-side.
+      let issuesDocs = [] as any[];
+      if (machineFilter) {
+        const selectedMachine = machineOptions.find(m => m.id === machineFilter);
+        const selectedTag = selectedMachine?.tag ?? null;
+
+        const qById = query(collection(firebaseDb, "issues"), where("machineId", "==", machineFilter), orderBy("updatedAt", "desc"), limit(PAGE_SIZE));
+        const snaps: any[] = [];
+        snaps.push(await getDocs(qById));
+        if (selectedTag) {
+          const qByTag = query(collection(firebaseDb, "issues"), where("tag", "==", selectedTag), orderBy("updatedAt", "desc"), limit(PAGE_SIZE));
+          snaps.push(await getDocs(qByTag));
+        }
+        const seen = new Set<string>();
+        snaps.forEach(s => s.docs.forEach((d: any) => { if (!seen.has(d.id)) { seen.add(d.id); issuesDocs.push(d); } }));
+      } else {
+        const snap = await getDocs(query(collection(firebaseDb, "issues"), ...issueConstraints));
+        issuesDocs = snap.docs;
+      }
+
+      const issuesSnap = { docs: issuesDocs } as const;
+
       const sourceInspectionIds = Array.from(
         new Set(
           issuesSnap.docs
-            .flatMap(issueDoc => {
+            .flatMap((issueDoc: any) => {
               const issueData = issueDoc.data() ?? {};
               return [issueData.abertaEmInspecaoId, issueData.ultimaReincidenciaInspecaoId]
                 .filter((value): value is string => typeof value === "string" && value.trim().length > 0);
