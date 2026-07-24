@@ -15,6 +15,7 @@ import {
   where,
   type DocumentData,
   type QueryDocumentSnapshot,
+  type QuerySnapshot,
 } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase-client";
 import { Button } from "@/components/ui/button";
@@ -430,20 +431,20 @@ export default function AdminNonConformitiesPage() {
       // Query issues: when filtering by machine, we need to include issues that reference
       // the machine by `machineId` or by `tag`. Firestore doesn't support OR across fields
       // in a single query, so run one or two queries and merge the results client-side.
-      let issuesDocs = [] as any[];
+      let issuesDocs: QueryDocumentSnapshot<DocumentData>[] = [];
       if (machineFilter) {
         const selectedMachine = machineOptions.find(m => m.id === machineFilter);
         const selectedTag = selectedMachine?.tag ?? null;
 
         const qById = query(collection(firebaseDb, "issues"), where("machineId", "==", machineFilter), orderBy("updatedAt", "desc"), limit(PAGE_SIZE));
-        const snaps: any[] = [];
+        const snaps: QuerySnapshot<DocumentData>[] = [];
         snaps.push(await getDocs(qById));
         if (selectedTag) {
           const qByTag = query(collection(firebaseDb, "issues"), where("tag", "==", selectedTag), orderBy("updatedAt", "desc"), limit(PAGE_SIZE));
           snaps.push(await getDocs(qByTag));
         }
         const seen = new Set<string>();
-        snaps.forEach(s => s.docs.forEach((d: any) => { if (!seen.has(d.id)) { seen.add(d.id); issuesDocs.push(d); } }));
+        snaps.forEach(s => s.docs.forEach((d: QueryDocumentSnapshot<DocumentData>) => { if (!seen.has(d.id)) { seen.add(d.id); issuesDocs.push(d); } }));
       } else {
         const snap = await getDocs(query(collection(firebaseDb, "issues"), ...issueConstraints));
         issuesDocs = snap.docs;
@@ -454,7 +455,7 @@ export default function AdminNonConformitiesPage() {
       const sourceInspectionIds = Array.from(
         new Set(
           issuesSnap.docs
-            .flatMap((issueDoc: any) => {
+            .flatMap((issueDoc: QueryDocumentSnapshot<DocumentData>) => {
               const issueData = issueDoc.data() ?? {};
               return [issueData.abertaEmInspecaoId, issueData.ultimaReincidenciaInspecaoId]
                 .filter((value): value is string => typeof value === "string" && value.trim().length > 0);
