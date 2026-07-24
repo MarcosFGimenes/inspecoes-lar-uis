@@ -694,7 +694,8 @@ export default function AdminNonConformitiesPage() {
   }, [machineOptions]);
 
   const applyMachineFilter = useCallback(() => {
-    const term = machineSearch.trim().toLowerCase();
+    const termRaw = machineSearch ?? "";
+    const term = termRaw.trim().toLowerCase();
     if (!term) {
       setMachineFilter("");
       return;
@@ -702,11 +703,17 @@ export default function AdminNonConformitiesPage() {
 
     const match = machineOptions.find(machine => {
       const label = buildMachineLabelFromOption(machine).toLowerCase();
+      const nome = (machine.nome ?? "").toLowerCase();
+      const tag = (machine.tag ?? "").toLowerCase();
+      const id = (machine.id ?? "").toLowerCase();
       return (
-        machine.id.toLowerCase() === term ||
+        id === term ||
         label === term ||
-        (machine.tag ?? "").toLowerCase() === term ||
-        label.includes(term)
+        tag === term ||
+        label.includes(term) ||
+        nome.includes(term) ||
+        id.includes(term) ||
+        tag.includes(term)
       );
     });
 
@@ -986,7 +993,7 @@ export default function AdminNonConformitiesPage() {
                 list="machine-filter-options"
                 placeholder="Digite nome, TAG ou ID"
               />
-              <Button type="button" variant="secondary" onClick={applyMachineFilter} disabled={loading}>
+              <Button type="button" variant="secondary" onClick={applyMachineFilter} disabled={loading || !machineSearch.trim()}>
                 Aplicar
               </Button>
               {machineFilter ? (
