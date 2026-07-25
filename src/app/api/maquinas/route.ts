@@ -24,8 +24,8 @@ export async function GET(req: NextRequest) {
 
     const filtered = q
       ? records.filter(item => {
-          const tag = typeof item.tag === "string" ? item.tag.toLowerCase() : "";
-          const nome = typeof item.nome === "string" ? item.nome.toLowerCase() : "";
+          const tag = item.tag != null ? String(item.tag).toLowerCase() : "";
+          const nome = item.nome != null ? String(item.nome).toLowerCase() : "";
           return tag.includes(q) || nome.includes(q);
         })
       : records;

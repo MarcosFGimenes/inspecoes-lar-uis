@@ -321,6 +321,7 @@ export default function AdminNonConformitiesPage() {
   const [items, setItems] = useState<NonConformityItem[]>([]);
   const [treatmentsByResponse, setTreatmentsByResponse] = useState<Record<string, ChecklistNonConformityTreatment[]>>({});
   const [machineFilter, setMachineFilter] = useState("");
+  const [machineTagFilter, setMachineTagFilter] = useState("");
   const [machineSearch, setMachineSearch] = useState("");
   const [maintainerFilter, setMaintainerFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("open");
@@ -430,7 +431,7 @@ export default function AdminNonConformitiesPage() {
 
       // Query issues: when filtering by machine, we need to include issues that reference
       // the machine by `machineId` or by `tag`. Firestore doesn't support OR across fields
-      // in a single query, so run one or two queries and merge the results client-side.
+      // in a single query, so run one or more queries and merge the results client-side.
       let issuesDocs: QueryDocumentSnapshot<DocumentData>[] = [];
       if (machineFilter) {
         const selectedMachine = machineOptions.find(m => m.id === machineFilter);
@@ -452,6 +453,39 @@ export default function AdminNonConformitiesPage() {
                 limit(PAGE_SIZE),
               );
               snaps.push(await getDocs(qByNumericTag));
+            }
+          }
+        }
+        const seen = new Set<string>();
+        snaps.forEach(s => s.docs.forEach((d: QueryDocumentSnapshot<DocumentData>) => { if (!seen.has(d.id)) { seen.add(d.id); issuesDocs.push(d); } }));
+      } else if (machineTagFilter) {
+        const snaps: QuerySnapshot<DocumentData>[] = [];
+        const tagValue = machineTagFilter.trim();
+        if (tagValue) {
+          // First try to resolve a machine by tag from the loaded machineOptions
+          const resolvedMachine = machineOptions.find(m => (m.tag ?? "").toLowerCase() === tagValue.toLowerCase());
+          if (resolvedMachine) {
+            const qById = query(collection(firebaseDb, "issues"), where("machineId", "==", resolvedMachine.id), orderBy("updatedAt", "desc"), limit(PAGE_SIZE));
+            snaps.push(await getDocs(qById));
+
+            const selectedTag = resolvedMachine.tag ?? null;
+            if (selectedTag) {
+              snaps.push(await getDocs(query(collection(firebaseDb, "issues"), where("tag", "==", selectedTag), orderBy("updatedAt", "desc"), limit(PAGE_SIZE))));
+              if (/^\d+$/.test(selectedTag)) {
+                const numericTag = Number(selectedTag);
+                if (Number.isSafeInteger(numericTag)) {
+                  snaps.push(await getDocs(query(collection(firebaseDb, "issues"), where("tag", "==", numericTag), orderBy("updatedAt", "desc"), limit(PAGE_SIZE))));
+                }
+              }
+            }
+          } else {
+            // fallback: query by tag field (string) and numeric tag
+            snaps.push(await getDocs(query(collection(firebaseDb, "issues"), where("tag", "==", tagValue), orderBy("updatedAt", "desc"), limit(PAGE_SIZE))));
+            if (/^\d+$/.test(tagValue)) {
+              const numericTag = Number(tagValue);
+              if (Number.isSafeInteger(numericTag)) {
+                snaps.push(await getDocs(query(collection(firebaseDb, "issues"), where("tag", "==", numericTag), orderBy("updatedAt", "desc"), limit(PAGE_SIZE))));
+              }
             }
           }
         }
@@ -677,13 +711,13 @@ export default function AdminNonConformitiesPage() {
         setLoading(false);
       }
     }
-  }, [machineFilter, maintainerFilter, statusFilter]);
+  }, [machineFilter, machineTagFilter, maintainerFilter, statusFilter]);
 
 
   useEffect(() => {
     setForceVisibleIds(new Set());
     loadData("reset");
-  }, [dueDateFilter, machineFilter, maintainerFilter, statusFilter, loadData]);
+  }, [dueDateFilter, machineFilter, machineTagFilter, maintainerFilter, statusFilter, loadData]);
 
   const filteredItems = useMemo(() => {
     const visibleItems = items.filter(item => {
@@ -707,37 +741,44 @@ export default function AdminNonConformitiesPage() {
 
   const applyMachineFilter = useCallback(() => {
     const termRaw = machineSearch ?? "";
-    const term = termRaw.trim().toLowerCase();
+    const term = termRaw.trim();
     if (!term) {
       setMachineFilter("");
+      setMachineTagFilter("");
       return;
     }
 
+    const normalizedTerm = term.toLowerCase();
     const match = machineOptions.find(machine => {
       const label = buildMachineLabelFromOption(machine).toLowerCase();
       const nome = (machine.nome ?? "").toLowerCase();
       const tag = (machine.tag ?? "").toLowerCase();
       const id = (machine.id ?? "").toLowerCase();
       return (
-        id === term ||
-        label === term ||
-        tag === term ||
-        label.includes(term) ||
-        nome.includes(term) ||
-        id.includes(term) ||
-        tag.includes(term)
+        id === normalizedTerm ||
+        label === normalizedTerm ||
+        tag === normalizedTerm ||
+        label.includes(normalizedTerm) ||
+        nome.includes(normalizedTerm) ||
+        id.includes(normalizedTerm) ||
+        tag.includes(normalizedTerm)
       );
     });
 
-    setMachineFilter(match?.id ?? "");
     if (match) {
+      setMachineFilter(match.id);
+      setMachineTagFilter("");
       setMachineSearch(buildMachineLabelFromOption(match));
+    } else {
+      setMachineFilter("");
+      setMachineTagFilter(term);
     }
   }, [machineOptions, machineSearch]);
 
   const clearMachineFilter = useCallback(() => {
     setMachineSearch("");
     setMachineFilter("");
+    setMachineTagFilter("");
   }, []);
 
   const keepItemVisibleInCurrentFilter = useCallback((id: string) => {
@@ -1008,7 +1049,7 @@ export default function AdminNonConformitiesPage() {
               <Button type="button" variant="secondary" onClick={applyMachineFilter} disabled={loading || !machineSearch.trim()}>
                 Aplicar
               </Button>
-              {machineFilter ? (
+              {machineFilter || machineTagFilter ? (
                 <Button type="button" variant="ghost" onClick={clearMachineFilter} disabled={loading}>
                   Limpar
                 </Button>
