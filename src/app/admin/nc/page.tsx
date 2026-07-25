@@ -442,6 +442,18 @@ export default function AdminNonConformitiesPage() {
         if (selectedTag) {
           const qByTag = query(collection(firebaseDb, "issues"), where("tag", "==", selectedTag), orderBy("updatedAt", "desc"), limit(PAGE_SIZE));
           snaps.push(await getDocs(qByTag));
+          if (/^\d+$/.test(selectedTag)) {
+            const numericTag = Number(selectedTag);
+            if (Number.isSafeInteger(numericTag)) {
+              const qByNumericTag = query(
+                collection(firebaseDb, "issues"),
+                where("tag", "==", numericTag),
+                orderBy("updatedAt", "desc"),
+                limit(PAGE_SIZE),
+              );
+              snaps.push(await getDocs(qByNumericTag));
+            }
+          }
         }
         const seen = new Set<string>();
         snaps.forEach(s => s.docs.forEach((d: QueryDocumentSnapshot<DocumentData>) => { if (!seen.has(d.id)) { seen.add(d.id); issuesDocs.push(d); } }));
